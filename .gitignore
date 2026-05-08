@@ -43,6 +43,7 @@ astrbot_backup_*/
 
 # Stale artifacts
 registry-mirrors*
+EOF
 
 # Generated assets
 qrcode.png
