@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+env/
+
+# Environment files
+.env
+.env.local
+.env.prod
+
+# Database
+*.db
+*.db-journal
+*.lock
+
+# Logs
+*.log
+*.err
+*.page
+*.tmp
+
+# Font files (large binaries)
+*.ttc
+*.ttf
+*.otf
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Backup
+astrbot_backup_*/
+
+# Claude settings
+.claude/
+
+# Stale artifacts
+registry-mirrors*
+
+# Generated assets
+qrcode.png

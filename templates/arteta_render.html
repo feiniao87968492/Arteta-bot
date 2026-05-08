@@ -1,0 +1,134 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #f8fafc;
+            color: #1e293b;
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            font-size: 28px;
+            line-height: 1.6;
+            padding: 40px 50px;
+            width: 1500px;
+        }
+        .topbar {
+            background: #db0007;
+            height: 15px;
+            width: 100%;
+            margin-bottom: 30px;
+        }
+        .header {
+            font-size: 38px;
+            font-weight: 900;
+            color: #db0007;
+            margin-bottom: 20px;
+            letter-spacing: 1px;
+        }
+        .separator {
+            border: none;
+            border-top: 3px solid #cbd5e1;
+            margin: 20px 0;
+        }
+        h1, h2, h3 {
+            color: #1e293b;
+            margin-top: 1.2em;
+            margin-bottom: 0.5em;
+            font-weight: 700;
+        }
+        h1 { font-size: 1.6em; }
+        h2 { font-size: 1.3em; }
+        h3 { font-size: 1.1em; }
+        p { margin: 0.8em 0; }
+        strong { color: #db0007; font-weight: 700; }
+        .katex { font-size: 1.1em; }
+        pre {
+            background: #0d1117;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            overflow-x: auto;
+            border: 1px solid #30363d;
+        }
+        pre code {
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 22px;
+            line-height: 1.5;
+            text-shadow: none;
+            background: none;
+            padding: 0;
+        }
+        code:not(pre code) {
+            background: #e8e8e8;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+        blockquote {
+            border-left: 5px solid #db0007;
+            padding: 10px 20px;
+            margin: 15px 0;
+            background: #f1f5f9;
+            border-radius: 0 8px 8px 0;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #cbd5e1;
+            padding: 10px 15px;
+            text-align: left;
+        }
+        th { background: #db0007; color: white; font-weight: 700; }
+        tr:nth-child(even) { background: #f1f5f9; }
+        .arsenal-red { color: #db0007; font-weight: 700; }
+        .arsenal-blue { color: #0284c7; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <div class="topbar"></div>
+    <div class="header">ARSENAL | TACTICAL BOARD</div>
+    <hr class="separator">
+    <div id="content"></div>
+    <script>
+        var raw = {{ text | tojson }};
+        var hasMath = raw.indexOf('$') !== -1;
+        if (hasMath) {
+            var blocks = [];
+            var processed = raw
+                .replace(/\$\$([\s\S]+?)\$\$/g, function(m) { blocks.push(m); return 'MATHBLOCK' + (blocks.length - 1) + 'END'; })
+                .replace(/\$([\s\S]+?)\$/g, function(m) { blocks.push(m); return 'MATHBLOCK' + (blocks.length - 1) + 'END'; });
+            var html = marked.parse(processed);
+            blocks.forEach(function(b, i) { html = html.replace('MATHBLOCK' + i + 'END', function() { return b; }); });
+            document.getElementById('content').innerHTML = html;
+        } else {
+            document.getElementById('content').innerHTML = marked.parse(raw);
+        }
+        try {
+            if (window.renderMathInElement) {
+                renderMathInElement(document.getElementById('content'), {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ],
+                    throwOnError: false,
+                    errorColor: "#db0007"
+                });
+            }
+        } catch(e) { console.error(e); }
+        try { hljs.highlightAll(); } catch(e) {}
+        document.body.setAttribute('data-rendered', '1');
+        window.__RENDERED__ = true;
+    </script>
+</body>
+</html>

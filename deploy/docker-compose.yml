@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  ## ==========================================
+  ## NapCat QQ - OneBot V11 协议实现
+  ## 文档: https://napcat.napneko.com/
+  ## ==========================================
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: unless-stopped
+    environment:
+      - WS_ENABLE=true          # 启用 WebSocket 服务端
+      - WS_PORT=8088            # WS 端口
+      - HTTP_ENABLE=false
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./napcat:/app/.config/QQ   # 持久化 QQ 登录状态
+    stdin_open: true
+    tty: true
+
+  ## ==========================================
+  ## Arteta Bot - NoneBot2 QQ 机器人
+  ## ==========================================
+  arteta-bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: arteta_bot
+    restart: unless-stopped
+    depends_on:
+      - napcat
+    environment:
+      - ENVIRONMENT=prod
+      - HOST=0.0.0.0
+      - PORT=8088
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - FOOTBALL_API_TOKEN=${FOOTBALL_API_TOKEN}
+      - SUPERUSERS=${SUPERUSERS:-["2648955710"]}
+      - COMMAND_START=["", "/"]
+    volumes:
+      - ./bot_data:/app/data           # 持久化 SQLite 和文件数据
+      - ../plugins:/app/plugins        # 挂载插件目录（方便热更新）
+    network_mode: "service:napcat"     # 共用网络，localhost 直连 napcat

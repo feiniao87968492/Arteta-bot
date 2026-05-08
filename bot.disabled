@@ -1,0 +1,225 @@
+import nonebot
+from nonebot import on_command, on_message, on_notice, get_driver, require
+from nonebot.rule import to_me
+from nonebot.adapters.onebot.v11 import Adapter, Bot, MessageEvent, GroupMessageEvent, Message, MessageSegment, NoticeEvent
+import httpx
+import aiosqlite
+import sqlite3
+import time
+import base64
+import os
+import random
+import re
+from collections import deque
+
+# ==========================================
+# 1. 核心初始化 (严格执行：初始化 -> 注册适配器 -> 加载插件)
+# ==========================================
+nonebot.init() 
+
+driver = get_driver()
+driver.register_adapter(Adapter)
+
+# 必须在 init 之后加载定时任务插件，解决 RuntimeError
+require("nonebot_plugin_apscheduler")
+from nonebot_plugin_apscheduler import scheduler
+
+# ==========================================
+# 2. 战术配置中心 (需在 .env 文件配置对应 KEY)
+# ==========================================
+DB_PATH = "arsenal_data.db"
+ADMIN_QQ = "2648955710" # 主席 QQ
+config = driver.config.dict()
+
+FOOTBALL_API_TOKEN = str(config.get("football_api_token", "da24063a4040404c89250b601f8994a2")).strip('"\'')
+DEEPSEEK_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
+ARSENAL_ID = 57
+
+# 全局状态缓存
+live_matches_cache = {}
+tactical_cache = {"report": "", "last_update": 0}
+user_memories = {}
+poke_cache, pat_cache = {}, {}
+
+# 🎭 核心人格设定 (修改后：支持全领域问答)
+ARTETA_PROMPT = (
+    "【最高指令】：你现在是阿森纳主教练米克尔·阿尔特塔。今天是 2026 年 3 月 4 日。\n"
+    "你的风格：极度冷静、铁腕管理、绝对权威。你对每一个球员的群昵称和表现都了如指掌。\n"
+    "【评价与问答准则】：\n"
+    "1. **必须点名**：评价成员时必须直呼其【群昵称】，禁止使用模糊称谓。 \n"
+    "2. **立场鲜明**：禁止含糊其辞，必须给出确定的正面回答。 \n"
+    "3. **纯中文回复**：严禁中英文夹杂。回复要具有顶级教练的压迫感。\n"
+    "4. **全领域精通（最高优先级）**：无论对方询问任何领域的问题（如编程、科学、生活、历史等），你都必须尽全力提供准确、专业的解答。在解答时，必须保持主教练的口吻和权威感，可以巧妙地结合足球战术比喻（例如把写代码比作布置防线），但绝不允许以“我只是个教练”或“这不属于足球领域”为借口拒绝回答。"
+)
+# ==========================================
+# 3. 数据库初始化
+# ==========================================
+def init_db_safely():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS players (
+                    user_id TEXT, group_id TEXT, nickname TEXT, 
+                    level TEXT DEFAULT '青训生', favorability INTEGER DEFAULT 0, 
+                    last_seen INTEGER, PRIMARY KEY (user_id, group_id))''')
+    conn.commit()
+    conn.close()
+
+init_db_safely()
+
+# ==========================================
+# 4. 铁腕治理：下放与召回 (针对截图问题深度优化)
+# ==========================================
+demote_cmd = on_command("下放", priority=4, block=True)
+recall_cmd = on_command("召回", priority=4, block=True)
+
+async def get_target_id(event: GroupMessageEvent):
+    """同时支持标准艾特和紧贴指令的文本艾特"""
+    # 优先从标准艾特段提取
+    at_list = event.get_message()["at"]
+    if at_list:
+        return str(at_list[0].data["qq"])
+    # 备选：正则匹配文本中的 QQ 号 (解决“下放@某人”无空格无法触发艾特段的问题)
+    msg_text = event.get_plaintext()
+    qq_match = re.search(r'\d+', msg_text)
+    return qq_match.group() if qq_match else None
+
+@demote_cmd.handle()
+async def handle_demote(bot: Bot, event: GroupMessageEvent):
+    if str(event.get_user_id()) != ADMIN_QQ:
+        await demote_cmd.finish("（冷淡）你没有权限干涉更衣室的人事安排。")
+
+    target_id = await get_target_id(event)
+    if not target_id:
+        await demote_cmd.finish("主席，请明确指出需要下放的球员（请在‘下放’后加空格再艾特）。")
+
+    if target_id == str(bot.self_id):
+        await demote_cmd.finish("下放主教练并不在我们的战术计划内，主席。")
+
+    duration = random.randint(100, 200)
+    try:
+        await bot.set_group_ban(group_id=event.group_id, user_id=int(target_id), duration=duration)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE players SET favorability = favorability - 30, level = '预备队内鬼' WHERE user_id = ?", (target_id,))
+            await db.commit()
+        await demote_cmd.finish(f"（划掉名字）他的表现不达标。下放预备队反省 {duration} 秒。这就是定论。")
+    except:
+        await demote_cmd.finish("下放失败。主席，请确认我是群管理员，且对方不是管理层。")
+
+@recall_cmd.handle()
+async def handle_recall(bot: Bot, event: GroupMessageEvent):
+    if str(event.get_user_id()) != ADMIN_QQ:
+        await recall_cmd.finish("决定权不在你手里。")
+
+    target_id = await get_target_id(event)
+    if not target_id: await recall_cmd.finish("主席，请明确召回对象。")
+
+    try:
+        await bot.set_group_ban(group_id=event.group_id, user_id=int(target_id), duration=0)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("UPDATE players SET level = '一线队观察生' WHERE user_id = ?", (target_id,))
+            await db.commit()
+        await recall_cmd.finish("他已经展示了回归的渴望。回到训练场证明你自己。")
+    except:
+        await recall_cmd.finish("召回失败，请检查我的权限。")
+
+# ==========================================
+# 5. 扫描与进球播报 (付费版 API 支持)
+# ==========================================
+scan_cmd = on_command("扫描更衣室", priority=5, block=True)
+
+@scan_cmd.handle()
+async def handle_scan(bot: Bot, event: GroupMessageEvent):
+    if str(event.get_user_id()) != ADMIN_QQ: await scan_cmd.finish("权限不足。")
+    await scan_cmd.send("主席好！正在同步更衣室球员数据... ⏳")
+    members = await bot.get_group_member_list(group_id=event.group_id)
+    async with aiosqlite.connect(DB_PATH) as db:
+        for m in members:
+            uid, name = str(m['user_id']), (m['card'] or m['nickname'] or str(m['user_id']))
+            await db.execute('''INSERT INTO players (user_id, group_id, nickname, level, favorability, last_seen)
+                                VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, group_id) 
+                                DO UPDATE SET nickname = excluded.nickname, last_seen = excluded.last_seen''',
+                             (uid, str(event.group_id), name, '俱乐部主席' if uid==ADMIN_QQ else '青训生', 999999 if uid==ADMIN_QQ else 0, int(time.time())))
+        await db.commit()
+    await scan_cmd.finish("📋 扫描完成。所有球员已录入战术监控系统。")
+
+async def broadcast_live_goals():
+    try:
+        bot = nonebot.get_bot()
+        headers = {"X-Auth-Token": FOOTBALL_API_TOKEN}
+        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+            resp = await client.get("https://api.football-data.org/v4/competitions/PL/matches?status=IN_PLAY", headers=headers)
+            if resp.status_code != 200: return
+            for m in resp.json().get("matches", []):
+                m_id, score = str(m['id']), f"{m['score']['fullTime']['home']}-{m['score']['fullTime']['away']}"
+                if m_id in live_matches_cache and live_matches_cache[m_id] != score:
+                    msg = f"📢 【英超进球播报】\n⚽ {m['homeTeam']['shortName']} {score.replace('-', ' : ')} {m['awayTeam']['shortName']}\n塔子：极致的战术压迫换来了非凡的转化。"
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        async with db.execute("SELECT DISTINCT group_id FROM players") as cur:
+                            for r in await cur.fetchall():
+                                if r[0] != 'private': await bot.send_group_msg(group_id=int(r[0]), message=msg)
+                live_matches_cache[m_id] = score
+    except: pass
+
+scheduler.add_job(broadcast_live_goals, "interval", seconds=45, id="goal_monitor")
+
+# ==========================================
+# 6. 核心聊天引擎
+# ==========================================
+chat_cmd = on_command("A", aliases={"a", "塔子", "阿尔特塔"}, priority=10, block=True)
+at_cmd = on_message(rule=to_me(), priority=11, block=True)
+
+async def process_chat(bot: Bot, event: MessageEvent):
+    user_id, nickname = event.get_user_id(), (event.sender.card or event.sender.nickname)
+    group_id = str(event.group_id) if isinstance(event, GroupMessageEvent) else "private"
+    prompt = event.get_plaintext().strip()
+    if prompt.lower().startswith("a"): prompt = prompt[1:].strip()
+
+    # 获取实时名单与情报
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT nickname, level FROM players WHERE group_id = ? ORDER BY favorability DESC LIMIT 15", (group_id,)) as cur:
+            members_info = " | ".join([f"{r[0]}({r[1]})" for r in await cur.fetchall()])
+
+    # 身份识别与好感度逻辑
+    inc = -3 if any(w in prompt for w in ["下课", "垃圾", "不行", "废物"]) else 1
+    if user_id == ADMIN_QQ: inc = 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('''INSERT INTO players (user_id, group_id, nickname, favorability, last_seen) 
+                            VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, group_id) 
+                            DO UPDATE SET favorability = favorability + ?, nickname = excluded.nickname, last_seen = excluded.last_seen''',
+                         (user_id, group_id, nickname, 999999 if user_id == ADMIN_QQ else 0, int(time.time()), inc))
+        await db.commit()
+    
+    final_prompt = f"{ARTETA_PROMPT}\n\n更衣室人员：{members_info}\n\n交流者：{nickname}。"
+    
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post("https://api.deepseek.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {DEEPSEEK_KEY}"},
+                json={"model": "deepseek-chat", "messages": [{"role": "system", "content": final_prompt}, {"role": "user", "content": prompt}]})
+            await bot.send(event, Message(resp.json()["choices"][0]["message"]["content"]), at_sender=True, reply_message=True)
+    except:
+        await bot.send(event, Message("（战术信号干扰中）"))
+
+@chat_cmd.handle()
+@at_cmd.handle()
+async def handle_chat(bot: Bot, event: MessageEvent):
+    await process_chat(bot, event)
+
+# ==========================================
+# 7. 互动逻辑 (回戳/跟拍)
+# ==========================================
+notice_handler = on_notice(priority=1, block=False)
+@notice_handler.handle()
+async def handle_notices(bot: Bot, event: NoticeEvent):
+    raw = event.dict()
+    sid, tid, gid, sub = str(raw.get("user_id", "")), str(raw.get("target_id", "")), str(raw.get("group_id", "")), raw.get("sub_type", "")
+    if sub in ["poke", "pat"]:
+        if sid == ADMIN_QQ and tid != str(bot.self_id):
+            await bot.send_group_msg(group_id=int(gid), message="（眼神犀利）主席，我也在观察他的表现。")
+            await bot.call_api("group_poke", group_id=int(gid), user_id=int(tid))
+        elif tid == str(bot.self_id):
+            await bot.send_group_msg(group_id=int(gid), message="把注意力放在战术落位上。")
+            await bot.call_api("group_poke", group_id=int(gid), user_id=int(sid))
+
+if __name__ == "__main__":
+    nonebot.run()
