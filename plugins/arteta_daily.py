@@ -261,8 +261,6 @@ async def handle_manual_summary(bot: Bot, event: GroupMessageEvent):
     if str(user_id) != ADMIN_QQ:
         await manual_cmd.finish("只有教练组可以手动发布总结！")
 
-    await manual_cmd.send("正在整理今日战报，稍等...")
-
     today = date.today()
     today_start = int(datetime(today.year, today.month, today.day).timestamp())
     today_end = today_start + 86400
@@ -301,6 +299,8 @@ async def handle_manual_summary(bot: Bot, event: GroupMessageEvent):
 
     try:
         img_bytes = text_to_tactical_board(final_text)
-        await manual_cmd.finish(MessageSegment.image(img_bytes))
+        await bot.call_api("send_group_msg", group_id=int(group_id), message=MessageSegment.image(img_bytes))
     except Exception:
-        await manual_cmd.finish(final_text)
+        await bot.call_api("send_group_msg", group_id=int(group_id), message=final_text)
+
+    await manual_cmd.finish()
