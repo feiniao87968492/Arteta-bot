@@ -52,7 +52,8 @@ DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
 SUMMARY_ENABLED = str(config.get("daily_summary_enabled", "true")).lower() in ("true", "1", "yes")
 
 # --- 3. 消息记录器：捕获所有群消息 ---
-record_all = on_message(priority=999, block=False)
+# 优先级1确保在所有命令处理器之前运行（命令处理器 priority=3~11 且 block=True）
+record_all = on_message(priority=1, block=False)
 
 
 @record_all.handle()
