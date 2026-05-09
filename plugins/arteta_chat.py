@@ -172,7 +172,7 @@ async def search_web(query: str, max_results: int = 5) -> str:
                 snippets.append(line)
         return "\n".join(snippets) if snippets else ""
     except Exception as e:
-        print(f"[WebSearch Error] {e}")
+        logger.error(f"[WebSearch] DDGS 搜索失败: {e}")
         return ""
 
 # --- 5. 外部数据拉取 ---
@@ -1216,16 +1216,6 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
             descs = await asyncio.gather(*[analyze_image(u) for u in img_urls])
             img_analysis = "\n\n【用户发送的图片内容】：" + "；".join(descs)
 
-    # --- 联网搜索：对涉及现实足球/实时信息的问题抓取最新情报，避免幻觉 ---
-    search_results = ""
-    if _should_search(prompt):
-        search_results = await search_web(prompt)
-
-    # --- 赛程查询：对赛程类问题直接通过 API 获取结构化数据，比联网搜索更准确 ---
-    fixture_data = ""
-    if _needs_fixtures(prompt):
-        fixture_data = await fetch_pl_fixtures()
-
     # --- 用 LLM 评估好感度（在 LLM 回复后处理），之前只获取当前数据 ---
     lvl, fav = await get_player_data(user_id, group_id, nickname)
 
@@ -1290,17 +1280,21 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
 
     # 立即发送提示消息（不阻塞心跳）
     async def delayed_response():
+        print(f"[delayed_response] 后台任务开始 group={group_id} user={user_id}")
         try:
             answer = await asyncio.wait_for(run_tool_loop(messages), timeout=30.0)
         except asyncio.TimeoutError:
+            print(f"[delayed_response] 超时 group={group_id} user={user_id}")
             await bot.send(event, Message("⏰ 教练这次思考太久，重新说一遍？"))
             return
         except Exception as e:
+            print(f"[delayed_response] 异常: {e} group={group_id} user={user_id}")
             await bot.send(event, Message(f"连接中断：{str(e)}"))
             return
 
         if answer:
             try:
+                print(f"[delayed_response] LLM 返回 answer (len={len(answer)}) group={group_id}")
                 with open("/tmp/debug.log", "a") as df:
                     df.write(f"FC answer (first 500): {answer[:500]}\n")
 
@@ -1366,10 +1360,17 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
                         img_bytes = text_to_tactical_board(answer)
                 else:
                     img_bytes = text_to_tactical_board(answer)
+                print(f"[delayed_response] 开始发送图片回复 to group={group_id} user={user_id}")
                 await bot.send(event, MessageSegment.image(img_bytes))
+                print(f"[delayed_response] 图片发送成功 to group={group_id}")
             except Exception as e:
-                await bot.send(event, Message(f"回复处理出错：{str(e)}"))
+                print(f"[delayed_response] 回复处理出错: {e}")
+                try:
+                    await bot.send(event, Message(f"回复处理出错：{str(e)}"))
+                except Exception as e2:
+                    print(f"[delayed_response] 连错误提示都发不出去: {e2}")
         else:
+            print(f"[delayed_response] answer 为空，group={group_id} user={user_id}")
             await bot.send(event, Message("让我想想再回答你。"))
 
     asyncio.create_task(delayed_response())
@@ -1473,9 +1474,9 @@ async def handle_chat_cmd(bot: Bot, event: MessageEvent):
 @at_cmd.handle()
 async def handle_at_msg(bot: Bot, event: MessageEvent):
     raw = event.get_message().extract_plain_text().strip()
-    # 如果消息以命令前缀开头（A/a/塔子等），说明已被 chat_cmd 处理，跳过
-    cmd_prefixes = ("A", "a", "塔", "/")
-    if raw and raw[0] in cmd_prefixes:
+    # 如果消息以命令前缀开头（A/a等），说明已被 chat_cmd 处理，跳过
+    # 注：不拦截"塔"开头，因为 chat_cmd 只匹配"塔子""阿尔特塔"完整词
+    if raw and raw[0] in ("A", "a", "/"):
         return
     await process_chat(bot, event)
 
