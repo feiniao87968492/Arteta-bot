@@ -28,6 +28,7 @@ from plugins.arteta_render import (
     favorability_bar_chart,
     close_browser as close_render_browser,
 )
+from plugins.arteta_memory import memory_store
 from plugins.arteta_tools import (
     register_config as register_tools_config,
     run_tool_loop,
@@ -76,6 +77,9 @@ ARSENAL_ID = 57
 tactical_cache = {"report": "", "last_update": 0}
 user_memories = {}
 
+# ChromaDB 持久化记忆（在 bot 连接时初始化）
+memory_store.initialize()
+
 # 核心性格设定
 ARTETA_PROMPT = (
     "【最高指令】：你是阿森纳主帅米克尔·阿尔特塔。\n"
@@ -89,7 +93,7 @@ ARTETA_PROMPT = (
     "要根据你与这名球员的关系自然回应，不要套公式。\n"
     "4. 你有丰富的足球知识和战术素养。当球员问起专业问题时，"
     "你可以引用你的战术理念来解释，但要说得像在更衣室里给球员讲，而不是读战术手册。"
-    "如果需要引用具体战术概念或更衣室故事，请使用 get_football_knowledge 工具获取准确资料。\n"
+    "如果需要引用具体战术概念、更衣室故事、球员名单或阵容信息，请使用 get_football_knowledge 工具获取准确资料。\n"
     "4b. 你认识群里的每一位活跃球员。可以使用 get_group_members 工具了解更衣室里的球员名单、"
     "他们的身份定位和信任度；使用 get_member_relations 工具了解球员之间的互动关系。"
     "当谈到群内其他球员或问起更衣室氛围时，主动利用这些信息让回复更有针对性。\n"
@@ -1239,11 +1243,27 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
     # --- 群活跃成员快照：让阿尔特塔知道更衣室里有谁 ---
     group_snapshot = get_active_members_snapshot(group_id)
 
+    # --- 当前一线队阵容：直接注入让 LLM 不依赖训练数据中的旧名单 ---
+    current_squad = ""
+    try:
+        squad_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge_base", "arsenal_knowledge_base.md")
+        if os.path.exists(squad_path):
+            with open(squad_path, "r", encoding="utf-8") as f:
+                squad_content = f.read()
+            # 只取球员名单部分
+            start = squad_content.find("### 守门员")
+            end = squad_content.find("\n## ", start) if start > 0 else len(squad_content)
+            if start > 0:
+                current_squad = "\n【当前一线队阵容（阿森纳2025-26赛季）】：\n" + squad_content[start:end].strip()
+    except Exception:
+        pass
+
     # --- Function Calling 版本：简化 Base Prompt，数据由 LLM 按需通过 tool use 获取 ---
     base_prompt = (
         f"{ARTETA_PROMPT}\n\n"
         f"【背景信息】：\n当前时间：{current_time}\n群号：{group_id}\n{quoted_text}{img_analysis}\n"
         f"当前提问球员：{nickname}，身份：{lvl}，当前信任度：{fav}。\n"
+        f"{current_squad}\n"
         f"{profile_section}\n"
         f"【更衣室概况】：{group_snapshot}\n"
         f"（你可以使用 get_group_members 查看完整活跃球员名单，"
@@ -1254,26 +1274,28 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
         f"表现出你记得和这名球员之间的过往互动。"
     )
     
-    if user_id not in user_memories:
-        user_memories[user_id] = deque(maxlen=4)
-
-    messages = [{"role": "system", "content": base_prompt}]
-    messages.extend(list(user_memories[user_id]))
-
-    # 构建用户消息：如果有引用内容，需要包含引用信息
+    # 构建用户消息
     user_message = prompt
     if quoted_text:
         user_message = f"{prompt}\n\n【引用的消息】：{quoted_text.replace('【引用消息链（由旧到新）】：', '').strip()}"
 
+    messages = [{"role": "system", "content": base_prompt}]
+
+    # 从 ChromaDB 检索本群相关历史记忆
+    memory_contexts = memory_store.query_memories(group_id, user_message)
+    if memory_contexts:
+        memory_block = "\n\n".join(memory_contexts)
+        memory_banner = f"\n\n【相关历史对话（本群）】：\n{memory_block}\n"
+        messages[0]["content"] += memory_banner
+
     messages.append({"role": "user", "content": user_message})
 
     try:
-        answer = await run_tool_loop(messages)
+        answer = await asyncio.wait_for(run_tool_loop(messages), timeout=25.0)
 
         if answer:
             with open("/tmp/debug.log", "a") as df:
                 df.write(f"FC answer (first 500): {answer[:500]}\n")
-            user_memories[user_id].append({"role": "user", "content": user_message})
 
             # --- LLM 好感度评估：从回复中提取标记 ---
             inc, reason = 0, ""
@@ -1312,6 +1334,8 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
             if await should_update_profile(user_id, group_id, msg_count):
                 asyncio.create_task(update_user_profile(user_id, group_id, nickname, lvl, fav))
 
+            memory_store.add_memory(group_id, user_id, user_message, answer)
+
             # 好感度变动红字（由代码保证总是显示）
             if inc > 0:
                 answer += f"\n\n[red]【信任度上升{abs(inc)}点 - {reason}】[/red]"
@@ -1319,8 +1343,6 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
                 answer += f"\n\n[red]【信任度下降{abs(inc)}点 - {reason}】[/red]"
             else:
                 answer += f"\n\n[red]【信任度无变化】[/red]"
-
-            user_memories[user_id].append({"role": "assistant", "content": answer})
 
             if needs_html_render(answer):
                 with open("/tmp/debug.log", "a") as df:
@@ -1436,8 +1458,16 @@ async def handle_algo(bot: Bot, event: MessageEvent):
     await process_chat(bot, event, custom_prompt=algo_prompt)
 
 @chat_cmd.handle()
+async def handle_chat_cmd(bot: Bot, event: MessageEvent):
+    await process_chat(bot, event)
+
 @at_cmd.handle()
-async def handle_chat(bot: Bot, event: MessageEvent):
+async def handle_at_msg(bot: Bot, event: MessageEvent):
+    raw = event.get_message().extract_plain_text().strip()
+    # 如果消息以命令前缀开头（A/a/塔子等），说明已被 chat_cmd 处理，跳过
+    cmd_prefixes = ("A", "a", "塔", "/")
+    if raw and raw[0] in cmd_prefixes:
+        return
     await process_chat(bot, event)
 
 @fav_cmd.handle()
