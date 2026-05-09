@@ -312,13 +312,16 @@ async def publish_to_groups(report: str):
                     logger.warning(f"[WeeklyNews] 群 {gid} 发送失败: {e}")
     except Exception as e:
         logger.error(f"[WeeklyNews] 图片渲染失败: {e}，尝试发送纯文本")
+        plain_text = final_text.replace('[red]', '').replace('[/red]', '') \
+                               .replace('[blue]', '').replace('[/blue]', '') \
+                               .replace('*', '').strip()
         for bot in bots.values():
             for group in group_list:
                 try:
                     await bot.call_api(
                         "send_group_msg",
                         group_id=group["group_id"],
-                        message=final_text[:2000],
+                        message=plain_text[:2000],
                     )
                 except Exception as e2:
                     logger.warning(f"[WeeklyNews] 群文本发送也失败: {e2}")
