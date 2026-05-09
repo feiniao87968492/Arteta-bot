@@ -377,10 +377,11 @@ async def analyze_image_base64(data_url: str) -> str:
     if result and not _is_error(result):
         return result
     # 备用：duckcoding.ai gpt-4o-mini
-    logger.warning(f"SiliconFlow 识别失败（{result}），fallback 到 duckcoding.ai")
+    print(f"[Vision] SiliconFlow 识别失败（{result[:200]}），fallback 到 duckcoding.ai")
     fallback = await _call_vision_api(IMAGE_API_URL, IMAGE_API_KEY, VISION_MODEL, data_url)
     if fallback and not _is_error(fallback):
         return fallback
+    print(f"[Vision] 备用服务也失败: {fallback[:200]}")
     return f"[图片识别失败（SiliconFlow 和备用服务均失败）]"
 
 
@@ -408,6 +409,7 @@ async def _call_vision_api(api_url: str, api_key: str, model: str, data_url: str
                 body = "(无法读取响应体)"
             return f"[图片识别失败：HTTP {resp.status_code} body={body}]"
     except Exception as e:
+        print(f"[Vision API Error] {api_url} model={model} {type(e).__name__}: {e}")
         return f"[图片识别异常：{type(e).__name__}: {e}]"
 
 # --- 6. 数据库系统 ---
@@ -1282,7 +1284,7 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
     async def delayed_response():
         print(f"[delayed_response] 后台任务开始 group={group_id} user={user_id}")
         try:
-            answer = await asyncio.wait_for(run_tool_loop(messages), timeout=30.0)
+            answer = await asyncio.wait_for(run_tool_loop(messages), timeout=90.0)
         except asyncio.TimeoutError:
             print(f"[delayed_response] 超时 group={group_id} user={user_id}")
             await bot.send(event, Message("⏰ 教练这次思考太久，重新说一遍？"))
@@ -1445,6 +1447,35 @@ async def handle_box(bot: Bot, event: GroupMessageEvent):
     except Exception as e:
         await box_cmd.finish(f"读取异常：{str(e)}")
 
+ALGO_API_KEY = "sk-sNff1dqDXJsocCaoGanHeCSB3OHvovlZhC3IFD71Fm1CTqEE"
+ALGO_API_URL = "https://www.boxying.com/v1/chat/completions"
+ALGO_MODEL = "gpt-5.5"
+
+
+async def call_algo_llm(system_prompt: str, user_text: str) -> str:
+    """调用 GPT-5.5 处理算法/技术问题"""
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            resp = await client.post(
+                ALGO_API_URL,
+                headers={"Authorization": f"Bearer {ALGO_API_KEY}"},
+                json={
+                    "model": ALGO_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_text}
+                    ]
+                }
+            )
+            if resp.status_code != 200:
+                return f"API 错误: {resp.status_code}"
+            return resp.json()["choices"][0]["message"]["content"]
+    except asyncio.TimeoutError:
+        return "⏰ AI 教练思考太久，重新试一次？"
+    except Exception as e:
+        return f"连接中断：{str(e)}"
+
+
 @algo_cmd.handle()
 async def handle_algo(bot: Bot, event: MessageEvent):
     raw_text = event.get_message().extract_plain_text().strip()
@@ -1452,20 +1483,49 @@ async def handle_algo(bot: Bot, event: MessageEvent):
         if raw_text.startswith(cmd):
             raw_text = raw_text[len(cmd):].strip()
             break
-            
+
     if not raw_text:
         await algo_cmd.finish("把你需要解决的问题写在白板上！")
         return
-        
+
+    # 分析消息中的图片
+    img_analysis = ""
+    img_urls = [s.data.get("url") for s in event.get_message() if s.type == "image" and s.data.get("url")]
+    if img_urls:
+        descs = await asyncio.gather(*[analyze_image(u) for u in img_urls])
+        img_analysis = "\n\n【用户发送的图片内容】：" + "；".join(descs)
+
     algo_prompt = (
         "【技术指导】对方提交了技术问题，用教练指导球员口头说话的方式解答。\n"
         "【数学公式硬性规定】短公式/行内公式用单个 $ 包裹（如 $f(x) = x^2$），"
         "长公式/独立公式用双 $$ 包裹（如 $$\\int_a^b f(x)dx$$、$$\\frac{{dy}}{{dx}}$$）。"
         "这是死命令，不遵守会让球员看不懂战术板！\n"
         "【代码硬性规定】如果涉及代码，用 ``` 代码块包裹展示。\n"
-        "绝对不要加小标题和列表符：\n" + raw_text
+        "绝对不要加小标题和列表符：\n" + raw_text + img_analysis
     )
-    await process_chat(bot, event, custom_prompt=algo_prompt)
+
+    answer = await call_algo_llm(algo_prompt, raw_text + img_analysis)
+
+    if answer:
+        try:
+            if needs_html_render(answer):
+                html_answer = answer.replace("[red]", '<span class="arsenal-red">')
+                html_answer = html_answer.replace("[/red]", '</span>')
+                html_answer = html_answer.replace("[blue]", '<span class="arsenal-blue">')
+                html_answer = html_answer.replace("[/blue]", '</span>')
+                try:
+                    img_bytes = await html_to_image(html_answer)
+                except Exception:
+                    img_bytes = text_to_tactical_board(answer)
+            else:
+                img_bytes = text_to_tactical_board(answer)
+            await algo_cmd.finish(MessageSegment.image(img_bytes))
+        except FinishedException:
+            raise
+        except Exception as e:
+            await algo_cmd.finish(Message(f"回复处理出错：{str(e)}"))
+    else:
+        await algo_cmd.finish(Message("让我想想再回答你。"))
 
 @chat_cmd.handle()
 async def handle_chat_cmd(bot: Bot, event: MessageEvent):
