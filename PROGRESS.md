@@ -763,3 +763,45 @@ FAVOR_MARKERS = {
 - ✅ 所有插件加载成功，零报错
 - ✅ PID 247045 → 248160 → 248381 运行中
 
+---
+
+### 2026-05-09: 阿森纳周报功能（自动爬取新闻 + LLM 生成 + 知识库注入 + 群发布）
+
+**设计文档**：`docs/superpowers/specs/2026-05-09-weekly-news-design.md`
+**实施计划**：`docs/superpowers/plans/2026-05-09-weekly-news.md`
+
+**新增文件**：
+- `plugins/arteta_weekly.py` — 周报独立插件（~400 行）
+- `knowledge_base/weekly-news.md` — 周报知识库文件（运行时自动生成）
+
+**修改文件**：
+- `plugins/arteta_help.py` — 帮助文档添加周报命令
+
+**功能概述**：
+
+| 模块 | 函数 | 说明 |
+|------|------|------|
+| 新闻抓取 | `fetch_bbc_news()` | BBC Sport Arsenal 页面（ConnectTimeout，服务器无法连接） |
+| 新闻抓取 | `fetch_sky_news()` | Sky Sports Arsenal 页面（正常工作） |
+| 新闻抓取 | `fetch_guardian_news()` | The Guardian Arsenal 页面（正常工作） |
+| 正文抓取 | `fetch_article_content()` | 提取 `<p>` 标签文本，每篇最多 500 字 |
+| 去重排序 | `fetch_arsenal_news()` | 三源异步并发 → 去重 → Top 8 |
+| LLM 生成 | `generate_weekly_report()` | DeepSeek API，阿尔特塔风格更衣室周报 |
+| 知识库 | `save_to_knowledge_base()` | 写入 `knowledge_base/weekly-news.md` |
+| 知识库 | `clear_cache()` | 写入后清除知识库缓存，LLM 聊天立即命中 |
+| 群发布 | `publish_to_groups()` | `text_to_tactical_board()` 渲染图片 → 全群发 |
+| 定时任务 | `weekly_news_job()` | APScheduler cron 每周一 09:00 |
+| 手动触发 | `handle_weekly_manual()` | `/周报` 命令，仅发当前群 |
+
+**爬坑记录**：
+
+1. **`str | None` 语法（Python 3.8）**：`-> str | None` 在 Python 3.8 不支持。修复：改为 `-> Optional[str]`。
+2. **知识库缓存未失效**：`save_to_knowledge_base()` 写入后 `arteta_knowledge.py` 的 `_file_cache` 未清空，LLM 聊天看不到新周报。修复：写入后调用 `clear_cache()`。
+3. **BBC 连接超时**：服务器无法连接 `bbc.com`（`ConnectTimeout`），异常消息为空字符串。修复：增加 `type(e).__name__` 日志、新增 Guardian 源补偿。
+4. **`group_list` → `targets` 变量名遗漏**：重构 `publish_to_groups()` 支持单群发送时，将 `group_list` 改为 `targets`，但 try 块内漏改了一处，导致图片生成成功后发送循环抛出 `NameError`，然后回退发送纯文本。修复：统一为 `targets`。
+5. **纯文本回退包含颜色标记**：图片渲染失败回退时，`final_text` 中包含 `[red]`/`[blue]` 标记。修复：回退前替换掉所有颜色标记。
+6. **颜色标记跨行/未闭合**：LLM 输出的 `[red]...[/red]` 可能跨行或格式异常，`text_to_tactical_board` 的逐行正则无法匹配。修复：新增 `_clean_color_tags()` 预处理，跨行/未闭合标签自动去除。
+
+**当前状态**：✅ 部署完成，`arteta_weekly` 插件加载成功。`/周报` 手动触发已测试通过。定时任务每周一 09:00 自动执行。
+
+
