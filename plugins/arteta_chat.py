@@ -1290,80 +1290,93 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
 
     messages.append({"role": "user", "content": user_message})
 
-    try:
-        answer = await asyncio.wait_for(run_tool_loop(messages), timeout=25.0)
+    # 立即发送提示消息（不阻塞心跳）
+    await bot.send(event, Message("\U0001f4cb 教练在战术板上写分析，马上就好..."))
+
+    async def delayed_response():
+        try:
+            answer = await asyncio.wait_for(run_tool_loop(messages), timeout=30.0)
+        except asyncio.TimeoutError:
+            await bot.send(event, Message("⏰ 教练这次思考太久，重新说一遍？"))
+            return
+        except Exception as e:
+            await bot.send(event, Message(f"连接中断：{str(e)}"))
+            return
 
         if answer:
-            with open("/tmp/debug.log", "a") as df:
-                df.write(f"FC answer (first 500): {answer[:500]}\n")
-
-            # --- LLM 好感度评估：从回复中提取标记 ---
-            inc, reason = 0, ""
-            marker = extract_favor_marker(answer)
-            is_admin = (user_id == ADMIN_QQ)
-            if marker and marker in FAVOR_MARKERS:
-                min_val, max_val, marker_reason = FAVOR_MARKERS[marker]
-                if min_val != 0:
-                    inc = random.randint(min(min_val, max_val), max(min_val, max_val))
-                reason = marker_reason
-
-                # 从显示文本中移除标记
-                answer = re.sub(r'\s*' + re.escape(marker) + r'\s*$', '', answer).rstrip()
-            else:
+            try:
                 with open("/tmp/debug.log", "a") as df:
-                    df.write(f"[FAV] user={user_id} no marker found\n")
+                    df.write(f"FC answer (first 500): {answer[:500]}\n")
 
-            # --- 关键词辅助检测：在 LLM 评估基础上额外扣分 ---
-            kw_penalty, kw_reason = check_keyword_penalty(prompt) if not is_admin else (0, "")
-            if kw_penalty < 0:
-                inc += kw_penalty
-                reason = (reason + kw_reason) if reason else kw_reason.lstrip("（").rstrip("）")
-                with open("/tmp/debug.log", "a") as df:
-                    df.write(f"[FAV] keyword extra: {kw_penalty} reason={kw_reason}\n")
+                # --- LLM 好感度评估：从回复中提取标记 ---
+                inc, reason = 0, ""
+                marker = extract_favor_marker(answer)
+                is_admin = (user_id == ADMIN_QQ)
+                if marker and marker in FAVOR_MARKERS:
+                    min_val, max_val, marker_reason = FAVOR_MARKERS[marker]
+                    if min_val != 0:
+                        inc = random.randint(min(min_val, max_val), max(min_val, max_val))
+                    reason = marker_reason
 
-            # 应用好感度变更（管理员不参与）
-            if not is_admin:
-                lvl, fav = await apply_favor_change(user_id, group_id, nickname, inc)
-            else:
-                lvl, fav = await apply_favor_change(user_id, group_id, nickname, 0, is_admin=True)
-
-            with open("/tmp/debug.log", "a") as df:
-                df.write(f"[FAV] user={user_id} nick={nickname} inc={inc} reason={reason}\n")
-
-            # 检查是否需要更新画像
-            if await should_update_profile(user_id, group_id, msg_count):
-                asyncio.create_task(update_user_profile(user_id, group_id, nickname, lvl, fav))
-
-            memory_store.add_memory(group_id, user_id, user_message, answer)
-
-            # 好感度变动红字（由代码保证总是显示）
-            if inc > 0:
-                answer += f"\n\n[red]【信任度上升{abs(inc)}点 - {reason}】[/red]"
-            elif inc < 0:
-                answer += f"\n\n[red]【信任度下降{abs(inc)}点 - {reason}】[/red]"
-            else:
-                answer += f"\n\n[red]【信任度无变化】[/red]"
-
-            if needs_html_render(answer):
-                with open("/tmp/debug.log", "a") as df:
-                    df.write(f"RENDER: needs_html_render=True, trying html_to_image\n")
-                html_answer = answer.replace("[red]", '<span class="arsenal-red">')
-                html_answer = html_answer.replace("[/red]", '</span>')
-                html_answer = html_answer.replace("[blue]", '<span class="arsenal-blue">')
-                html_answer = html_answer.replace("[/blue]", '</span>')
-                try:
-                    img_bytes = await html_to_image(html_answer)
-                except Exception as e:
+                    # 从显示文本中移除标记
+                    answer = re.sub(r'\s*' + re.escape(marker) + r'\s*$', '', answer).rstrip()
+                else:
                     with open("/tmp/debug.log", "a") as df:
-                        df.write(f"RENDER: html_to_image failed: {e}, falling back to PIL\n")
+                        df.write(f"[FAV] user={user_id} no marker found\n")
+
+                # --- 关键词辅助检测：在 LLM 评估基础上额外扣分 ---
+                kw_penalty, kw_reason = check_keyword_penalty(prompt) if not is_admin else (0, "")
+                if kw_penalty < 0:
+                    inc += kw_penalty
+                    reason = (reason + kw_reason) if reason else kw_reason.lstrip("（").rstrip("）")
+                    with open("/tmp/debug.log", "a") as df:
+                        df.write(f"[FAV] keyword extra: {kw_penalty} reason={kw_reason}\n")
+
+                # 应用好感度变更（管理员不参与）
+                if not is_admin:
+                    lvl, fav = await apply_favor_change(user_id, group_id, nickname, inc)
+                else:
+                    lvl, fav = await apply_favor_change(user_id, group_id, nickname, 0, is_admin=True)
+
+                with open("/tmp/debug.log", "a") as df:
+                    df.write(f"[FAV] user={user_id} nick={nickname} inc={inc} reason={reason}\n")
+
+                # 检查是否需要更新画像
+                if await should_update_profile(user_id, group_id, msg_count):
+                    asyncio.create_task(update_user_profile(user_id, group_id, nickname, lvl, fav))
+
+                memory_store.add_memory(group_id, user_id, user_message, answer)
+
+                # 好感度变动红字（由代码保证总是显示）
+                if inc > 0:
+                    answer += f"\n\n[red]【信任度上升{abs(inc)}点 - {reason}】[/red]"
+                elif inc < 0:
+                    answer += f"\n\n[red]【信任度下降{abs(inc)}点 - {reason}】[/red]"
+                else:
+                    answer += f"\n\n[red]【信任度无变化】[/red]"
+
+                if needs_html_render(answer):
+                    with open("/tmp/debug.log", "a") as df:
+                        df.write(f"RENDER: needs_html_render=True, trying html_to_image\n")
+                    html_answer = answer.replace("[red]", '<span class="arsenal-red">')
+                    html_answer = html_answer.replace("[/red]", '</span>')
+                    html_answer = html_answer.replace("[blue]", '<span class="arsenal-blue">')
+                    html_answer = html_answer.replace("[/blue]", '</span>')
+                    try:
+                        img_bytes = await html_to_image(html_answer)
+                    except Exception as e:
+                        with open("/tmp/debug.log", "a") as df:
+                            df.write(f"RENDER: html_to_image failed: {e}, falling back to PIL\n")
+                        img_bytes = text_to_tactical_board(answer)
+                else:
                     img_bytes = text_to_tactical_board(answer)
-            else:
-                img_bytes = text_to_tactical_board(answer)
-            await bot.send(event, MessageSegment.image(img_bytes))
+                await bot.send(event, MessageSegment.image(img_bytes))
+            except Exception as e:
+                await bot.send(event, Message(f"回复处理出错：{str(e)}"))
         else:
             await bot.send(event, Message("让我想想再回答你。"))
-    except Exception as e:
-        await bot.send(event, Message(f"连接中断：{str(e)}"))
+
+    asyncio.create_task(delayed_response())
 
 @notice_handler.handle()
 async def handle_notices(bot: Bot, event: NoticeEvent):
