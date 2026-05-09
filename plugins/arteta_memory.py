@@ -2,8 +2,16 @@
 
 import logging
 import os
+import sys
 import time
 from datetime import datetime
+
+# 系统 sqlite3 可能过旧（ChromaDB 要求 >= 3.35.0），使用 pysqlite3-binary 替代
+try:
+    import pysqlite3  # type: ignore
+    sys.modules["sqlite3"] = pysqlite3
+except ImportError:
+    pass
 
 import chromadb
 from chromadb.config import Settings
