@@ -11,6 +11,7 @@ import os
 import re
 from datetime import datetime, date
 from plugins.arteta_render import text_to_tactical_board
+from plugins.arteta_knowledge import clear_cache
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +249,24 @@ def save_to_knowledge_base(report: str) -> bool:
 
 # ===== 群发布 =====
 
+async def _run_weekly_pipeline() -> str | None:
+    """运行完整周报管道：获取 → 生成 → 保存 → 发布。失败返回 None。"""
+    articles = await fetch_arsenal_news()
+    if not articles:
+        logger.warning("[WeeklyNews] 无可用新闻，跳过")
+        return None
+
+    report = await generate_weekly_report(articles)
+    if not report:
+        logger.warning("[WeeklyNews] 周报生成失败，跳过")
+        return None
+
+    save_to_knowledge_base(report)
+    clear_cache()
+    await publish_to_groups(report)
+    return report
+
+
 async def publish_to_groups(report: str):
     """渲染周报为图片并发送到所有群"""
     if not report:
@@ -269,15 +288,16 @@ async def publish_to_groups(report: str):
         f"{report}"
     )
 
-    try:
-        img_bytes = text_to_tactical_board(final_text)
-    except Exception as e:
-        logger.error(f"[WeeklyNews] 图片渲染失败: {e}")
-        return
-
+    group_list = []
     for bot in bots.values():
         try:
             group_list = await bot.call_api("get_group_list")
+        except Exception as e:
+            logger.error(f"[WeeklyNews] bot 获取群列表异常: {e}")
+
+    try:
+        img_bytes = text_to_tactical_board(final_text)
+        for bot in bots.values():
             for group in group_list:
                 gid = group["group_id"]
                 try:
@@ -289,8 +309,18 @@ async def publish_to_groups(report: str):
                     logger.info(f"[WeeklyNews] 已发送群 {gid}")
                 except Exception as e:
                     logger.warning(f"[WeeklyNews] 群 {gid} 发送失败: {e}")
-        except Exception as e:
-            logger.error(f"[WeeklyNews] bot 发送循环异常: {e}")
+    except Exception as e:
+        logger.error(f"[WeeklyNews] 图片渲染失败: {e}，尝试发送纯文本")
+        for bot in bots.values():
+            for group in group_list:
+                try:
+                    await bot.call_api(
+                        "send_group_msg",
+                        group_id=group["group_id"],
+                        message=final_text[:2000],
+                    )
+                except Exception as e2:
+                    logger.warning(f"[WeeklyNews] 群文本发送也失败: {e2}")
 
 
 # ===== 定时任务 =====
@@ -304,18 +334,7 @@ async def weekly_news_job():
         return
 
     logger.info("[WeeklyNews] 开始周报生成")
-    articles = await fetch_arsenal_news()
-    if not articles:
-        logger.warning("[WeeklyNews] 无可用新闻，跳过本次周报")
-        return
-
-    report = await generate_weekly_report(articles)
-    if not report:
-        logger.warning("[WeeklyNews] 周报生成失败，跳过")
-        return
-
-    save_to_knowledge_base(report)
-    await publish_to_groups(report)
+    await _run_weekly_pipeline()
     logger.info("[WeeklyNews] 周报生成完成")
 
 
@@ -332,16 +351,8 @@ async def handle_weekly_manual(bot: Bot, event: GroupMessageEvent):
 
     await weekly_cmd.send("🔄 开始爬取新闻生成周报，请稍候...")
 
-    articles = await fetch_arsenal_news()
-    if not articles:
-        await weekly_cmd.finish("新闻源暂时不可用，稍后再试。")
-        return
-
-    report = await generate_weekly_report(articles)
-    if not report:
-        await weekly_cmd.finish("周报生成失败（API 可能暂时离线）")
-        return
-
-    save_to_knowledge_base(report)
-    await publish_to_groups(report)
-    await weekly_cmd.finish("✅ 周报已生成并发布到所有群！")
+    result = await _run_weekly_pipeline()
+    if result:
+        await weekly_cmd.finish("✅ 周报已生成并发布到所有群！")
+    else:
+        await weekly_cmd.finish("周报生成失败，请检查日志。")
