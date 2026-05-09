@@ -11,7 +11,6 @@ import sqlite3
 import time
 import os
 import re
-from collections import deque
 import random
 from datetime import datetime
 import base64
@@ -75,7 +74,6 @@ ARSENAL_ID = 57
 
 # 高速缓存
 tactical_cache = {"report": "", "last_update": 0}
-user_memories = {}
 
 # ChromaDB 持久化记忆（在 bot 连接时初始化）
 memory_store.initialize()
