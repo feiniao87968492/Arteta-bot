@@ -1289,8 +1289,6 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
     messages.append({"role": "user", "content": user_message})
 
     # 立即发送提示消息（不阻塞心跳）
-    await bot.send(event, Message("\U0001f4cb 教练在战术板上写分析，马上就好..."))
-
     async def delayed_response():
         try:
             answer = await asyncio.wait_for(run_tool_loop(messages), timeout=30.0)
