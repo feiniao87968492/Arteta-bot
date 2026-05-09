@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import re
+from typing import Optional
 from datetime import datetime, date
 from plugins.arteta_render import text_to_tactical_board
 from plugins.arteta_knowledge import clear_cache
@@ -249,7 +250,7 @@ def save_to_knowledge_base(report: str) -> bool:
 
 # ===== 群发布 =====
 
-async def _run_weekly_pipeline() -> str | None:
+async def _run_weekly_pipeline() -> Optional[str]:
     """运行完整周报管道：获取 → 生成 → 保存 → 发布。失败返回 None。"""
     articles = await fetch_arsenal_news()
     if not articles:
