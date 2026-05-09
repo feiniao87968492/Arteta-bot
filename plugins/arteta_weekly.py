@@ -321,8 +321,8 @@ def save_to_knowledge_base(report: str) -> bool:
 
 # ===== 群发布 =====
 
-async def _run_weekly_pipeline() -> Optional[str]:
-    """运行完整周报管道：获取 → 生成 → 保存 → 发布。失败返回 None。"""
+async def _generate_and_save() -> Optional[str]:
+    """获取新闻 → 生成周报 → 保存知识库。失败返回 None。"""
     articles = await fetch_arsenal_news()
     if not articles:
         logger.warning("[WeeklyNews] 无可用新闻，跳过")
@@ -335,12 +335,11 @@ async def _run_weekly_pipeline() -> Optional[str]:
 
     save_to_knowledge_base(report)
     clear_cache()
-    await publish_to_groups(report)
     return report
 
 
-async def publish_to_groups(report: str):
-    """渲染周报为图片并发送到所有群"""
+async def publish_to_groups(report: str, group_ids: list = None):
+    """渲染周报为图片并发送。group_ids=None 发送到所有群，否则只发指定群列表。"""
     if not report:
         return
 
@@ -360,12 +359,16 @@ async def publish_to_groups(report: str):
         f"{report}"
     )
 
-    group_list = []
-    for bot in bots.values():
-        try:
-            group_list = await bot.call_api("get_group_list")
-        except Exception as e:
-            logger.error(f"[WeeklyNews] bot 获取群列表异常: {e}")
+    # 确定目标群
+    if group_ids is not None:
+        targets = [{"group_id": gid} for gid in group_ids]
+    else:
+        targets = []
+        for bot in bots.values():
+            try:
+                targets = await bot.call_api("get_group_list")
+            except Exception as e:
+                logger.error(f"[WeeklyNews] bot 获取群列表异常: {e}")
 
     try:
         img_bytes = text_to_tactical_board(final_text)
@@ -387,7 +390,7 @@ async def publish_to_groups(report: str):
                                .replace('[blue]', '').replace('[/blue]', '') \
                                .replace('*', '').strip()
         for bot in bots.values():
-            for group in group_list:
+            for group in targets:
                 try:
                     await bot.call_api(
                         "send_group_msg",
@@ -409,7 +412,9 @@ async def weekly_news_job():
         return
 
     logger.info("[WeeklyNews] 开始周报生成")
-    await _run_weekly_pipeline()
+    report = await _generate_and_save()
+    if report:
+        await publish_to_groups(report)
     logger.info("[WeeklyNews] 周报生成完成")
 
 
@@ -426,8 +431,9 @@ async def handle_weekly_manual(bot: Bot, event: GroupMessageEvent):
 
     await weekly_cmd.send("🔄 开始爬取新闻生成周报，请稍候...")
 
-    result = await _run_weekly_pipeline()
-    if result:
-        await weekly_cmd.finish("✅ 周报已生成并发布到所有群！")
+    report = await _generate_and_save()
+    if report:
+        await publish_to_groups(report, group_ids=[event.group_id])
+        await weekly_cmd.finish("✅ 周报已生成！")
     else:
         await weekly_cmd.finish("周报生成失败，请检查日志。")
