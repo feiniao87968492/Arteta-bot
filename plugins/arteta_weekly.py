@@ -373,7 +373,7 @@ async def publish_to_groups(report: str, group_ids: list = None):
     try:
         img_bytes = text_to_tactical_board(final_text)
         for bot in bots.values():
-            for group in group_list:
+            for group in targets:
                 gid = group["group_id"]
                 try:
                     await bot.call_api(
