@@ -21,6 +21,7 @@ import asyncio
 import json
 from typing import Optional
 from loguru import logger
+from plugins.arteta_mute import is_muted
 from plugins.arteta_render import (
     text_to_tactical_board,
     html_to_image,
@@ -1530,6 +1531,8 @@ async def handle_algo(bot: Bot, event: MessageEvent):
 
 @chat_cmd.handle()
 async def handle_chat_cmd(bot: Bot, event: MessageEvent):
+    if isinstance(event, GroupMessageEvent) and is_muted(str(event.group_id)):
+        return
     await process_chat(bot, event)
 
 @at_cmd.handle()
