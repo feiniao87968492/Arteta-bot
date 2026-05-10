@@ -15,6 +15,7 @@ arteta_bot/
 │   ├── arteta_chat.py     # AI 对话核心 + 好感度 + 渲染路由
 │   ├── arteta_tools.py    # Function Calling 工具 (7个)
 │   ├── arteta_memory.py   # ChromaDB 向量记忆
+│   ├── arteta_mute.py     # 塔闭嘴/塔说话 群静音开关
 │   ├── arteta_render.py   # 图片渲染引擎 (PIL + Playwright)
 │   ├── arteta_knowledge.py # 本地知识库检索
 │   ├── arteta_daily.py    # 每日群聊总结
