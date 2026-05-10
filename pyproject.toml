@@ -12,6 +12,7 @@ dependencies = [
     "pillow",
     "pilmoji",
     "duckduckgo_search",
+    "loguru",
 ]
 
 [tool.nonebot]

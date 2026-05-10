@@ -14,7 +14,7 @@ class InterceptHandler(logging.Handler):
         logger_opt.log(record.levelno, record.getMessage())
 
 
-def setup_logging():
+def setup_logging() -> None:
     logger.remove()  # 清除 loguru 默认 stderr handler
 
     is_prod = os.getenv("ENVIRONMENT") == "prod"
