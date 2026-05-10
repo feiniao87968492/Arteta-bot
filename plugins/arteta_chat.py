@@ -20,6 +20,7 @@ from pathlib import Path
 import asyncio
 import json
 from typing import Optional
+from loguru import logger
 from plugins.arteta_render import (
     text_to_tactical_board,
     html_to_image,
