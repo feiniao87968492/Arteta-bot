@@ -21,7 +21,7 @@ from plugins.arteta_render import text_to_tactical_board
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = "arsenal_data.db"
+DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 ADMIN_QQ = "2648955710"
 
 # --- 1. 初始化数据库 ---

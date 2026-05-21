@@ -11,7 +11,6 @@ import sqlite3
 import time
 import os
 import re
-from collections import deque
 import random
 from datetime import datetime
 import base64
@@ -21,6 +20,8 @@ from pathlib import Path
 import asyncio
 import json
 from typing import Optional
+from loguru import logger
+from plugins.arteta_mute import is_muted
 from plugins.arteta_render import (
     text_to_tactical_board,
     html_to_image,
@@ -28,6 +29,7 @@ from plugins.arteta_render import (
     favorability_bar_chart,
     close_browser as close_render_browser,
 )
+from plugins.arteta_memory import memory_store
 from plugins.arteta_tools import (
     register_config as register_tools_config,
     run_tool_loop,
@@ -68,13 +70,15 @@ at_cmd = on_message(rule=to_me(), priority=11, block=True)
 notice_handler = on_notice(priority=1, block=False)
 
 # --- 3. 全球战术核心配置 ---
-DB_PATH = "arsenal_data.db"
+DB_PATH = os.environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 ADMIN_QQ = "2648955710"
 ARSENAL_ID = 57
 
 # 高速缓存
 tactical_cache = {"report": "", "last_update": 0}
-user_memories = {}
+
+# ChromaDB 持久化记忆（在 bot 连接时初始化）
+memory_store.initialize()
 
 # 核心性格设定
 ARTETA_PROMPT = (
@@ -89,7 +93,7 @@ ARTETA_PROMPT = (
     "要根据你与这名球员的关系自然回应，不要套公式。\n"
     "4. 你有丰富的足球知识和战术素养。当球员问起专业问题时，"
     "你可以引用你的战术理念来解释，但要说得像在更衣室里给球员讲，而不是读战术手册。"
-    "如果需要引用具体战术概念或更衣室故事，请使用 get_football_knowledge 工具获取准确资料。\n"
+    "如果需要引用具体战术概念、更衣室故事、球员名单或阵容信息，请使用 get_football_knowledge 工具获取准确资料。\n"
     "4b. 你认识群里的每一位活跃球员。可以使用 get_group_members 工具了解更衣室里的球员名单、"
     "他们的身份定位和信任度；使用 get_member_relations 工具了解球员之间的互动关系。"
     "当谈到群内其他球员或问起更衣室氛围时，主动利用这些信息让回复更有针对性。\n"
@@ -170,7 +174,7 @@ async def search_web(query: str, max_results: int = 5) -> str:
                 snippets.append(line)
         return "\n".join(snippets) if snippets else ""
     except Exception as e:
-        print(f"[WebSearch Error] {e}")
+        logger.error(f"[WebSearch] DDGS 搜索失败: {e}")
         return ""
 
 # --- 5. 外部数据拉取 ---
@@ -375,10 +379,11 @@ async def analyze_image_base64(data_url: str) -> str:
     if result and not _is_error(result):
         return result
     # 备用：duckcoding.ai gpt-4o-mini
-    logger.warning(f"SiliconFlow 识别失败（{result}），fallback 到 duckcoding.ai")
+    print(f"[Vision] SiliconFlow 识别失败（{result[:200]}），fallback 到 duckcoding.ai")
     fallback = await _call_vision_api(IMAGE_API_URL, IMAGE_API_KEY, VISION_MODEL, data_url)
     if fallback and not _is_error(fallback):
         return fallback
+    print(f"[Vision] 备用服务也失败: {fallback[:200]}")
     return f"[图片识别失败（SiliconFlow 和备用服务均失败）]"
 
 
@@ -406,6 +411,7 @@ async def _call_vision_api(api_url: str, api_key: str, model: str, data_url: str
                 body = "(无法读取响应体)"
             return f"[图片识别失败：HTTP {resp.status_code} body={body}]"
     except Exception as e:
+        print(f"[Vision API Error] {api_url} model={model} {type(e).__name__}: {e}")
         return f"[图片识别异常：{type(e).__name__}: {e}]"
 
 # --- 6. 数据库系统 ---
@@ -1214,16 +1220,6 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
             descs = await asyncio.gather(*[analyze_image(u) for u in img_urls])
             img_analysis = "\n\n【用户发送的图片内容】：" + "；".join(descs)
 
-    # --- 联网搜索：对涉及现实足球/实时信息的问题抓取最新情报，避免幻觉 ---
-    search_results = ""
-    if _should_search(prompt):
-        search_results = await search_web(prompt)
-
-    # --- 赛程查询：对赛程类问题直接通过 API 获取结构化数据，比联网搜索更准确 ---
-    fixture_data = ""
-    if _needs_fixtures(prompt):
-        fixture_data = await fetch_pl_fixtures()
-
     # --- 用 LLM 评估好感度（在 LLM 回复后处理），之前只获取当前数据 ---
     lvl, fav = await get_player_data(user_id, group_id, nickname)
 
@@ -1239,11 +1235,27 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
     # --- 群活跃成员快照：让阿尔特塔知道更衣室里有谁 ---
     group_snapshot = get_active_members_snapshot(group_id)
 
+    # --- 当前一线队阵容：直接注入让 LLM 不依赖训练数据中的旧名单 ---
+    current_squad = ""
+    try:
+        squad_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge_base", "arsenal_knowledge_base.md")
+        if os.path.exists(squad_path):
+            with open(squad_path, "r", encoding="utf-8") as f:
+                squad_content = f.read()
+            # 只取球员名单部分
+            start = squad_content.find("### 守门员")
+            end = squad_content.find("\n## ", start) if start > 0 else len(squad_content)
+            if start > 0:
+                current_squad = "\n【当前一线队阵容（阿森纳2025-26赛季）】：\n" + squad_content[start:end].strip()
+    except Exception:
+        pass
+
     # --- Function Calling 版本：简化 Base Prompt，数据由 LLM 按需通过 tool use 获取 ---
     base_prompt = (
         f"{ARTETA_PROMPT}\n\n"
         f"【背景信息】：\n当前时间：{current_time}\n群号：{group_id}\n{quoted_text}{img_analysis}\n"
         f"当前提问球员：{nickname}，身份：{lvl}，当前信任度：{fav}。\n"
+        f"{current_squad}\n"
         f"{profile_section}\n"
         f"【更衣室概况】：{group_snapshot}\n"
         f"（你可以使用 get_group_members 查看完整活跃球员名单，"
@@ -1254,94 +1266,118 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
         f"表现出你记得和这名球员之间的过往互动。"
     )
     
-    if user_id not in user_memories:
-        user_memories[user_id] = deque(maxlen=4)
-
-    messages = [{"role": "system", "content": base_prompt}]
-    messages.extend(list(user_memories[user_id]))
-
-    # 构建用户消息：如果有引用内容，需要包含引用信息
+    # 构建用户消息
     user_message = prompt
     if quoted_text:
         user_message = f"{prompt}\n\n【引用的消息】：{quoted_text.replace('【引用消息链（由旧到新）】：', '').strip()}"
 
+    messages = [{"role": "system", "content": base_prompt}]
+
+    # 从 ChromaDB 检索本群相关历史记忆
+    memory_contexts = memory_store.query_memories(group_id, user_message)
+    if memory_contexts:
+        memory_block = "\n\n".join(memory_contexts)
+        memory_banner = f"\n\n【相关历史对话（本群）】：\n{memory_block}\n"
+        messages[0]["content"] += memory_banner
+
     messages.append({"role": "user", "content": user_message})
 
-    try:
-        answer = await run_tool_loop(messages)
+    # 立即发送提示消息（不阻塞心跳）
+    async def delayed_response():
+        print(f"[delayed_response] 后台任务开始 group={group_id} user={user_id}")
+        try:
+            answer = await asyncio.wait_for(run_tool_loop(messages), timeout=90.0)
+        except asyncio.TimeoutError:
+            print(f"[delayed_response] 超时 group={group_id} user={user_id}")
+            await bot.send(event, Message("⏰ 教练这次思考太久，重新说一遍？"))
+            return
+        except Exception as e:
+            print(f"[delayed_response] 异常: {e} group={group_id} user={user_id}")
+            await bot.send(event, Message(f"连接中断：{str(e)}"))
+            return
 
         if answer:
-            with open("/tmp/debug.log", "a") as df:
-                df.write(f"FC answer (first 500): {answer[:500]}\n")
-            user_memories[user_id].append({"role": "user", "content": user_message})
-
-            # --- LLM 好感度评估：从回复中提取标记 ---
-            inc, reason = 0, ""
-            marker = extract_favor_marker(answer)
-            is_admin = (user_id == ADMIN_QQ)
-            if marker and marker in FAVOR_MARKERS:
-                min_val, max_val, marker_reason = FAVOR_MARKERS[marker]
-                if min_val != 0:
-                    inc = random.randint(min(min_val, max_val), max(min_val, max_val))
-                reason = marker_reason
-
-                # 从显示文本中移除标记
-                answer = re.sub(r'\s*' + re.escape(marker) + r'\s*$', '', answer).rstrip()
-            else:
+            try:
+                print(f"[delayed_response] LLM 返回 answer (len={len(answer)}) group={group_id}")
                 with open("/tmp/debug.log", "a") as df:
-                    df.write(f"[FAV] user={user_id} no marker found\n")
+                    df.write(f"FC answer (first 500): {answer[:500]}\n")
 
-            # --- 关键词辅助检测：在 LLM 评估基础上额外扣分 ---
-            kw_penalty, kw_reason = check_keyword_penalty(prompt) if not is_admin else (0, "")
-            if kw_penalty < 0:
-                inc += kw_penalty
-                reason = (reason + kw_reason) if reason else kw_reason.lstrip("（").rstrip("）")
-                with open("/tmp/debug.log", "a") as df:
-                    df.write(f"[FAV] keyword extra: {kw_penalty} reason={kw_reason}\n")
+                # --- LLM 好感度评估：从回复中提取标记 ---
+                inc, reason = 0, ""
+                marker = extract_favor_marker(answer)
+                is_admin = (user_id == ADMIN_QQ)
+                if marker and marker in FAVOR_MARKERS:
+                    min_val, max_val, marker_reason = FAVOR_MARKERS[marker]
+                    if min_val != 0:
+                        inc = random.randint(min(min_val, max_val), max(min_val, max_val))
+                    reason = marker_reason
 
-            # 应用好感度变更（管理员不参与）
-            if not is_admin:
-                lvl, fav = await apply_favor_change(user_id, group_id, nickname, inc)
-            else:
-                lvl, fav = await apply_favor_change(user_id, group_id, nickname, 0, is_admin=True)
-
-            with open("/tmp/debug.log", "a") as df:
-                df.write(f"[FAV] user={user_id} nick={nickname} inc={inc} reason={reason}\n")
-
-            # 检查是否需要更新画像
-            if await should_update_profile(user_id, group_id, msg_count):
-                asyncio.create_task(update_user_profile(user_id, group_id, nickname, lvl, fav))
-
-            # 好感度变动红字（由代码保证总是显示）
-            if inc > 0:
-                answer += f"\n\n[red]【信任度上升{abs(inc)}点 - {reason}】[/red]"
-            elif inc < 0:
-                answer += f"\n\n[red]【信任度下降{abs(inc)}点 - {reason}】[/red]"
-            else:
-                answer += f"\n\n[red]【信任度无变化】[/red]"
-
-            user_memories[user_id].append({"role": "assistant", "content": answer})
-
-            if needs_html_render(answer):
-                with open("/tmp/debug.log", "a") as df:
-                    df.write(f"RENDER: needs_html_render=True, trying html_to_image\n")
-                html_answer = answer.replace("[red]", '<span class="arsenal-red">')
-                html_answer = html_answer.replace("[/red]", '</span>')
-                html_answer = html_answer.replace("[blue]", '<span class="arsenal-blue">')
-                html_answer = html_answer.replace("[/blue]", '</span>')
-                try:
-                    img_bytes = await html_to_image(html_answer)
-                except Exception as e:
+                    # 从显示文本中移除标记
+                    answer = re.sub(r'\s*' + re.escape(marker) + r'\s*$', '', answer).rstrip()
+                else:
                     with open("/tmp/debug.log", "a") as df:
-                        df.write(f"RENDER: html_to_image failed: {e}, falling back to PIL\n")
+                        df.write(f"[FAV] user={user_id} no marker found\n")
+
+                # --- 关键词辅助检测：在 LLM 评估基础上额外扣分 ---
+                kw_penalty, kw_reason = check_keyword_penalty(prompt) if not is_admin else (0, "")
+                if kw_penalty < 0:
+                    inc += kw_penalty
+                    reason = (reason + kw_reason) if reason else kw_reason.lstrip("（").rstrip("）")
+                    with open("/tmp/debug.log", "a") as df:
+                        df.write(f"[FAV] keyword extra: {kw_penalty} reason={kw_reason}\n")
+
+                # 应用好感度变更（管理员不参与）
+                if not is_admin:
+                    lvl, fav = await apply_favor_change(user_id, group_id, nickname, inc)
+                else:
+                    lvl, fav = await apply_favor_change(user_id, group_id, nickname, 0, is_admin=True)
+
+                with open("/tmp/debug.log", "a") as df:
+                    df.write(f"[FAV] user={user_id} nick={nickname} inc={inc} reason={reason}\n")
+
+                # 检查是否需要更新画像
+                if await should_update_profile(user_id, group_id, msg_count):
+                    asyncio.create_task(update_user_profile(user_id, group_id, nickname, lvl, fav))
+
+                memory_store.add_memory(group_id, user_id, user_message, answer)
+
+                # 好感度变动红字（由代码保证总是显示）
+                if inc > 0:
+                    answer += f"\n\n[red]【信任度上升{abs(inc)}点 - {reason}】[/red]"
+                elif inc < 0:
+                    answer += f"\n\n[red]【信任度下降{abs(inc)}点 - {reason}】[/red]"
+                else:
+                    answer += f"\n\n[red]【信任度无变化】[/red]"
+
+                if needs_html_render(answer):
+                    with open("/tmp/debug.log", "a") as df:
+                        df.write(f"RENDER: needs_html_render=True, trying html_to_image\n")
+                    html_answer = answer.replace("[red]", '<span class="arsenal-red">')
+                    html_answer = html_answer.replace("[/red]", '</span>')
+                    html_answer = html_answer.replace("[blue]", '<span class="arsenal-blue">')
+                    html_answer = html_answer.replace("[/blue]", '</span>')
+                    try:
+                        img_bytes = await html_to_image(html_answer)
+                    except Exception as e:
+                        with open("/tmp/debug.log", "a") as df:
+                            df.write(f"RENDER: html_to_image failed: {e}, falling back to PIL\n")
+                        img_bytes = text_to_tactical_board(answer)
+                else:
                     img_bytes = text_to_tactical_board(answer)
-            else:
-                img_bytes = text_to_tactical_board(answer)
-            await bot.send(event, MessageSegment.image(img_bytes))
+                print(f"[delayed_response] 开始发送图片回复 to group={group_id} user={user_id}")
+                await bot.send(event, MessageSegment.image(img_bytes))
+                print(f"[delayed_response] 图片发送成功 to group={group_id}")
+            except Exception as e:
+                print(f"[delayed_response] 回复处理出错: {e}")
+                try:
+                    await bot.send(event, Message(f"回复处理出错：{str(e)}"))
+                except Exception as e2:
+                    print(f"[delayed_response] 连错误提示都发不出去: {e2}")
         else:
+            print(f"[delayed_response] answer 为空，group={group_id} user={user_id}")
             await bot.send(event, Message("让我想想再回答你。"))
-    except Exception as e:
-        await bot.send(event, Message(f"连接中断：{str(e)}"))
+
+    asyncio.create_task(delayed_response())
 
 @notice_handler.handle()
 async def handle_notices(bot: Bot, event: NoticeEvent):
@@ -1413,6 +1449,35 @@ async def handle_box(bot: Bot, event: GroupMessageEvent):
     except Exception as e:
         await box_cmd.finish(f"读取异常：{str(e)}")
 
+ALGO_API_KEY = "sk-sNff1dqDXJsocCaoGanHeCSB3OHvovlZhC3IFD71Fm1CTqEE"
+ALGO_API_URL = "https://www.boxying.com/v1/chat/completions"
+ALGO_MODEL = "gpt-5.5"
+
+
+async def call_algo_llm(system_prompt: str, user_text: str) -> str:
+    """调用 GPT-5.5 处理算法/技术问题"""
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            resp = await client.post(
+                ALGO_API_URL,
+                headers={"Authorization": f"Bearer {ALGO_API_KEY}"},
+                json={
+                    "model": ALGO_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_text}
+                    ]
+                }
+            )
+            if resp.status_code != 200:
+                return f"API 错误: {resp.status_code}"
+            return resp.json()["choices"][0]["message"]["content"]
+    except asyncio.TimeoutError:
+        return "⏰ AI 教练思考太久，重新试一次？"
+    except Exception as e:
+        return f"连接中断：{str(e)}"
+
+
 @algo_cmd.handle()
 async def handle_algo(bot: Bot, event: MessageEvent):
     raw_text = event.get_message().extract_plain_text().strip()
@@ -1420,24 +1485,63 @@ async def handle_algo(bot: Bot, event: MessageEvent):
         if raw_text.startswith(cmd):
             raw_text = raw_text[len(cmd):].strip()
             break
-            
+
     if not raw_text:
         await algo_cmd.finish("把你需要解决的问题写在白板上！")
         return
-        
+
+    # 分析消息中的图片
+    img_analysis = ""
+    img_urls = [s.data.get("url") for s in event.get_message() if s.type == "image" and s.data.get("url")]
+    if img_urls:
+        descs = await asyncio.gather(*[analyze_image(u) for u in img_urls])
+        img_analysis = "\n\n【用户发送的图片内容】：" + "；".join(descs)
+
     algo_prompt = (
         "【技术指导】对方提交了技术问题，用教练指导球员口头说话的方式解答。\n"
         "【数学公式硬性规定】短公式/行内公式用单个 $ 包裹（如 $f(x) = x^2$），"
         "长公式/独立公式用双 $$ 包裹（如 $$\\int_a^b f(x)dx$$、$$\\frac{{dy}}{{dx}}$$）。"
         "这是死命令，不遵守会让球员看不懂战术板！\n"
         "【代码硬性规定】如果涉及代码，用 ``` 代码块包裹展示。\n"
-        "绝对不要加小标题和列表符：\n" + raw_text
+        "绝对不要加小标题和列表符：\n" + raw_text + img_analysis
     )
-    await process_chat(bot, event, custom_prompt=algo_prompt)
+
+    answer = await call_algo_llm(algo_prompt, raw_text + img_analysis)
+
+    if answer:
+        try:
+            if needs_html_render(answer):
+                html_answer = answer.replace("[red]", '<span class="arsenal-red">')
+                html_answer = html_answer.replace("[/red]", '</span>')
+                html_answer = html_answer.replace("[blue]", '<span class="arsenal-blue">')
+                html_answer = html_answer.replace("[/blue]", '</span>')
+                try:
+                    img_bytes = await html_to_image(html_answer)
+                except Exception:
+                    img_bytes = text_to_tactical_board(answer)
+            else:
+                img_bytes = text_to_tactical_board(answer)
+            await algo_cmd.finish(MessageSegment.image(img_bytes))
+        except FinishedException:
+            raise
+        except Exception as e:
+            await algo_cmd.finish(Message(f"回复处理出错：{str(e)}"))
+    else:
+        await algo_cmd.finish(Message("让我想想再回答你。"))
 
 @chat_cmd.handle()
+async def handle_chat_cmd(bot: Bot, event: MessageEvent):
+    if isinstance(event, GroupMessageEvent) and is_muted(str(event.group_id)):
+        return
+    await process_chat(bot, event)
+
 @at_cmd.handle()
-async def handle_chat(bot: Bot, event: MessageEvent):
+async def handle_at_msg(bot: Bot, event: MessageEvent):
+    raw = event.get_message().extract_plain_text().strip()
+    # 如果消息以命令前缀开头（A/a等），说明已被 chat_cmd 处理，跳过
+    # 注：不拦截"塔"开头，因为 chat_cmd 只匹配"塔子""阿尔特塔"完整词
+    if raw and raw[0] in ("A", "a", "/"):
+        return
     await process_chat(bot, event)
 
 @fav_cmd.handle()

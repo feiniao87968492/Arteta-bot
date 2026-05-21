@@ -9,7 +9,7 @@ import time
 from typing import List
 from plugins.arteta_knowledge import query_knowledge
 
-DB_PATH = "arsenal_data.db"
+DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 
 # --- 配置（在运行时由 register_config() 注入）---
 FOOTBALL_API_TOKEN = ""
@@ -86,7 +86,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_football_knowledge",
-            "description": "查询阿尔特塔的战术知识库。当你需要引用具体战术概念（如内收型边后卫、高位逼抢、2-3-5进攻站位）、更衣室故事（灯泡演讲、大脑与心脏演讲）、发布会语录或足球哲学时调用",
+            "description": "查询阿尔特塔的知识库（含阿森纳当前一线队球员名单、战术概念、更衣室故事、发布会语录、足球哲学）。当你需要查询球员信息、当前阵容、球员名单、球队新闻、战术术语、球队哲学时调用",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -190,7 +190,7 @@ async def execute_tool_call(tc: dict) -> str:
     elif name == "search_news":
         return await _search_news(args.get("q", ""))
     elif name == "get_football_knowledge":
-        return query_knowledge(args.get("topic", ""))
+        return query_knowledge(args.get("topic", ""), max_chars=3000)
     elif name == "get_group_members":
         return await _get_group_members(args.get("group_id", ""))
     elif name == "get_member_relations":
@@ -301,12 +301,12 @@ async def _get_arsenal_injuries() -> str:
         from duckduckgo_search import DDGS
 
         def _search():
-            with DDGS() as ddgs:
+            with DDGS(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}) as ddgs:
                 return list(ddgs.text("Arsenal injury news latest squad updates", max_results=3))
 
         results = await asyncio.wait_for(
             asyncio.get_event_loop().run_in_executor(None, _search),
-            timeout=10.0
+            timeout=5.0
         )
 
         snippets = []
@@ -317,8 +317,11 @@ async def _get_arsenal_injuries() -> str:
                 snippets.append(f"• {t}：{b}" if t else f"• {b}")
 
         return "\n".join(snippets) if snippets else "未找到相关伤病信息。"
+    except asyncio.TimeoutError:
+        return "[搜索超时]"
     except Exception as e:
-        return f"[搜索失败: {e}]"
+        print(f"[Tool Error] _get_arsenal_injuries: {e}")
+        return f"[搜索失败]"
 
 
 async def _search_news(q: str) -> str:
@@ -330,12 +333,12 @@ async def _search_news(q: str) -> str:
         from duckduckgo_search import DDGS
 
         def _search():
-            with DDGS() as ddgs:
+            with DDGS(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}) as ddgs:
                 return list(ddgs.text(q, max_results=5))
 
         results = await asyncio.wait_for(
             asyncio.get_event_loop().run_in_executor(None, _search),
-            timeout=10.0
+            timeout=5.0
         )
 
         snippets = []
@@ -346,8 +349,11 @@ async def _search_news(q: str) -> str:
                 snippets.append(f"• {t}：{b}" if t else f"• {b}")
 
         return "\n".join(snippets) if snippets else "未找到相关信息。"
+    except asyncio.TimeoutError:
+        return "[搜索超时]"
     except Exception as e:
-        return f"[搜索失败: {e}]"
+        print(f"[Tool Error] _search_news: {e}")
+        return "[搜索失败]"
 
 
 async def _get_group_members(group_id: str) -> str:

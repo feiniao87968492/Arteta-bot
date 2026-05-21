@@ -763,3 +763,78 @@ FAVOR_MARKERS = {
 - ✅ 所有插件加载成功，零报错
 - ✅ PID 247045 → 248160 → 248381 运行中
 
+---
+
+### 2026-05-09: 阿森纳周报功能（自动爬取新闻 + LLM 生成 + 知识库注入 + 群发布）
+
+**设计文档**：`docs/superpowers/specs/2026-05-09-weekly-news-design.md`
+**实施计划**：`docs/superpowers/plans/2026-05-09-weekly-news.md`
+
+**新增文件**：
+- `plugins/arteta_weekly.py` — 周报独立插件（~400 行）
+- `knowledge_base/weekly-news.md` — 周报知识库文件（运行时自动生成）
+
+**修改文件**：
+- `plugins/arteta_help.py` — 帮助文档添加周报命令
+
+**功能概述**：
+
+| 模块 | 函数 | 说明 |
+|------|------|------|
+| 新闻抓取 | `fetch_bbc_news()` | BBC Sport Arsenal 页面（ConnectTimeout，服务器无法连接） |
+| 新闻抓取 | `fetch_sky_news()` | Sky Sports Arsenal 页面（正常工作） |
+| 新闻抓取 | `fetch_guardian_news()` | The Guardian Arsenal 页面（正常工作） |
+| 正文抓取 | `fetch_article_content()` | 提取 `<p>` 标签文本，每篇最多 500 字 |
+| 去重排序 | `fetch_arsenal_news()` | 三源异步并发 → 去重 → Top 8 |
+| LLM 生成 | `generate_weekly_report()` | DeepSeek API，阿尔特塔风格更衣室周报 |
+| 知识库 | `save_to_knowledge_base()` | 写入 `knowledge_base/weekly-news.md` |
+| 知识库 | `clear_cache()` | 写入后清除知识库缓存，LLM 聊天立即命中 |
+| 群发布 | `publish_to_groups()` | `text_to_tactical_board()` 渲染图片 → 全群发 |
+| 定时任务 | `weekly_news_job()` | APScheduler cron 每周一 09:00 |
+| 手动触发 | `handle_weekly_manual()` | `/周报` 命令，仅发当前群 |
+
+**爬坑记录**：
+
+1. **`str | None` 语法（Python 3.8）**：`-> str | None` 在 Python 3.8 不支持。修复：改为 `-> Optional[str]`。
+2. **知识库缓存未失效**：`save_to_knowledge_base()` 写入后 `arteta_knowledge.py` 的 `_file_cache` 未清空，LLM 聊天看不到新周报。修复：写入后调用 `clear_cache()`。
+3. **BBC 连接超时**：服务器无法连接 `bbc.com`（`ConnectTimeout`），异常消息为空字符串。修复：增加 `type(e).__name__` 日志、新增 Guardian 源补偿。
+4. **`group_list` → `targets` 变量名遗漏**：重构 `publish_to_groups()` 支持单群发送时，将 `group_list` 改为 `targets`，但 try 块内漏改了一处，导致图片生成成功后发送循环抛出 `NameError`，然后回退发送纯文本。修复：统一为 `targets`。
+5. **纯文本回退包含颜色标记**：图片渲染失败回退时，`final_text` 中包含 `[red]`/`[blue]` 标记。修复：回退前替换掉所有颜色标记。
+6. **颜色标记跨行/未闭合**：LLM 输出的 `[red]...[/red]` 可能跨行或格式异常，`text_to_tactical_board` 的逐行正则无法匹配。修复：新增 `_clean_color_tags()` 预处理，跨行/未闭合标签自动去除。
+
+**当前状态**：✅ 部署完成，`arteta_weekly` 插件加载成功。`/周报` 手动触发已测试通过。定时任务每周一 09:00 自动执行。
+
+---
+
+### 2026-05-09: ChromaDB 群体记忆 + WebSocket 断联修复
+
+**设计文档**：`docs/superpowers/specs/2026-05-09-chromadb-memory-design.md`
+**实施计划**：`docs/superpowers/plans/2026-05-09-chromadb-memory-plan.md`
+
+**问题**：
+1. 对话记忆全在进程内存 `user_memories = {user_id: deque(maxlen=4)}`，重启即丢失
+2. 只能按人隔离，同一人在不同群的对话混在一起
+3. deque 只保留最近 4 轮，更早的有价值对话无法被感知
+4. WebSocket 频繁断联：`asyncio.wait_for(run_tool_loop(), timeout=25)` 阻塞事件循环，心跳无法响应
+
+**解决方案**：
+
+| 组件 | 说明 |
+|------|------|
+| `plugins/arteta_memory.py` | ChromaDB 封装模块，`MemoryStore` 类提供 `initialize()`、`add_memory()`、`query_memories()` |
+| ChromaDB Collection | 单 `group_memories` 集合，`metadata filter` 按群隔离，`all-MiniLM-L6-v2` 384 维向量 |
+| 检索策略 | 每次对话按语义检索 Top 5 相关历史，注入 `【相关历史对话（本群）】` 到 prompt |
+| 写入时机 | LLM 回复后、好感度标记拼接前存入 ChromaDB，避免 `[red]` 标记污染向量 |
+| WebSocket 修复 | `asyncio.create_task(delayed_response())` 后台执行 LLM 调用，主协程不阻塞 |
+| 异常保护 | `delayed_response` 内 `try/except` 包裹处理流程，出错了用户可见错误消息 |
+
+**爬坑记录**：
+
+1. **ChromeDB sqlite3 版本要求**：系统 sqlite3 3.31.1 < 3.35.0，ChromaDB 启动报错。修复：`pysqlite3-binary` monkey-patch 替换 `sys.modules["sqlite3"]`。
+2. **Python 3.8 兼容性**：`posthog>=4` 使用 `dict[str, X]` 语法（3.9+），降级 `posthog<3`；ChromaDB 降级 `0.4.x`。
+3. **重复 `import asyncio`**：实现者新增了第 9 行但文件第 22 行已有，导致重复导入。修复：移除第 9 行的副本。
+4. **`add_memory` 时机**：原写入在好感度红字拼接之后，`[red]【信任度上升X点】[/red]` 存入向量库污染 embedding。修复：移到渲染标记拼接之前。
+5. **后台任务异常无声**：`delayed_response` 的处理代码（好感度、渲染、发送）脱离 `try/except`，asyncio 静默吞异常。修复：增加独立 `try/except`。
+
+**当前状态**：✅ 全部完成，`arteta_memory` 和 `arteta_chat` 插件加载成功。ChromaDB 数据目录 `/opt/arteta_bot/chroma_db/` 已创建。Bot 运行正常。
+

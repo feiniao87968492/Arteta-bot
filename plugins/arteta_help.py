@@ -7,9 +7,9 @@ from plugins.arteta_render import text_to_tactical_board, html_to_image, needs_h
 help_cmd = on_command("帮助", aliases={"help", "menu", "指令", "命令"}, priority=1, block=True)
 
 
-@help_cmd.handle()
-async def handle_help(bot: Bot, event: MessageEvent):
-    help_text = (
+def build_help_text() -> str:
+    """构建帮助菜单文本。"""
+    return (
         "[red]*━━ 阿森纳战术指令板 ━━*[/red]\n\n"
         "[blue]*--- 战术部署与实战 ---*[/blue]\n"
         "A/塔子/阿尔特塔 [内容]：跟阿尔特塔讨论战术、聊球、扯淡，任何话题都能扔过来。\n"
@@ -26,9 +26,15 @@ async def handle_help(bot: Bot, event: MessageEvent):
         "英超局势/积分榜/英超排名：查看最新英超积分榜和局势分析。\n"
         "刷新情报：更新足球情报数据。\n\n"
         "[blue]*--- 球队管理（仅限教练组）---*[/blue]\n"
-        "下放/禁言/红牌 [@某人]：将违纪球员下放预备队（禁言）。\n\n"
+        "下放/禁言/红牌 [@某人]：将违纪球员下放预备队（禁言）。\n"
+        "周报/weekly：手动触发爬取新闻并生成阿森纳周报，发布到所有群。\n\n"
         "— 以上，去训练吧。"
     )
+
+
+@help_cmd.handle()
+async def handle_help(bot: Bot, event: MessageEvent):
+    help_text = build_help_text()
 
     if needs_html_render(help_text):
         img_bytes = await html_to_image(help_text)
