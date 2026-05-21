@@ -143,6 +143,7 @@ supervisorctl tail -f arteta_bot
   - `plugins/arteta_like.py` → `get_daily_like_limit()`
   - `plugins/arteta_help.py` → `build_help_text()`
 - 已支持隔离路径覆盖：
+  - `ARTETA_DB_PATH`
   - `ARTETA_CHROMA_DIR`
   - `ARTETA_SWEARS_FILE`
 
@@ -152,7 +153,8 @@ supervisorctl tail -f arteta_bot
 - `memory` suite 在安装 `chromadb` 后可本地通过
 - `commands` suite 在安装 `chromadb` 后可本地通过
 - `render` 中的非浏览器项（模板、战术板 PNG、引用图预处理）可本地通过
-- `render/html_to_image` 依赖 Playwright Chromium；若失败，先执行：`python -m playwright install chromium`
+- `render/html_to_image` 依赖 Playwright Chromium；未安装时该 case 会标记为 `skipped`
+- 如需实际验证 HTML/Markdown 图片渲染，先执行：`python -m playwright install chromium`
 
 ### 常用验证命令
 
@@ -164,7 +166,7 @@ python tools/verify_features.py --suite render --case html_to_image
 python tools/verify_features.py --list-suites
 ```
 
-对应说明文档：`docs/dev/developer-verification.md`
+对应说明文档：`Docs/dev/developer-verification.md`
 
 ## 修改后 Checklist
 
