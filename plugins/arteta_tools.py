@@ -9,7 +9,7 @@ import time
 from typing import List
 from plugins.arteta_knowledge import query_knowledge
 
-DB_PATH = "arsenal_data.db"
+DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 
 # --- 配置（在运行时由 register_config() 注入）---
 FOOTBALL_API_TOKEN = ""

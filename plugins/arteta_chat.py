@@ -70,7 +70,7 @@ at_cmd = on_message(rule=to_me(), priority=11, block=True)
 notice_handler = on_notice(priority=1, block=False)
 
 # --- 3. 全球战术核心配置 ---
-DB_PATH = "arsenal_data.db"
+DB_PATH = os.environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 ADMIN_QQ = "2648955710"
 ARSENAL_ID = 57
 

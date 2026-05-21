@@ -18,7 +18,10 @@ from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
 
-CHROMA_DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_db")
+CHROMA_DB_DIR = os.environ.get(
+    "ARTETA_CHROMA_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_db"),
+)
 COLLECTION_NAME = "group_memories"
 MAX_DOC_LENGTH = 1000  # 单条记忆的最大字符数
 N_RESULTS = 5  # 每次检索返回条数

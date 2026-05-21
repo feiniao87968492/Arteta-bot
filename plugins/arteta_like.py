@@ -9,7 +9,7 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot.exception import FinishedException
 
-DB_PATH = "arsenal_data.db"
+DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 MAX_NORMAL = 10  # 普通用户每日上限
 MAX_VIP = 50     # 会员用户每日上限
 
@@ -48,6 +48,11 @@ def _add_count(user_id: str, n: int):
     conn.close()
 
 
+def get_daily_like_limit(is_vip: bool) -> int:
+    """返回用户每日名片赞上限。"""
+    return MAX_VIP if is_vip else MAX_NORMAL
+
+
 _init_table()
 
 like_cmd = on_command("赞我", aliases={"点赞我", "like_me"}, priority=5, block=True)
@@ -70,7 +75,7 @@ async def handle_like_me(bot: Bot, event: GroupMessageEvent):
     if not is_vip and event.sender.role in ("owner", "admin"):
         is_vip = True
 
-    max_likes = MAX_VIP if is_vip else MAX_NORMAL
+    max_likes = get_daily_like_limit(is_vip)
     current = _get_count(user_id)
     if current >= max_likes:
         already_done = [

@@ -130,6 +130,42 @@ supervisorctl tail -f arteta_bot
 
 首次部署参考 `Docs/ops/deployment.md`。
 
+## 当前开发进度（2026-05-21）
+
+### 开发者功能验证工具已落地
+
+- 新增本地验证入口：`tools/verify_features.py`
+- 默认输出目录：`artifacts/verify/<timestamp>/`
+- 已支持 suites：`core`、`all`、`render`、`memory`、`chat`、`commands`、`online`
+- 已补充 fixtures：`tests/fixtures/markdown/`、`tests/fixtures/knowledge/`、`tests/fixtures/images/`
+- 已抽出可复用 helper：
+  - `plugins/arteta_image.py` → `preprocess_reference_image()`
+  - `plugins/arteta_like.py` → `get_daily_like_limit()`
+  - `plugins/arteta_help.py` → `build_help_text()`
+- 已支持隔离路径覆盖：
+  - `ARTETA_CHROMA_DIR`
+  - `ARTETA_SWEARS_FILE`
+
+### 当前验证状态
+
+- `chat` suite 可本地通过
+- `memory` suite 在安装 `chromadb` 后可本地通过
+- `commands` suite 在安装 `chromadb` 后可本地通过
+- `render` 中的非浏览器项（模板、战术板 PNG、引用图预处理）可本地通过
+- `render/html_to_image` 依赖 Playwright Chromium；若失败，先执行：`python -m playwright install chromium`
+
+### 常用验证命令
+
+```bash
+python tools/verify_features.py
+python tools/verify_features.py --suite all
+python tools/verify_features.py --suite core --online
+python tools/verify_features.py --suite render --case html_to_image
+python tools/verify_features.py --list-suites
+```
+
+对应说明文档：`docs/dev/developer-verification.md`
+
 ## 修改后 Checklist
 
 每次修改完成后确认以下事项：

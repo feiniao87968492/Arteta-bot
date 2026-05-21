@@ -29,6 +29,7 @@ python bot.py
 
 - 📖 [用户文档](Docs/user/features.md) — 功能概览与指令表
 - 🔧 [开发者文档](Docs/dev/overview.md) — 架构说明与功能实现
+- 🧪 [开发者验证](Docs/dev/developer-verification.md) — 本地功能回归与验收脚本
 - 🚀 [运维文档](Docs/ops/deployment.md) — 部署与环境配置
 
 ## 项目状态
