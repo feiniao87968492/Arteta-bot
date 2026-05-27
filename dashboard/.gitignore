@@ -1,0 +1,15 @@
+# Vite / npm
+node_modules/
+dist/
+
+# Build artifacts
+*.tsbuildinfo
+package-lock.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local env
+.env
+.env.local

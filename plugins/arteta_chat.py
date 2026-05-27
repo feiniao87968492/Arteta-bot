@@ -19,8 +19,9 @@ import hashlib
 from pathlib import Path
 import asyncio
 import json
-from typing import Optional
+from typing import Dict, Optional, Tuple
 from loguru import logger
+from dashboard.api.services.prompt_service import get_prompt
 from plugins.arteta_mute import is_muted
 from plugins.arteta_render import (
     text_to_tactical_board,
@@ -31,8 +32,15 @@ from plugins.arteta_render import (
 )
 from plugins.arteta_memory import memory_store
 from plugins.arteta_tools import (
+    maybe_answer_football_news_directly,
+    maybe_search_football_news_for_prompt,
     register_config as register_tools_config,
     run_tool_loop,
+)
+from plugins.arteta_vision import (
+    VisionConfig,
+    analyze_image_base64 as _analyze_image_base64_with_config,
+    detect_image_format as _detect_image_format,
 )
 try:
     from duckduckgo_search import DDGS
@@ -53,10 +61,51 @@ FOOTBALL_API_TOKEN = str(config.get("football_api_token", "da24063a4040404c89250
 DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
 IMAGE_API_KEY = str(config.get("image_api_key", "")).strip('"\'')
 IMAGE_API_URL = str(config.get("image_api_url", "https://api.duckcoding.ai")).strip('"\'')
+VISION_API_KEY = str(config.get("vision_api_key", IMAGE_API_KEY)).strip('"\'')
+VISION_API_URL = str(config.get("vision_api_url", IMAGE_API_URL)).strip('"\'')
 VISION_MODEL = str(config.get("vision_model", "gpt-4o-mini")).strip('"\'')
 SILICONFLOW_API_KEY = "sk-vyytntlehtxrglzffknmvwdtxnihhanjpjwiriplgbuqbrdc"
 SILICONFLOW_VISION_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
 TEMP_IMAGE_DIR = os.path.join(tempfile.gettempdir(), "arteta_images")
+
+
+def _segment_mentions_bot(segment, bot_id: str) -> bool:
+    return segment.type == "at" and str(segment.data.get("qq", "")) == bot_id
+
+
+def _message_starts_or_ends_with_bot_mention(message, bot_id: str) -> bool:
+    if not message:
+        return False
+    if _segment_mentions_bot(message[0], bot_id):
+        return True
+    index = len(message) - 1
+    if message[index].type == "text" and not str(message[index].data.get("text", "")).strip() and len(message) >= 2:
+        index -= 1
+    return _segment_mentions_bot(message[index], bot_id)
+
+
+def _message_has_reply_prefixed_bot_mention(message, bot_id: str) -> bool:
+    if not message:
+        return False
+    for index, segment in enumerate(message[:-1]):
+        if segment.type == "reply" and _segment_mentions_bot(message[index + 1], bot_id):
+            return True
+    return False
+
+
+async def _message_mentions_bot(event) -> bool:
+    if event.is_tome():
+        return True
+    bot_id = str(event.self_id)
+    original_message = getattr(event, "original_message", None)
+    current_message = event.get_message()
+    return any(
+        checker(message, bot_id)
+        for message in (original_message, current_message)
+        if message
+        for checker in (_message_starts_or_ends_with_bot_mention, _message_has_reply_prefixed_bot_mention)
+    )
+
 
 # --- 2. 指令定义区 ---
 chat_cmd = on_command("A", aliases={"a", "塔子", "阿尔特塔"}, priority=10, block=True)
@@ -66,7 +115,7 @@ fav_cmd = on_command("好感度", priority=5, block=True)
 rank_cmd = on_command("好感度排行", aliases={"排行", "ranking", "信任度排行"}, priority=5, block=True)
 refresh_cmd = on_command("刷新情报", priority=4, block=True)
 profile_cmd = on_command("档案", aliases={"profile", "个人档案"}, priority=6, block=True)
-at_cmd = on_message(rule=to_me(), priority=11, block=True)
+at_cmd = on_message(rule=_message_mentions_bot, priority=11, block=True)
 notice_handler = on_notice(priority=1, block=False)
 
 # --- 3. 全球战术核心配置 ---
@@ -297,20 +346,6 @@ async def fetch_pl_fixtures():
         return ""
 
 # --- 5b. 图片识别（Vision API） ---
-def _detect_image_format(data: bytes) -> str:
-    """检测图片格式，返回 MIME 子类型（jpeg/png/gif/webp 等）"""
-    if data.startswith(b'\xff\xd8'):
-        return "jpeg"
-    if data.startswith(b'\x89PNG\r\n\x1a\n'):
-        return "png"
-    if data.startswith(b'GIF87a') or data.startswith(b'GIF89a'):
-        return "gif"
-    if data.startswith(b'RIFF') and data[8:12] == b'WEBP':
-        return "webp"
-    if data.startswith(b'\x00\x00\x01\x00') or data.startswith(b'\x00\x00\x00\x1cftyp'):
-        return "heic"
-    return "jpeg"  # fallback
-
 async def _download_image_to_file(url: str) -> Optional[str]:
     """下载图片到本地临时文件（参考备份项目 aiohttp + HTTP 降级方案）。返回文件路径。"""
     os.makedirs(TEMP_IMAGE_DIR, exist_ok=True)
@@ -367,52 +402,28 @@ async def analyze_image(image_url: str) -> str:
     except Exception as e:
         return f"[图片识别异常：{type(e).__name__}: {e}]"
 
+def _select_vision_api_key(vision_api_key: str, image_api_key: str) -> str:
+    return vision_api_key or image_api_key
+
+
+def _select_vision_api_url(vision_api_url: str, image_api_url: str) -> str:
+    return vision_api_url or image_api_url
+
+
+def _build_vision_config() -> VisionConfig:
+    return VisionConfig(
+        vision_api_key=VISION_API_KEY,
+        vision_api_url=VISION_API_URL,
+        vision_model=VISION_MODEL,
+        image_api_key=IMAGE_API_KEY,
+        image_api_url=IMAGE_API_URL,
+    )
+
+
 async def analyze_image_base64(data_url: str) -> str:
     """调用 Vision API 分析图片，主服务失败时自动 fallback 到备用服务。"""
-    def _is_error(resp: str) -> bool:
-        """判断 Vision API 返回值是否表示失败"""
-        return resp.startswith("[图片识别失败") or resp.startswith("[图片识别异常")
-    # 主服务：SiliconFlow Qwen3-VL-32B-Instruct
-    result = await _call_vision_api(
-        "https://api.siliconflow.cn", SILICONFLOW_API_KEY, SILICONFLOW_VISION_MODEL, data_url
-    )
-    if result and not _is_error(result):
-        return result
-    # 备用：duckcoding.ai gpt-4o-mini
-    print(f"[Vision] SiliconFlow 识别失败（{result[:200]}），fallback 到 duckcoding.ai")
-    fallback = await _call_vision_api(IMAGE_API_URL, IMAGE_API_KEY, VISION_MODEL, data_url)
-    if fallback and not _is_error(fallback):
-        return fallback
-    print(f"[Vision] 备用服务也失败: {fallback[:200]}")
-    return f"[图片识别失败（SiliconFlow 和备用服务均失败）]"
+    return await _analyze_image_base64_with_config(data_url, _build_vision_config())
 
-
-async def _call_vision_api(api_url: str, api_key: str, model: str, data_url: str) -> str:
-    """调用单个 Vision API 的底层函数。"""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{api_url}/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": [
-                        {"type": "text", "text": "请用中文详细描述这张图片的内容，包括主要对象、场景、文字、表情等信息。"},
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                    ]}],
-                    "max_tokens": 500,
-                },
-            )
-            if resp.status_code == 200:
-                return resp.json()["choices"][0]["message"]["content"].strip()
-            try:
-                body = resp.text[:200]
-            except Exception:
-                body = "(无法读取响应体)"
-            return f"[图片识别失败：HTTP {resp.status_code} body={body}]"
-    except Exception as e:
-        print(f"[Vision API Error] {api_url} model={model} {type(e).__name__}: {e}")
-        return f"[图片识别异常：{type(e).__name__}: {e}]"
 
 # --- 6. 数据库系统 ---
 def init_db_safely():
@@ -459,10 +470,39 @@ def init_db_safely():
                  interaction_count INTEGER DEFAULT 1,
                  last_interaction_time INTEGER NOT NULL,
                  PRIMARY KEY (user_id, target_user_id, group_id))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS dashboard_group_names (
+                 group_id TEXT PRIMARY KEY,
+                 group_name TEXT NOT NULL,
+                 updated_at TEXT NOT NULL)''')
     conn.commit()
     conn.close()
 
 init_db_safely()
+
+async def save_group_name(group_id: str, group_name: str):
+    clean_name = (group_name or "").strip()
+    if not group_id or not clean_name:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('''CREATE TABLE IF NOT EXISTS dashboard_group_names (
+                         group_id TEXT PRIMARY KEY,
+                         group_name TEXT NOT NULL,
+                         updated_at TEXT NOT NULL)''')
+        await db.execute('''INSERT INTO dashboard_group_names (group_id, group_name, updated_at)
+                         VALUES (?, ?, ?)
+                         ON CONFLICT(group_id) DO UPDATE SET group_name = excluded.group_name, updated_at = excluded.updated_at''',
+                         (group_id, clean_name, datetime.now().isoformat(timespec="seconds")))
+        await db.commit()
+
+async def refresh_group_name(bot: Bot, group_id: str, fallback_name: str = ""):
+    clean_name = (fallback_name or "").strip()
+    if not clean_name:
+        try:
+            info = await bot.call_api("get_group_info", group_id=int(group_id), no_cache=False)
+            clean_name = str(info.get("group_name", "")).strip()
+        except Exception:
+            clean_name = ""
+    await save_group_name(group_id, clean_name)
 
 # 注入工具模块配置
 register_tools_config(
@@ -580,6 +620,99 @@ def get_active_members_snapshot(group_id: str, limit: int = 8) -> str:
         return "暂无活跃球员数据。"
 
 
+def find_recent_messages_by_alias(group_id: str, query_text: str, limit: int = 3) -> list:
+    text = (query_text or "").strip()
+    if not text or "说" not in text:
+        return []
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        player_rows = conn.execute(
+            """
+            SELECT user_id, nickname, profile_json
+            FROM players
+            WHERE group_id = ?
+            ORDER BY last_seen DESC
+            """,
+            (group_id,),
+        ).fetchall()
+        nickname_rows = conn.execute(
+            """
+            SELECT user_id, nickname
+            FROM nicknames
+            WHERE group_id = ?
+            ORDER BY last_seen DESC
+            """,
+            (group_id,),
+        ).fetchall()
+
+        aliases_by_user = {}
+        for row in player_rows:
+            user_id = str(row["user_id"])
+            aliases_by_user[user_id] = []
+            current_nickname = str(row["nickname"] or "").strip()
+            if current_nickname:
+                aliases_by_user[user_id].append(current_nickname)
+            profile_json = row["profile_json"]
+            if profile_json and profile_json != '{}':
+                try:
+                    profile = json.loads(profile_json)
+                    for alias in profile.get("nicknames", []):
+                        alias_text = str(alias or "").strip()
+                        if alias_text:
+                            aliases_by_user[user_id].append(alias_text)
+                except Exception:
+                    pass
+
+        for row in nickname_rows:
+            user_id = str(row["user_id"])
+            alias_text = str(row["nickname"] or "").strip()
+            if not alias_text:
+                continue
+            aliases_by_user.setdefault(user_id, []).append(alias_text)
+
+        matched = []
+        seen = set()
+        for row in player_rows:
+            user_id = str(row["user_id"])
+            if user_id in seen:
+                continue
+            current_nickname = str(row["nickname"] or "").strip()
+            alias_list = []
+            alias_seen = set()
+            for alias in aliases_by_user.get(user_id, []):
+                alias_text = str(alias or "").strip()
+                if not alias_text or alias_text in alias_seen:
+                    continue
+                alias_seen.add(alias_text)
+                alias_list.append(alias_text)
+            hit_alias = next((alias for alias in alias_list if alias in text), None)
+            if not hit_alias:
+                continue
+            seen.add(user_id)
+            matched.append((user_id, current_nickname, hit_alias))
+
+        results = []
+        for user_id, current_nickname, alias_text in matched[:limit]:
+            row = conn.execute(
+                "SELECT message, timestamp FROM messages WHERE group_id = ? AND user_id = ? ORDER BY timestamp DESC LIMIT 1",
+                (group_id, user_id),
+            ).fetchone()
+            if not row:
+                continue
+            results.append({
+                "user_id": str(user_id),
+                "nickname": current_nickname,
+                "alias": alias_text,
+                "message": row[0],
+                "timestamp": row[1],
+            })
+        conn.close()
+        return results
+    except Exception:
+        return []
+
+
 async def should_update_profile(user_id: str, group_id: str, message_count: int) -> bool:
     """判断是否需要触发画像更新"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -654,15 +787,19 @@ async def update_user_profile(user_id: str, group_id: str, nickname: str, level:
     )
 
     # 构建分析 prompt
-    prompt = PROFILE_ANALYSIS_PROMPT.format(
-        current_profile=current_profile,
-        count=len(rows),
-        recent_messages=recent_messages,
-        nickname=nickname,
-        level=level,
-        favorability=favorability,
-        now=now,
-        total_count=total_count
+    prompt = get_prompt(
+        "profile.analysis",
+        PROFILE_ANALYSIS_PROMPT,
+        variables={
+            "current_profile": current_profile,
+            "count": len(rows),
+            "recent_messages": recent_messages,
+            "nickname": nickname,
+            "level": level,
+            "favorability": favorability,
+            "now": now,
+            "total_count": total_count,
+        },
     )
 
     # 调用 LLM 进行画像分析
@@ -781,6 +918,71 @@ async def save_message(user_id: str, group_id: str, message: str):
             (user_id, group_id, message, now)
         )
         await db.commit()
+
+
+RECENT_GROUP_CONTEXT_LIMIT = 15
+RECENT_GROUP_CONTEXT_MAX_MESSAGE_CHARS = 120
+
+
+def _truncate_context_message(message: str, max_chars: int = RECENT_GROUP_CONTEXT_MAX_MESSAGE_CHARS) -> str:
+    text = str(message or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "…"
+
+
+def format_recent_group_context(rows: list, max_message_chars: int = RECENT_GROUP_CONTEXT_MAX_MESSAGE_CHARS) -> str:
+    if not rows:
+        return ""
+
+    lines = [
+        "【最近群聊上下文（由旧到新）】：",
+    ]
+    for row in rows:
+        ts = datetime.fromtimestamp(int(row["timestamp"])).strftime("%m月%d日 %H:%M")
+        nickname = str(row.get("nickname") or row.get("user_id") or "未知球员").strip()
+        message = _truncate_context_message(str(row.get("message") or ""), max_message_chars)
+        if not message:
+            continue
+        lines.append(f"- {ts} {nickname}：{message}")
+
+    if len(lines) == 1:
+        return ""
+
+    lines.append("")
+    lines.append("请优先用这段最近群聊上下文解析‘那/这个/他/谁/内奸/反贼’等短距离指代，再结合长期记忆回答。")
+    return "\n".join(lines)
+
+
+async def get_recent_group_messages(group_id: str, limit: int = RECENT_GROUP_CONTEXT_LIMIT) -> list:
+    if not group_id or group_id == "private":
+        return []
+
+    safe_limit = max(1, min(int(limit or RECENT_GROUP_CONTEXT_LIMIT), 30))
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT user_id, group_id, nickname, message, timestamp
+            FROM daily_messages
+            WHERE group_id = ? AND TRIM(message) != ''
+            ORDER BY timestamp DESC, id DESC
+            LIMIT ?
+            """,
+            (str(group_id), safe_limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    items = [dict(row) for row in rows]
+    items.reverse()
+    return items
+
+
+def append_recent_group_context(messages: list, recent_rows: list) -> None:
+    context_block = format_recent_group_context(recent_rows)
+    if context_block:
+        messages[0]["content"] += "\n\n" + context_block + "\n"
+
 
 async def get_user_profile(user_id: str, group_id: str) -> dict:
     """获取用户完整档案"""
@@ -938,6 +1140,24 @@ async def get_player_data(user_id: str, group_id: str, nickname: str):
                               (user_id, group_id)) as cursor:
             row = await cursor.fetchone()
     return (row[0], row[1]) if row else ("青训生", 0)
+
+
+async def get_known_aliases(user_id: str, group_id: str, nickname: str) -> list:
+    aliases = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT nickname FROM nicknames WHERE user_id = ? AND group_id = ? ORDER BY last_seen DESC LIMIT 10",
+            (user_id, group_id)
+        ) as cursor:
+            rows = await cursor.fetchall()
+    seen = set()
+    for item in [nickname] + [row[0] for row in rows if row and row[0]]:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        aliases.append(text)
+    return aliases
 
 
 async def apply_favor_change(user_id: str, group_id: str, nickname: str, inc: int, is_admin: bool = False):
@@ -1148,6 +1368,8 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
 
     user_id, group_id = event.get_user_id(), str(event.group_id) if isinstance(event, GroupMessageEvent) else "private"
     nickname = event.sender.card or event.sender.nickname or "未知球员"
+    if isinstance(event, GroupMessageEvent):
+        await refresh_group_name(bot, group_id, getattr(event, "group_name", ""))
 
     # 保存发言记录（仅非自定义 prompt 时）
     if not custom_prompt:
@@ -1252,7 +1474,7 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
 
     # --- Function Calling 版本：简化 Base Prompt，数据由 LLM 按需通过 tool use 获取 ---
     base_prompt = (
-        f"{ARTETA_PROMPT}\n\n"
+        f"{get_prompt('arteta.main', ARTETA_PROMPT)}\n\n"
         f"【背景信息】：\n当前时间：{current_time}\n群号：{group_id}\n{quoted_text}{img_analysis}\n"
         f"当前提问球员：{nickname}，身份：{lvl}，当前信任度：{fav}。\n"
         f"{current_squad}\n"
@@ -1272,6 +1494,17 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
         user_message = f"{prompt}\n\n【引用的消息】：{quoted_text.replace('【引用消息链（由旧到新）】：', '').strip()}"
 
     messages = [{"role": "system", "content": base_prompt}]
+    recent_group_messages = await get_recent_group_messages(group_id, RECENT_GROUP_CONTEXT_LIMIT)
+    append_recent_group_context(messages, recent_group_messages)
+
+    # 优先补充“某人今天说了什么”这类按别名追问的最近发言
+    recent_alias_messages = find_recent_messages_by_alias(group_id, user_message)
+    if recent_alias_messages:
+        recent_lines = []
+        for item in recent_alias_messages:
+            ts = datetime.fromtimestamp(item["timestamp"]).strftime("%m月%d日 %H:%M")
+            recent_lines.append(f"- {ts} {item['nickname']}（别名：{item['alias']}）说：{item['message']}")
+        messages[0]["content"] += "\n\n【按别名命中的最近发言】：\n" + "\n".join(recent_lines) + "\n"
 
     # 从 ChromaDB 检索本群相关历史记忆
     memory_contexts = memory_store.query_memories(group_id, user_message)
@@ -1280,13 +1513,22 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
         memory_banner = f"\n\n【相关历史对话（本群）】：\n{memory_block}\n"
         messages[0]["content"] += memory_banner
 
+    direct_football_news_answer = await maybe_answer_football_news_directly(user_message)
+    football_news_context = await maybe_search_football_news_for_prompt(user_message)
+    if football_news_context:
+        messages[0]["content"] += football_news_context
+
     messages.append({"role": "user", "content": user_message})
 
     # 立即发送提示消息（不阻塞心跳）
     async def delayed_response():
         print(f"[delayed_response] 后台任务开始 group={group_id} user={user_id}")
         try:
-            answer = await asyncio.wait_for(run_tool_loop(messages), timeout=90.0)
+            if direct_football_news_answer:
+                print(f"[FootballNews] direct answer used group={group_id} user={user_id}")
+                answer = direct_football_news_answer
+            else:
+                answer = await asyncio.wait_for(run_tool_loop(messages), timeout=90.0)
         except asyncio.TimeoutError:
             print(f"[delayed_response] 超时 group={group_id} user={user_id}")
             await bot.send(event, Message("⏰ 教练这次思考太久，重新说一遍？"))
@@ -1339,7 +1581,15 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
                 if await should_update_profile(user_id, group_id, msg_count):
                     asyncio.create_task(update_user_profile(user_id, group_id, nickname, lvl, fav))
 
-                memory_store.add_memory(group_id, user_id, user_message, answer)
+                known_aliases = await get_known_aliases(user_id, group_id, nickname)
+                memory_store.add_memory(
+                    group_id,
+                    user_id,
+                    user_message,
+                    answer,
+                    nickname=nickname,
+                    aliases=known_aliases,
+                )
 
                 # 好感度变动红字（由代码保证总是显示）
                 if inc > 0:
@@ -1486,27 +1736,50 @@ async def handle_algo(bot: Bot, event: MessageEvent):
             raw_text = raw_text[len(cmd):].strip()
             break
 
-    if not raw_text:
+    # 解析引用消息链（含被引用消息中的图片识别结果），与 process_chat 行为一致
+    reply_id = None
+    for seg in event.get_message():
+        if seg.type == "reply":
+            reply_id = seg.data.get("id")
+            break
+    if not reply_id:
+        reply_obj = getattr(event, "reply", None)
+        if reply_obj:
+            reply_id = getattr(reply_obj, "message_id", None)
+
+    quoted_context = ""
+    if reply_id:
+        try:
+            chain_text = await fetch_quoted_chain(bot, int(reply_id))
+            if chain_text:
+                quoted_context = "\n\n【引用消息】：\n" + chain_text
+        except Exception as e:
+            logger.warning(f"[algo] fetch_quoted_chain 失败: {e}")
+
+    if not raw_text and not quoted_context:
         await algo_cmd.finish("把你需要解决的问题写在白板上！")
         return
 
-    # 分析消息中的图片
+    # 分析当前消息中的图片
     img_analysis = ""
     img_urls = [s.data.get("url") for s in event.get_message() if s.type == "image" and s.data.get("url")]
     if img_urls:
         descs = await asyncio.gather(*[analyze_image(u) for u in img_urls])
         img_analysis = "\n\n【用户发送的图片内容】：" + "；".join(descs)
 
-    algo_prompt = (
+    user_text = raw_text + quoted_context + img_analysis
+
+    default_algo_prompt = (
         "【技术指导】对方提交了技术问题，用教练指导球员口头说话的方式解答。\n"
         "【数学公式硬性规定】短公式/行内公式用单个 $ 包裹（如 $f(x) = x^2$），"
         "长公式/独立公式用双 $$ 包裹（如 $$\\int_a^b f(x)dx$$、$$\\frac{{dy}}{{dx}}$$）。"
         "这是死命令，不遵守会让球员看不懂战术板！\n"
         "【代码硬性规定】如果涉及代码，用 ``` 代码块包裹展示。\n"
-        "绝对不要加小标题和列表符：\n" + raw_text + img_analysis
+        "绝对不要加小标题和列表符：\n"
     )
+    algo_prompt = get_prompt("algo.coach", default_algo_prompt) + user_text
 
-    answer = await call_algo_llm(algo_prompt, raw_text + img_analysis)
+    answer = await call_algo_llm(algo_prompt, user_text)
 
     if answer:
         try:

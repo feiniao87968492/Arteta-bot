@@ -25,7 +25,7 @@ AI 对话的核心流程如下：
   │
   ▼
 on_command 触发（匹配 "A"/"塔子"/"阿尔特塔" 前缀）
-  │  或 on_message 触发（rule=to_me()，即 @机器人）
+  │  或 on_message 触发（rule=_message_mentions_bot，即 @机器人 / reply 后 @机器人）
   │
   ▼
 process_chat(bot, event, custom_prompt)
@@ -94,14 +94,16 @@ profile_cmd= on_command("档案", aliases={"profile", "个人档案"}, priority=
 refresh_cmd= on_command("刷新情报", priority=4, block=True)               # 清除缓存强制刷新
 
 # @机器人触发（无前缀的被动唤醒）
-at_cmd = on_message(rule=to_me(), priority=11, block=True)
+at_cmd = on_message(rule=_message_mentions_bot, priority=11, block=True)
 ```
 
 **指令路由规则**：
 
 - `chat_cmd` (priority=10)：匹配以 `A`/`a`/`塔子`/`阿尔特塔` 开头的消息，调用 `process_chat()`
-- `at_cmd` (priority=11)：当 `@机器人` 时触发，但会跳过以 `A`/`a`/`/` 开头的消息（避免与 chat_cmd 重复处理）
-- `algo_cmd` (priority=9)：独立子系统，调用 GPT-5.5 模型处理算法/数学/代码问题，不经过 Function Calling 流程
+- `at_cmd` (priority=11)：当消息开头/结尾 `@机器人`，或原始消息中存在 `reply` 后紧跟 `@机器人` 时触发；会跳过以 `A`/`a`/`/` 开头的消息（避免与 chat_cmd 重复处理）
+- `algo_cmd` (priority=9)：独立子系统，调用 GPT-5.5 模型处理算法/数学/代码问题，不经过 Function Calling 流程；与 `process_chat` 行为一致——会解析消息中的 `reply` 段或 `event.reply`，调用 `fetch_quoted_chain` 把被引用消息（含其中图片的 vision 识别结果、嵌套引用、合并转发内容）拼成 `【引用消息】：...` 块和当前消息一起喂给 LLM。这覆盖"引用一张题目图片 + `/算法 这道题怎么做`"的常见场景；纯命令无内容也无引用时返回 `把你需要解决的问题写在白板上！`
+
+`at_cmd` 不直接使用 NoneBot 的 `to_me()` 作为 matcher rule，而是使用 `_message_mentions_bot(event)`。原因是 OneBot v11 的 reply 预处理会移除 `reply` 段以及紧随其后的 `at` 段；当用户“回复自己的图片 + @机器人”时，`event.to_me` 不会被置为 `True`，只看处理后的消息会漏触发。自定义规则会同时检查 `event.original_message` 和 `event.get_message()`，覆盖 reply+@ 的图片追问场景，同时避免匹配正文中间随手 @机器人的普通讨论。
 
 ---
 
@@ -252,7 +254,8 @@ async def run_tool_loop(user_messages: List[dict]) -> str:
    - 如果包含 → 对每个 `tool_call` 调用 `execute_tool_call()`
    - 将执行结果以 `{"role": "tool", "tool_call_id": "...", "content": "..."}` 格式追加回 messages
    - 进入下一轮
-3. **超过 5 轮强制退出**：返回最后一条消息的内容
+3. **空最终回复重试**：如果 LLM 没有 `tool_calls` 但 `content` 为空，会追加一条用户消息 `请直接给出最终回复，不要返回空内容。` 并继续下一轮，避免上层收到空字符串
+4. **超过 5 轮强制退出**：返回最后一条消息的内容
 
 ### call_deepseek_tool
 
@@ -314,6 +317,16 @@ asyncio.create_task(delayed_response())
 ```python
 answer = await asyncio.wait_for(run_tool_loop(messages), timeout=90.0)
 ```
+
+真正触发 90s 超时时，用户会收到 `⏰ 教练这次思考太久，重新说一遍？`。如果用户收到 `让我想想再回答你。`，说明 `run_tool_loop()` 返回了空答案，而不是超时；当前实现会先在工具循环内对空 `content` 做一次继续追问，仍为空时才进入这个兜底分支。
+
+### 回归测试
+
+相关行为由以下测试覆盖：
+
+- `tests/test_arteta_chat_vision.py`：覆盖 Vision 请求格式、响应解析，以及 reply+@ 触发规则
+- `tests/test_arteta_tools.py`：覆盖 DeepSeek 最终回复 `content` 为空时的重试
+- `tests/test_arteta_football_news.py`：覆盖图片理解问题不会被足球新闻直答逻辑误拦截
 
 ### WebSocket 心跳
 

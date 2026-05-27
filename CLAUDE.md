@@ -13,13 +13,15 @@ arteta_bot/
 │
 ├── plugins/               # 所有功能插件（核心代码）
 │   ├── arteta_chat.py     # AI 对话核心 + 好感度 + 渲染路由
-│   ├── arteta_tools.py    # Function Calling 工具 (7个)
+│   ├── arteta_tools.py    # Function Calling 工具 (8个)
 │   ├── arteta_memory.py   # ChromaDB 向量记忆
+│   ├── arteta_vision.py   # 纯 vision API 调用层（不依赖 NoneBot，dashboard 共用）
 │   ├── arteta_mute.py     # 塔闭嘴/塔说话 群静音开关
 │   ├── arteta_render.py   # 图片渲染引擎 (PIL + Playwright)
 │   ├── arteta_knowledge.py # 本地知识库检索
 │   ├── arteta_daily.py    # 每日群聊总结
 │   ├── arteta_weekly.py   # 阿森纳周报（爬虫 + LLM）
+│   ├── arteta_football_news.py # 全局足球新闻向量库（定时抓取 + ChromaDB）
 │   ├── arteta_swear.py    # 誓言系统
 │   ├── arteta_like.py     # QQ 名片赞
 │   ├── arteta_image.py    # AI 图片生成
@@ -72,14 +74,15 @@ arteta_bot/
 | get_pl_table | 积分榜/排名 | football-data.org |
 | get_arsenal_injuries | 伤病名单 | football-data.org |
 | search_news(q) | 新闻/转会 | DuckDuckGo |
+| search_football_news(query, category, days) | 最近英超/欧冠/五大联赛/中超新闻 | ChromaDB `football_news` collection |
 | get_football_knowledge(topic) | 战术/知识 | knowledge_base/ |
 | get_group_members(group_id) | 群成员列表 | SQLite |
 | get_member_relations(group_id, user_id) | 成员关系 | SQLite |
 
 ### 数据库
 
-- **`arsenal_data.db`** (SQLite): players, nicknames, messages, profile_updates, member_relations, daily_likes, daily_messages
-- **`chroma_db/`** (ChromaDB): `group_memories` collection, all-MiniLM-L6-v2 384维
+- **`arsenal_data.db`** (SQLite): players, nicknames, messages, profile_updates, member_relations, daily_likes, daily_messages, football_news_items
+- **`chroma_db/`** (ChromaDB): `group_memories`、`football_news` collections, all-MiniLM-L6-v2 384维
 - **`data/arteta_swears.json`**: 誓言存储
 
 ### 日志系统（bot.py）
@@ -136,7 +139,7 @@ supervisorctl tail -f arteta_bot
 
 - 新增本地验证入口：`tools/verify_features.py`
 - 默认输出目录：`artifacts/verify/<timestamp>/`
-- 已支持 suites：`core`、`all`、`render`、`memory`、`chat`、`commands`、`online`
+- 已支持 suites：`core`、`all`、`render`、`memory`、`chat`、`commands`、`football_news`、`online`
 - 已补充 fixtures：`tests/fixtures/markdown/`、`tests/fixtures/knowledge/`、`tests/fixtures/images/`
 - 已抽出可复用 helper：
   - `plugins/arteta_image.py` → `preprocess_reference_image()`
@@ -163,10 +166,18 @@ python tools/verify_features.py
 python tools/verify_features.py --suite all
 python tools/verify_features.py --suite core --online
 python tools/verify_features.py --suite render --case html_to_image
+python tools/verify_features.py --suite football_news
 python tools/verify_features.py --list-suites
 ```
 
 对应说明文档：`Docs/dev/developer-verification.md`
+
+### Dashboard 与 Bot 共用 Vision（2026-05-27）
+
+- `plugins/arteta_vision.py` 是无 NoneBot 依赖的 vision 模块；`plugins/arteta_chat.py` 与 `dashboard/api/services/bot_chat_service.py` 都从这里导入 `analyze_image_base64` / `VisionConfig`
+- Dashboard 是独立 uvicorn 进程，**不要**让它直接 import `plugins.arteta_chat` 或其它带 `on_command()` 的 plugin —— 会触发 `NoneBot has not been initialized` 500
+- `dashboard/api/services/prompt_service.py` `DEFAULT_PROMPTS` 内置 6 段默认 prompt content；`get_prompt(...)` 仍以调用方传入的 `default` 参数为准，避免 service content 与 plugin 常量漂移
+- `/算法` 命令的 reply 引用图片现在会经 `fetch_quoted_chain` 解析（与 `process_chat` 一致）
 
 ## 修改后 Checklist
 

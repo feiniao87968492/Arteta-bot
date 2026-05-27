@@ -5,6 +5,125 @@
 
 ## 修改记录
 
+### 2026-05-27: Dashboard 图片输入、好感度调整、Prompt 默认值与 /算法 引用图片
+
+**问题描述**：
+- 用户在 QQ 群引用一张题目图片 + `/算法 这道题怎么做` 时，机器人答非所问。检查日志发现 `handle_algo` 只读取当前消息中的 image 段，完全没有解析 reply 引用消息，LLM 拿到的 user 内容只有"这道题怎么做"。
+- Dashboard "机器人对话"栏目仅支持文本输入，无法验证 vision 链路。
+- Dashboard "群组档案"只能查看好感度，不能修改；缺少与机器人主程序一致的等级阈值表。
+- Dashboard "Prompt 人设"栏目打开时右侧文本框是空白，不方便对照修改代码默认 prompt。
+
+**修改方案**：
+
+#### 1. `plugins/arteta_chat.handle_algo` 接入引用消息链
+- 检测当前消息中的 `reply` 段或 `event.reply.message_id`，调用 `fetch_quoted_chain(bot, reply_id)`，把被引用消息（含 vision 识别结果、嵌套引用、合并转发）拼成 `【引用消息】：...` 块和当前消息一起喂给 LLM。
+- `default_algo_prompt` 末尾不再拼 `user_text`；改成 `get_prompt("algo.coach", default_algo_prompt) + user_text`，与 dashboard `_reply_algo` 对齐，registry content 才能保持纯前缀模板。
+
+#### 2. 抽出 `plugins/arteta_vision.py`
+- 把 `_detect_image_format`、`_call_vision_api`、`analyze_image_base64` 等纯 vision 工具搬到独立模块，配 `VisionConfig` dataclass，不 import NoneBot。
+- `plugins/arteta_chat.py` 从 `arteta_vision` re-export 这些函数，运行时用 `_build_vision_config()` 注入 `.env` 配置；对外 API 不变。
+- Dashboard `bot_chat_service.py` 直接从 `plugins.arteta_vision` 导入，自己从 `.env` 构造 VisionConfig，与 NoneBot 解耦——之前的 lazy import 在请求触发时仍会拉起 `plugins.arteta_mute` 的 `on_command()`，导致 Dashboard 这条独立 uvicorn 进程报 `NoneBot has not been initialized` 500。
+
+#### 3. Dashboard "机器人对话"图片输入
+- 前端 `BotChatPage.tsx` 加文件选择 + 缩略图列表，`FileReader.readAsDataURL` 转 base64 data URL，最多 4 张、单张 ≤ 6 MB。
+- 后端 `BotChatRequest` 新增 `images: List[str]`，`BotChatService.reply()` 接受 `images` kw arg；新辅助 `_validate_image_data_url` / `_describe_images` 校验后并发调 vision，`【用户发送的图片内容】：...` 块同时进 prompt 和 ChromaDB memory。
+- `message` 与 `images` 至少一个非空才接受；纯图片请求也能走通。
+
+#### 4. Dashboard 好感度修改系统
+- `dashboard/api/services/sqlite_service.py` 新增 `update_user_favor(group_id, user_id, *, favor=None, delta=None, nickname=None)`，按 `FAVOR_LEVEL_THRESHOLDS`（与机器人一致）派生 level；不存在的 player 行自动 INSERT。
+- `dashboard/api/routers/groups.py` 新增 `POST /api/groups/{group_id}/users/{user_id}/favor`，readonly 拦截、群密码检查、`favor.set` / `favor.delta` 审计写入。
+- 前端 `GroupsPage.tsx` 用户档案区新增「信任度调整」面板：直接设值（含负值）、增减（正整数 ±）；提交后乐观更新右栏 detail 与左栏列表。
+
+#### 5. Prompt 编辑器默认 content 注入
+- `dashboard/api/services/prompt_service.py` 把 `arteta.main / arteta.dashboard_chat / profile.analysis / daily.summary / weekly.report / algo.coach` 六段代码默认 prompt 复制到模块顶部常量并塞进 `DEFAULT_PROMPTS[*].content`。
+- `_merged_entries(include_builtin_defaults=True)` 给 list 接口（前端展示）暴露内置默认 content；`get_prompt(...)` 用 `include_builtin_defaults=False`，运行时仍以调用方传入的 `default` 参数为准——避免 service content 与 plugin 常量漂移。
+- registry 里的空字符串视为"未覆盖"，不会吞掉默认显示。
+
+**测试覆盖**：
+- `tests/dashboard/test_bot_chat.py` 新增图片描述拼接、纯图片请求、非法图片 data URL 拒绝。
+- `tests/dashboard/test_groups_api.py` 新增 favor 设值/增减/校验/readonly 拦截 4 条用例。
+- `tests/dashboard/test_prompt_service.py` 新增 list 暴露内置默认 content / get_prompt 仍以调用方 default 为准 2 条用例。
+- `tests/test_arteta_chat_vision.py` 改为直接 import `plugins.arteta_vision`，不再用 source 切片 exec。
+
+**部署状态**：
+- 已上传 `plugins/arteta_chat.py`、`plugins/arteta_vision.py`、`dashboard/api/services/{bot_chat_service,prompt_service,sqlite_service}.py`、`dashboard/api/routers/{bot_chat,groups}.py`、`dashboard/web/dist/*` 到 `/opt/arteta_bot/`。
+- 重启 `arteta_bot` 与 `arteta_dashboard` 成功，dashboard `/api/health` ok。
+
+---
+
+### 2026-05-21: 修复群体记忆按别名追问失效
+
+**问题描述**：
+- 在群 `1104602373` 中，用户追问“今天飞鸟说他干了什么”时，机器人没有稳定回忆到对应发言。
+- 初看像是 ChromaDB 群体记忆失效，但线上检查后发现并不是“没写入”，而是“按人追问命中弱”。
+
+**排查结论**：
+- ChromaDB 在线上处于可用状态，collection `group_memories` 可正常初始化和查询。
+- 原始记忆 document 只保存 `User` 和 `Assistant`，没有显式保存说话人 ID、当前昵称、别名。
+- 因此像“飞鸟说了什么”这样的 query，若历史 document 里只存“今天我踢球了”，语义命中会偏弱。
+- 进一步检查线上数据后又发现一个真实缺口：`飞鸟` 这个别名存在于 `players.profile_json.nicknames`，但不在 `nicknames` 表中；如果补充链路只查 `nicknames`，线上这条数据仍会漏掉。
+
+**修改方案**：
+
+#### 1. 强化新写入的 ChromaDB 记忆文本
+- 文件：`plugins/arteta_memory.py`
+- 新增 `build_memory_document()`
+- 新写入 document 改为保存：
+  - `Speaker ID`
+  - `Speaker Nickname`
+  - `Speaker Aliases`
+  - `User`
+  - `Assistant`
+
+这样后续新记忆对“谁说过什么”的语义检索更友好。
+
+#### 2. 增加按别名查最近发言的补充链路
+- 文件：`plugins/arteta_chat.py`
+- 新增 / 调整 `find_recent_messages_by_alias()`
+
+补充链路逻辑：
+- 仅当用户问题里出现“说”这类按人追问语义时触发。
+- 先从 `players` 读取当前昵称和 `profile_json.nicknames`。
+- 再从 `nicknames` 表追加历史别名。
+- 任一别名命中查询文本后，返回该用户最近一条 `messages` 记录。
+- 命中结果会以 `【按别名命中的最近发言】` banner 注入 system prompt。
+
+这条链路解决旧数据也能立刻回忆的问题，不必等待全部历史记忆重建。
+
+#### 3. 测试覆盖
+- 文件：`tests/test_arteta_memory.py`
+- 新增并通过以下回归测试：
+  1. `build_memory_document()` 会写入说话人身份和别名
+  2. `find_recent_messages_by_alias()` 能命中 `nicknames` 表中的别名
+  3. `find_recent_messages_by_alias()` 在别名仅存在于 `profile_json.nicknames` 时仍能命中最近发言
+
+本地验证命令：
+
+```bash
+python -m unittest tests.test_arteta_memory
+```
+
+**部署与线上验证**：
+- 已上传并重启：`plugins/arteta_memory.py`、`plugins/arteta_chat.py`
+- 服务状态：`arteta_bot RUNNING`
+- 使用线上虚拟环境验证：
+  - `memory_ready=True`
+  - `collection_name=group_memories`
+  - `collection_count=904`
+- 使用线上只读 SQL/逻辑复核目标场景：
+  - 查询：`今天飞鸟说他干了什么`
+  - 命中结果：
+    - `user_id=2648955710`
+    - `nickname=Oiseaux Volants`
+    - `alias=飞鸟`
+    - `message=今天我踢球了`
+
+**当前结论**：
+- 问题已定位并修复。
+- 线上运行中的代码、数据库数据和记忆链路已对这次别名追问场景完成验证。
+
+---
+
 ### 2026-05-04: 实现个人档案系统
 
 **问题描述**：
