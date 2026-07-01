@@ -38,6 +38,7 @@ def _build_vision_config_from_env() -> VisionConfig:
         vision_model=_val("VISION_MODEL", "gpt-4o-mini"),
         image_api_key=image_api_key,
         image_api_url=image_api_url,
+        vision_timeout=float(_val("VISION_TIMEOUT", "60.0")),
     )
 
 
@@ -176,6 +177,7 @@ class BotChatService:
         register_config(
             football_api_token=self._setting_value(env_values, "FOOTBALL_API_TOKEN"),
             deepseek_api_key=deepseek_api_key,
+            deepseek_model=self._setting_value(env_values, "DEEPSEEK_MODEL") or "deepseek-v4-pro",
             arsenal_id=57,
             has_web_search=True,
         )
@@ -327,6 +329,19 @@ class BotChatService:
             )
             algo_prompt = get_prompt("algo.coach", default_algo_prompt) + user_text
             answer = await call_algo_llm(algo_prompt, user_text)
+        # 将 Dashboard 算法问答也存入记忆
+        if answer and answer != "把你需要解决的问题写在白板上！":
+            try:
+                memory_store.add_memory(
+                    clean_group_id,
+                    clean_user_id,
+                    user_text,
+                    answer,
+                    nickname=clean_nickname,
+                    aliases=[],
+                )
+            except Exception:
+                pass
         reply_image = await self._render_reply_image(answer)
         return {
             "reply": answer,

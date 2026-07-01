@@ -14,17 +14,64 @@ DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 # --- 配置（在运行时由 register_config() 注入）---
 FOOTBALL_API_TOKEN = ""
 DEEPSEEK_API_KEY = ""
+DEEPSEEK_MODEL = "deepseek-v4-pro"
 ARSENAL_ID = 57
 HAS_WEB_SEARCH = False
 
 
 def register_config(**kwargs):
     """在 bot 启动时注入全局配置"""
-    global FOOTBALL_API_TOKEN, DEEPSEEK_API_KEY, ARSENAL_ID, HAS_WEB_SEARCH
+    global FOOTBALL_API_TOKEN, DEEPSEEK_API_KEY, DEEPSEEK_MODEL, ARSENAL_ID, HAS_WEB_SEARCH
     FOOTBALL_API_TOKEN = kwargs.get("football_api_token", "")
     DEEPSEEK_API_KEY = kwargs.get("deepseek_api_key", "")
+    DEEPSEEK_MODEL = kwargs.get("deepseek_model", "deepseek-v4-pro")
     ARSENAL_ID = kwargs.get("arsenal_id", 57)
     HAS_WEB_SEARCH = kwargs.get("has_web_search", False)
+
+
+FOOTBALL_NEWS_CATEGORY_KEYWORDS = [
+    ("premier_league", ["英超", "曼联", "曼城", "利物浦", "切尔西", "热刺", "阿森纳"]),
+    ("champions_league", ["欧冠", "冠军杯", "冠军联赛"]),
+    ("laliga", ["西甲", "皇马", "巴萨", "马竞"]),
+    ("serie_a", ["意甲", "尤文", "国米", "米兰", "罗马", "那不勒斯"]),
+    ("bundesliga", ["德甲", "拜仁", "多特", "勒沃库森"]),
+    ("ligue1", ["法甲", "巴黎", "马赛", "里昂", "摩纳哥"]),
+    ("chinese_super_league", ["中超", "国安", "申花", "海港", "泰山", "蓉城"]),
+]
+
+
+def detect_football_news_query(query: str):
+    text = query or ""
+    image_question_keywords = ["这张图", "这个图", "图片", "图里", "截图", "照片", "看图", "图讲", "图说"]
+    if any(word in text for word in image_question_keywords):
+        return None
+    if not any(word in text for word in ["新闻", "消息", "动态", "最近", "最新", "怎么样", "有什么"]):
+        return None
+    for category, keywords in FOOTBALL_NEWS_CATEGORY_KEYWORDS:
+        if any(keyword in text for keyword in keywords):
+            return text, category
+    if "五大联赛" in text or "足球" in text:
+        return text, None
+    return None
+
+
+async def maybe_search_football_news_for_prompt(query: str) -> str:
+    return ""
+
+
+def format_football_news_direct_answer(query: str, search_result: str) -> str:
+    if not search_result or "没有找到符合时间范围" in search_result or "尚未初始化" in search_result or "检索失败" in search_result:
+        return "教练查了本地足球新闻库，这个分类最近还没有可靠新闻入库。\n\n【好感度=】"
+    lines = [line.strip() for line in search_result.splitlines() if line.strip()]
+    highlights = lines[:5]
+    body = "教练刚查了本地足球新闻库，最新能看到这些：\n\n" + "\n".join(highlights)
+    body += "\n\n重点是：这些是已经同步进本地向量库的新闻，不是我凭印象编的。"
+    body += "\n\n【好感度+】"
+    return body
+
+
+async def maybe_answer_football_news_directly(query: str) -> str:
+    return ""
 
 
 # --- 工具定义（DeepSeek / OpenAI 格式）---
@@ -149,7 +196,7 @@ async def call_deepseek_tool(messages: List[dict]) -> List[dict]:
             "https://api.deepseek.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
             json={
-                "model": "deepseek-v4-flash",
+                "model": DEEPSEEK_MODEL,
                 "messages": messages,
                 "tools": TOOLS,
                 "tool_choice": "auto"
@@ -214,8 +261,11 @@ async def run_tool_loop(user_messages: List[dict]) -> str:
 
         last = resp_msgs[-1]
         if "tool_calls" not in last or not last["tool_calls"]:
-            # LLM 返回了最终回复
-            return last.get("content", "")
+            content = (last.get("content") or "").strip()
+            if content:
+                return content
+            messages.append({"role": "user", "content": "请直接给出最终回复，不要返回空内容。"})
+            continue
 
         # 执行所有 tool call
         for tc in last["tool_calls"]:
@@ -354,6 +404,23 @@ async def _search_news(q: str) -> str:
     except Exception as e:
         print(f"[Tool Error] _search_news: {e}")
         return "[搜索失败]"
+
+
+async def _search_football_news(query: str, category=None, days: int = 14) -> str:
+    """查询本地足球新闻向量库。"""
+    try:
+        from plugins.arteta_football_news import FootballNewsChromaStore, CHROMA_DB_DIR
+        store = FootballNewsChromaStore(CHROMA_DB_DIR)
+        store.initialize()
+        try:
+            safe_days = int(days)
+        except (TypeError, ValueError):
+            safe_days = 14
+        category_value = str(category).strip() if category else None
+        return store.search(query=query, category=category_value, days=safe_days)
+    except Exception as e:
+        print(f"[Tool Error] _search_football_news: {e}")
+        return "足球新闻库暂时不可用。"
 
 
 async def _get_group_members(group_id: str) -> str:

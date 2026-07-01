@@ -27,6 +27,30 @@ MAX_DOC_LENGTH = 1000  # 单条记忆的最大字符数
 N_RESULTS = 5  # 每次检索返回条数
 
 
+def _dedupe_aliases(nickname: str, aliases: list) -> list:
+    seen = set()
+    normalized = []
+    for item in [nickname] + list(aliases or []):
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def build_memory_document(user_id: str, nickname: str, aliases: list, user_msg: str, assistant_reply: str) -> str:
+    alias_list = _dedupe_aliases(nickname, aliases)
+    alias_text = "、".join(alias_list) if alias_list else nickname
+    return (
+        f"Speaker ID: {user_id}\n"
+        f"Speaker Nickname: {nickname}\n"
+        f"Speaker Aliases: {alias_text}\n"
+        f"User: {user_msg}\n"
+        f"Assistant: {assistant_reply}"
+    )
+
+
 class MemoryStore:
     """ChromaDB 记忆存储封装，全局单例"""
 
@@ -52,14 +76,27 @@ class MemoryStore:
             self._ready = False
             logger.error(f"[MemoryStore] ChromaDB 初始化失败: {e}")
 
-    def add_memory(self, group_id: str, user_id: str, user_msg: str, assistant_reply: str):
-        """将一轮对话存入 ChromaDB"""
+    def add_memory(self, group_id: str, user_id: str, user_msg: str, assistant_reply: str,
+                   nickname: str = "", aliases: list = None):
+        """将一轮对话存入 ChromaDB，确保 User 和 Assistant 两部分都被保留。"""
         if not self._ready:
             return
 
-        content = f"User: {user_msg}\nAssistant: {assistant_reply}"
+        content = build_memory_document(user_id, nickname or user_id, aliases or [], user_msg, assistant_reply)
         if len(content) > MAX_DOC_LENGTH:
-            content = content[:MAX_DOC_LENGTH]
+            # 不再简单从末尾截断（会丢掉 Assistant 发言），改为分别截断两部分
+            header = build_memory_document(user_id, nickname or user_id, aliases or [], "", "")
+            header_len = len(header)
+            available = MAX_DOC_LENGTH - header_len
+            # 给 Assistant 留更多空间（60%），因为大模型回复通常比用户消息更长
+            user_budget = max(20, int(available * 0.4))
+            asst_budget = max(20, available - user_budget)
+            truncated_user = user_msg[:user_budget] + ("..." if len(user_msg) > user_budget else "")
+            truncated_asst = assistant_reply[:asst_budget] + ("..." if len(assistant_reply) > asst_budget else "")
+            content = build_memory_document(user_id, nickname or user_id, aliases or [], truncated_user, truncated_asst)
+            # 兜底：如果仍然超长（罕见），再从末尾硬截断
+            if len(content) > MAX_DOC_LENGTH:
+                content = content[:MAX_DOC_LENGTH]
 
         ts = time.time()
         doc_id = f"{group_id}_{int(ts)}_{user_id[-8:]}"
@@ -103,6 +140,25 @@ class MemoryStore:
             formatted.append(f"--- {date_str} ---\n{doc}")
 
         return formatted
+
+    def clear_group_memories(self, group_id: str) -> int:
+        """清除指定群的长期对话记忆，返回删除条数"""
+        if not self._ready:
+            return 0
+
+        try:
+            existing = self.collection.get(
+                where={"group_id": str(group_id)},
+                include=[],
+            )
+            ids = list(existing.get("ids") or [])
+            if not ids:
+                return 0
+            self.collection.delete(ids=ids)
+            return len(ids)
+        except Exception as e:
+            logger.warning(f"[MemoryStore] clear_group_memories 失败: {e}")
+            return 0
 
 
 # 全局单例

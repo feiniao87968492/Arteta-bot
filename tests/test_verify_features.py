@@ -135,6 +135,12 @@ class VerifyFeaturesTests(unittest.TestCase):
                 else:
                     os.environ["ARTETA_SWEARS_FILE"] = old_swears
 
+    def test_registry_contains_football_news_suite(self):
+        registry = verify_features.build_registry()
+        self.assertIn("football_news", registry)
+        case_names = [name for name, _case in registry["football_news"].cases]
+        self.assertIn("offline_roundtrip", case_names)
+
 
 if __name__ == "__main__":
     unittest.main()

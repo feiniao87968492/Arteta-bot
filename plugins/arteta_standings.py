@@ -17,6 +17,7 @@ except AttributeError:
 
 FOOTBALL_API_TOKEN = str(config.get("football_api_token", "da24063a4040404c89250b601f8994a2")).strip('"\'')
 DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
+DEEPSEEK_MODEL = str(config.get("deepseek_model", "deepseek-v4-pro")).strip('"\'')
 ARSENAL_ID = 57
 
 # --- 2. 注册指令 ---
@@ -98,7 +99,7 @@ async def handle_standings(bot: Bot, event: MessageEvent):
             resp = await client.post("https://api.deepseek.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
                 json={
-                    "model": "deepseek-v4-flash", 
+                    "model": DEEPSEEK_MODEL,
                     "messages": [
                         {"role": "system", "content": ai_prompt},
                         {"role": "user", "content": ai_data_str}

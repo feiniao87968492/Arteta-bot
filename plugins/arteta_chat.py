@@ -23,6 +23,7 @@ from typing import Dict, Optional, Tuple
 from loguru import logger
 from dashboard.api.services.prompt_service import get_prompt
 from plugins.arteta_mute import is_muted
+from plugins.arteta_power import is_bot_enabled
 from plugins.arteta_render import (
     text_to_tactical_board,
     html_to_image,
@@ -32,11 +33,20 @@ from plugins.arteta_render import (
 )
 from plugins.arteta_memory import memory_store
 from plugins.arteta_tools import (
-    maybe_answer_football_news_directly,
-    maybe_search_football_news_for_prompt,
     register_config as register_tools_config,
     run_tool_loop,
 )
+try:
+    from plugins.arteta_tools import (
+        maybe_answer_football_news_directly,
+        maybe_search_football_news_for_prompt,
+    )
+except ImportError:
+    async def maybe_answer_football_news_directly(query: str) -> str:
+        return ""
+
+    async def maybe_search_football_news_for_prompt(query: str) -> str:
+        return ""
 from plugins.arteta_vision import (
     VisionConfig,
     analyze_image_base64 as _analyze_image_base64_with_config,
@@ -59,12 +69,14 @@ except AttributeError:
 
 FOOTBALL_API_TOKEN = str(config.get("football_api_token", "da24063a4040404c89250b601f8994a2")).strip('"\'')
 DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
+DEEPSEEK_MODEL = str(config.get("deepseek_model", "deepseek-v4-pro")).strip('"\'')
 IMAGE_API_KEY = str(config.get("image_api_key", "")).strip('"\'')
 IMAGE_API_URL = str(config.get("image_api_url", "https://api.duckcoding.ai")).strip('"\'')
 VISION_API_KEY = str(config.get("vision_api_key", IMAGE_API_KEY)).strip('"\'')
 VISION_API_URL = str(config.get("vision_api_url", IMAGE_API_URL)).strip('"\'')
 VISION_MODEL = str(config.get("vision_model", "gpt-4o-mini")).strip('"\'')
-SILICONFLOW_API_KEY = "sk-vyytntlehtxrglzffknmvwdtxnihhanjpjwiriplgbuqbrdc"
+VISION_TIMEOUT = float(config.get("vision_timeout", 60.0))
+SILICONFLOW_API_KEY = str(config.get("siliconflow_api_key", os.environ.get("SILICONFLOW_API_KEY", ""))).strip('"\'')
 SILICONFLOW_VISION_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
 TEMP_IMAGE_DIR = os.path.join(tempfile.gettempdir(), "arteta_images")
 
@@ -114,6 +126,7 @@ box_cmd = on_command("盒", priority=8, block=True)
 fav_cmd = on_command("好感度", priority=5, block=True)
 rank_cmd = on_command("好感度排行", aliases={"排行", "ranking", "信任度排行"}, priority=5, block=True)
 refresh_cmd = on_command("刷新情报", priority=4, block=True)
+clear_memory_cmd = on_command("clear", aliases={"清除记忆", "清空记忆"}, priority=4, block=True)
 profile_cmd = on_command("档案", aliases={"profile", "个人档案"}, priority=6, block=True)
 at_cmd = on_message(rule=_message_mentions_bot, priority=11, block=True)
 notice_handler = on_notice(priority=1, block=False)
@@ -417,6 +430,9 @@ def _build_vision_config() -> VisionConfig:
         vision_model=VISION_MODEL,
         image_api_key=IMAGE_API_KEY,
         image_api_url=IMAGE_API_URL,
+        siliconflow_api_key=SILICONFLOW_API_KEY,
+        siliconflow_model=SILICONFLOW_VISION_MODEL,
+        vision_timeout=VISION_TIMEOUT,
     )
 
 
@@ -508,6 +524,7 @@ async def refresh_group_name(bot: Bot, group_id: str, fallback_name: str = ""):
 register_tools_config(
     football_api_token=FOOTBALL_API_TOKEN,
     deepseek_api_key=DEEPSEEK_API_KEY,
+    deepseek_model=DEEPSEEK_MODEL,
     arsenal_id=ARSENAL_ID,
     has_web_search=HAS_WEB_SEARCH,
 )
@@ -810,7 +827,7 @@ async def update_user_profile(user_id: str, group_id: str, nickname: str, level:
                 "https://api.deepseek.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
                 json={
-                    "model": "deepseek-v4-flash",
+                    "model": DEEPSEEK_MODEL,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.3
                 }
@@ -1699,9 +1716,9 @@ async def handle_box(bot: Bot, event: GroupMessageEvent):
     except Exception as e:
         await box_cmd.finish(f"读取异常：{str(e)}")
 
-ALGO_API_KEY = "sk-sNff1dqDXJsocCaoGanHeCSB3OHvovlZhC3IFD71Fm1CTqEE"
-ALGO_API_URL = "https://www.boxying.com/v1/chat/completions"
-ALGO_MODEL = "gpt-5.5"
+ALGO_API_KEY = str(config.get("algo_api_key", os.environ.get("ALGO_API_KEY", ""))).strip('"\'')
+ALGO_API_URL = str(config.get("algo_api_url", os.environ.get("ALGO_API_URL", "https://www.boxying.com/v1/chat/completions"))).strip('"\'')
+ALGO_MODEL = str(config.get("algo_model", os.environ.get("ALGO_MODEL", "gpt-5.5"))).strip('"\'')
 
 
 async def call_algo_llm(system_prompt: str, user_text: str) -> str:
@@ -1730,6 +1747,8 @@ async def call_algo_llm(system_prompt: str, user_text: str) -> str:
 
 @algo_cmd.handle()
 async def handle_algo(bot: Bot, event: MessageEvent):
+    if not is_bot_enabled():
+        return
     raw_text = event.get_message().extract_plain_text().strip()
     for cmd in ["算法", "代码", "leetcode", "战术演练", "算法题", "amath", "物理", "数学", "计算"]:
         if raw_text.startswith(cmd):
@@ -1802,14 +1821,48 @@ async def handle_algo(bot: Bot, event: MessageEvent):
     else:
         await algo_cmd.finish(Message("让我想想再回答你。"))
 
+
+def can_clear_group_memory(event, user_id: str, admin_qq: str) -> Tuple[bool, str]:
+    if not hasattr(event, "group_id"):
+        return False, "该命令仅限群聊使用。"
+    if str(user_id) != str(admin_qq):
+        return False, "只有管理员才能清除本群长期记忆。"
+    return True, ""
+
+
+def build_clear_group_memory_message(deleted_count: int) -> str:
+    if deleted_count <= 0:
+        return "本群当前没有可清除的长期对话记忆。"
+    return "已清除本群 %d 条长期对话记忆。" % deleted_count
+
+
+def clear_group_memory_for_group(group_id: str) -> str:
+    deleted_count = memory_store.clear_group_memories(str(group_id))
+    return build_clear_group_memory_message(deleted_count)
+
+
+@clear_memory_cmd.handle()
+async def handle_clear_memory(event: MessageEvent):
+    user_id = event.get_user_id()
+    allowed, reason = can_clear_group_memory(event, user_id, ADMIN_QQ)
+    if not allowed:
+        await clear_memory_cmd.finish(reason)
+
+    await clear_memory_cmd.finish(clear_group_memory_for_group(str(event.group_id)))
+
+
 @chat_cmd.handle()
 async def handle_chat_cmd(bot: Bot, event: MessageEvent):
+    if not is_bot_enabled():
+        return
     if isinstance(event, GroupMessageEvent) and is_muted(str(event.group_id)):
         return
     await process_chat(bot, event)
 
 @at_cmd.handle()
 async def handle_at_msg(bot: Bot, event: MessageEvent):
+    if not is_bot_enabled():
+        return
     raw = event.get_message().extract_plain_text().strip()
     # 如果消息以命令前缀开头（A/a等），说明已被 chat_cmd 处理，跳过
     # 注：不拦截"塔"开头，因为 chat_cmd 只匹配"塔子""阿尔特塔"完整词

@@ -30,7 +30,7 @@ arteta_bot/
 │   ├── arteta_cmath.py    # 理科解题渲染
 │   └── arteta_help.py     # 帮助菜单
 │
-├── Docs/                  # 项目文档
+├── Docs/                  # 项目文档（统一文档树）
 │   ├── user/              # 用户文档
 │   ├── dev/               # 开发者文档
 │   ├── ops/               # 运维文档
@@ -74,7 +74,6 @@ arteta_bot/
 | get_pl_table | 积分榜/排名 | football-data.org |
 | get_arsenal_injuries | 伤病名单 | football-data.org |
 | search_news(q) | 新闻/转会 | DuckDuckGo |
-| search_football_news(query, category, days) | 最近英超/欧冠/五大联赛/中超新闻 | ChromaDB `football_news` collection |
 | get_football_knowledge(topic) | 战术/知识 | knowledge_base/ |
 | get_group_members(group_id) | 群成员列表 | SQLite |
 | get_member_relations(group_id, user_id) | 成员关系 | SQLite |
@@ -133,7 +132,26 @@ supervisorctl tail -f arteta_bot
 
 首次部署参考 `Docs/ops/deployment.md`。
 
-## 当前开发进度（2026-05-21）
+## 当前开发进度（2026-06-20）
+
+### 2026-06-20 修复三轮
+
+**1. Vision API 图片截断**：
+- `max_tokens` 500→2048，避免描述中途截断
+- 新增 `_normalize_image_data_url()`：大图超过 2048px 等比缩放 + 转 JPEG 85%
+- 涉及文件：`plugins/arteta_vision.py`
+
+**2. ChromaDB 大模型发言截断**：
+- `MAX_DOC_LENGTH=1000` 从末尾截断导致 Assistant 发言经常被完全丢弃
+- 改为 40/60 分别截断 User/Assistant，确保两部分都被保留
+- `/算法` 路径补上 `add_memory()`（原来完全没有）
+- 涉及文件：`plugins/arteta_memory.py`、`plugins/arteta_chat.py`、`dashboard/api/services/bot_chat_service.py`
+
+**3. NapCat QQ 离线排障**：
+- QQ 机器人账号掉线时，重启 bot 进程无效，需 `docker restart napcat`
+- 公网扫描流量源：Dashboard（8765）和 bot（8088）端口暴露
+- 建议安全组限制 8088→127.0.0.1，8765→可信 IP
+- 写入 `Docs/ops/troubleshooting.md`
 
 ### 开发者功能验证工具已落地
 

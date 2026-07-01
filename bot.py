@@ -2,20 +2,38 @@
 import sys
 import os
 import logging
+import re
 import nonebot
 from loguru import logger
 from nonebot.adapters.onebot.v11 import Adapter
+
+
+_SECRET_LOG_KEY_RE = re.compile(r"('(?:[^']*(?:key|token|secret|password)[^']*)'\s*:\s*)'[^']*'", re.IGNORECASE)
+
+
+def sanitize_log_message(message: str) -> str:
+    return _SECRET_LOG_KEY_RE.sub(r"\1'<masked>'", message)
+
+
+def _sanitize_loguru_record(record):
+    record["message"] = sanitize_log_message(record["message"])
+
+
+def _sanitize_loguru_filter(record) -> bool:
+    record["message"] = sanitize_log_message(record["message"])
+    return True
 
 
 class InterceptHandler(logging.Handler):
     """将标准 logging 重定向到 loguru"""
     def emit(self, record):
         logger_opt = logger.opt(depth=6, exception=record.exc_info)
-        logger_opt.log(record.levelno, record.getMessage())
+        logger_opt.log(record.levelno, sanitize_log_message(record.getMessage()))
 
 
 def setup_logging() -> None:
     logger.remove()  # 清除 loguru 默认 stderr handler
+    logger.configure(patcher=_sanitize_loguru_record)
 
     is_prod = os.getenv("ENVIRONMENT") == "prod"
 
@@ -31,6 +49,7 @@ def setup_logging() -> None:
         retention=5,
         level="DEBUG",
         encoding="utf-8",
+        filter=_sanitize_loguru_filter,
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {name}:{line} | {message}",
     )
 
@@ -39,6 +58,7 @@ def setup_logging() -> None:
         sys.stdout,
         level="INFO" if is_prod else "DEBUG",
         colorize=True,
+        filter=_sanitize_loguru_filter,
         format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <cyan>{module:<15}</cyan> | <level>{message}</level>",
     )
 

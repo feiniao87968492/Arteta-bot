@@ -20,15 +20,20 @@ if [[ $EUID -ne 0 ]]; then err "请使用 sudo 或 root 运行"; exit 1; fi
 BOT_DIR="/opt/arteta_bot"
 BOT_USER="arteta"
 DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
+DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-v4-pro}"
+VISION_TIMEOUT="${VISION_TIMEOUT:-60}"
 FOOTBALL_API_TOKEN="${FOOTBALL_API_TOKEN:-da24063a4040404c89250b601f8994a2}"
 SUPERUSERS="${SUPERUSERS:-[\"2648955710\"]}"
+DASHBOARD_PORT="${DASHBOARD_PORT:-8765}"
+DASHBOARD_ADMIN_PASSWORD="${DASHBOARD_ADMIN_PASSWORD:-}"
+DASHBOARD_SECRET_KEY="${DASHBOARD_SECRET_KEY:-}"
 
 # ---- 1. 系统初始化 ----
 info ">>> 更新系统包..."
 apt update -y && apt upgrade -y
 
 info ">>> 安装基础依赖..."
-apt install -y python3 python3-pip python3-venv git wget unzip curl supervisor
+apt install -y python3 python3-pip python3-venv git wget unzip curl supervisor nodejs npm
 
 ok "系统初始化完成"
 
@@ -43,6 +48,7 @@ info ">>> 准备项目目录..."
 mkdir -p "$BOT_DIR"
 mkdir -p "$BOT_DIR/data"
 mkdir -p "$BOT_DIR/plugins"
+mkdir -p "$BOT_DIR/config"
 mkdir -p /var/log/arteta_bot
 
 # ---- 4. 设置 Python 虚拟环境 ----
@@ -51,9 +57,37 @@ python3 -m venv "$BOT_DIR/venv"
 source "$BOT_DIR/venv/bin/activate"
 
 pip install --upgrade pip
-pip install nonebot2 nonebot-adapter-onebot nonebot-plugin-apscheduler httpx aiosqlite pillow
+pip install nonebot2 nonebot-adapter-onebot nonebot-plugin-apscheduler httpx aiosqlite pillow pilmoji duckduckgo_search loguru fastapi uvicorn 'python-jose[cryptography]' python-multipart chromadb pysqlite3-binary
 
+if [[ -d "$BOT_DIR/dashboard/web" ]]; then
+    info ">>> 构建 Dashboard 前端..."
+    npm --prefix "$BOT_DIR/dashboard/web" install
+    npm --prefix "$BOT_DIR/dashboard/web" run build
+    ok "Dashboard 前端构建完成"
+else
+    warn "未找到 $BOT_DIR/dashboard/web，跳过 Dashboard 前端构建"
+fi
 ok "Python 依赖安装完成"
+
+if [[ ! -f "$BOT_DIR/config/prompts.json" ]]; then
+    if [[ -f "$BOT_DIR/config/prompts.json.template" ]]; then
+        cp "$BOT_DIR/config/prompts.json.template" "$BOT_DIR/config/prompts.json"
+        ok "初始化 Prompt Registry"
+    elif [[ -f "config/prompts.json" ]]; then
+        cp "config/prompts.json" "$BOT_DIR/config/prompts.json"
+        ok "初始化 Prompt Registry"
+    else
+        cat > "$BOT_DIR/config/prompts.json" << 'PROMPTS_EOF'
+{
+  "version": 1,
+  "entries": []
+}
+PROMPTS_EOF
+        ok "创建空 Prompt Registry"
+    fi
+else
+    ok "保留现有 Prompt Registry"
+fi
 
 # ---- 5. 写入 .env 配置 ----
 info ">>> 写入配置文件..."
@@ -63,6 +97,8 @@ PORT=8088
 DEBUG=false
 SUPERUSERS=${SUPERUSERS}
 DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+DEEPSEEK_MODEL=${DEEPSEEK_MODEL}
+VISION_TIMEOUT=${VISION_TIMEOUT}
 COMMAND_START=["", "/"]
 zhipu_api_key=""
 FOOTBALL_API_TOKEN=${FOOTBALL_API_TOKEN}
@@ -85,8 +121,28 @@ autorestart=true
 startretries=3
 stderr_logfile=/var/log/arteta_bot/error.log
 stdout_logfile=/var/log/arteta_bot/access.log
-environment=ENVIRONMENT="prod"
+environment=ENVIRONMENT="prod",ARTETA_PROMPTS_FILE="/opt/arteta_bot/config/prompts.json"
 SUPERVISOR_EOF
+
+if [[ -z "$DASHBOARD_ADMIN_PASSWORD" ]]; then
+    warn "DASHBOARD_ADMIN_PASSWORD 未设置，Dashboard 登录将不可用"
+fi
+if [[ -z "$DASHBOARD_SECRET_KEY" ]]; then
+    warn "DASHBOARD_SECRET_KEY 未设置，Dashboard 公网模式将拒绝签发 JWT"
+fi
+
+cat > /etc/supervisor/conf.d/arteta_dashboard.conf << SUPERVISOR_DASHBOARD_EOF
+[program:arteta_dashboard]
+command=$BOT_DIR/venv/bin/python -m uvicorn dashboard.api.main:app --host 0.0.0.0 --port $DASHBOARD_PORT
+directory=$BOT_DIR
+user=$BOT_USER
+autostart=true
+autorestart=true
+startretries=3
+stderr_logfile=/var/log/arteta_bot/dashboard_error.log
+stdout_logfile=/var/log/arteta_bot/dashboard_access.log
+environment=ENVIRONMENT="prod",DASHBOARD_PUBLIC=true,DASHBOARD_HOST="0.0.0.0",DASHBOARD_PORT="$DASHBOARD_PORT",DASHBOARD_ADMIN_PASSWORD="$DASHBOARD_ADMIN_PASSWORD",DASHBOARD_SECRET_KEY="$DASHBOARD_SECRET_KEY",ARTETA_DB_PATH=/opt/arteta_bot/arsenal_data.db,ARTETA_CHROMA_DIR=/opt/arteta_bot/chroma_db,DASHBOARD_LOGS_DIR=/opt/arteta_bot/logs,DASHBOARD_ENV_FILE=/opt/arteta_bot/.env.prod,DASHBOARD_WEB_DIST=/opt/arteta_bot/dashboard/web/dist,ARTETA_PROMPTS_FILE=/opt/arteta_bot/config/prompts.json
+SUPERVISOR_DASHBOARD_EOF
 
 # supervisor 不支持 %(ENV_X)s，直接替换为实际路径
 sed -i "s|%(ENV_BOT_DIR)s|$BOT_DIR|g" /etc/supervisor/conf.d/arteta_bot.conf
@@ -135,8 +191,15 @@ echo "   supervisorctl status"
 echo ""
 echo -e "${YELLOW}5. 上传 bot.py 和 plugins/ 目录到 ${BOT_DIR}/${NC}"
 echo ""
-echo -e "${CYAN}日志文件: /var/log/arteta_bet/{error,access}.log${NC}"
+echo -e "${YELLOW}6. Dashboard 管理后台：${NC}"
+echo "   supervisorctl status arteta_dashboard"
+echo "   supervisorctl restart arteta_dashboard"
+echo "   浏览器访问: http://<ECS公网IP>:$DASHBOARD_PORT"
+echo "   登录密码来自 DASHBOARD_ADMIN_PASSWORD，JWT 密钥来自 DASHBOARD_SECRET_KEY"
+echo ""
+echo -e "${CYAN}日志文件: /var/log/arteta_bot/{error,access}.log${NC}"
 echo -e "${CYAN}数据库备份: /opt/arteta_bot_backups/${NC}"
 echo ""
 echo -e "${YELLOW}⚠  安全组记得添加 8088 端口入方向规则${NC}"
+echo -e "${YELLOW}⚠  安全组如需公网访问 Dashboard，添加 $DASHBOARD_PORT 端口入方向规则，并使用强密码${NC}"
 echo ""

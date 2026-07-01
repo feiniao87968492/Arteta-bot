@@ -11,7 +11,9 @@ import os
 import re
 from typing import Optional
 from datetime import datetime, date
+from dashboard.api.services.prompt_service import get_prompt
 from plugins.arteta_render import text_to_tactical_board
+from plugins.arteta_power import is_bot_enabled
 from plugins.arteta_knowledge import clear_cache
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,7 @@ except AttributeError:
     config = driver.config.dict()
 
 DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
+DEEPSEEK_MODEL = str(config.get("deepseek_model", "deepseek-v4-pro")).strip('"\'')
 WEEKLY_NEWS_ENABLED = str(config.get("weekly_news_enabled", "true")).lower() in ("true", "1", "yes")
 ADMIN_QQ = "2648955710"
 KNOWLEDGE_BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge_base")
@@ -262,7 +265,7 @@ async def generate_weekly_report(articles: list) -> str:
             article_lines.append(f"   （正文获取失败）")
     articles_text = "\n".join(article_lines)
 
-    prompt = WEEKLY_PROMPT.format(articles=articles_text)
+    prompt = get_prompt("weekly.report", WEEKLY_PROMPT, variables={"articles": articles_text})
 
     for attempt in range(2):
         try:
@@ -271,7 +274,7 @@ async def generate_weekly_report(articles: list) -> str:
                     "https://api.deepseek.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
                     json={
-                        "model": "deepseek-v4-flash",
+                        "model": DEEPSEEK_MODEL,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.7,
                         "max_tokens": 2500,
@@ -409,6 +412,9 @@ async def publish_to_groups(report: str, group_ids: list = None):
 async def weekly_news_job():
     if not WEEKLY_NEWS_ENABLED:
         logger.info("[WeeklyNews] 周报功能已禁用")
+        return
+    if not is_bot_enabled():
+        logger.info("[WeeklyNews] 机器人电源已关闭，跳过")
         return
 
     logger.info("[WeeklyNews] 开始周报生成")

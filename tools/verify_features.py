@@ -561,6 +561,7 @@ def commands_plugin_imports(ctx: RunContext) -> CaseResult:
         "plugins.arteta_knowledge",
         "plugins.arteta_like",
         "plugins.arteta_memory",
+        "plugins.arteta_football_news",
         "plugins.arteta_mute",
         "plugins.arteta_render",
         "plugins.arteta_standings",
@@ -627,6 +628,50 @@ def commands_local_feature_health(ctx: RunContext) -> CaseResult:
         start,
         artifacts=[relative(artifact)],
         details={"normal_like_limit": normal_limit, "vip_like_limit": vip_limit, "help_chars": len(help_text)},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Football news suite
+# ---------------------------------------------------------------------------
+
+
+def football_news_offline_roundtrip(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    football_news = import_module("plugins.arteta_football_news")
+    db_path = ctx.run_path("football_news", "football_news.db")
+    chroma_dir = ctx.run_path("football_news", "chroma")
+    sqlite_store = football_news.FootballNewsSQLiteStore(db_path)
+    sqlite_store.initialize()
+    chroma_store = football_news.FootballNewsChromaStore(chroma_dir)
+    chroma_store.initialize()
+    if not getattr(chroma_store, "_ready", False):
+        return fail_result("football_news", "offline_roundtrip", "Chroma football_news collection did not initialize", start, artifacts=[relative(chroma_dir)])
+    now = int(time.time())
+    items = [
+        football_news.NewsItem("阿森纳继续追逐英超冠军", "https://example.com/pl-a", "fixture", "premier_league", "阿森纳仍在争冠集团。", now, now).with_hash(),
+        football_news.NewsItem("中超焦点战今晚打响", "https://example.com/csl-a", "fixture", "chinese_super_league", "中超焦点战今晚进行。", now, now).with_hash(),
+    ]
+    inserted = 0
+    for item in items:
+        chroma_id = chroma_store.add_item(item)
+        if sqlite_store.insert_item(item, chroma_id):
+            inserted += 1
+    chroma_store.add_digest(items, now)
+    search_result = chroma_store.search("英超 阿森纳", category="premier_league", days=14, now=now)
+    artifact = ctx.artifact_path("football_news", "search_result.txt")
+    write_text(artifact, search_result)
+    if inserted != 2:
+        return fail_result("football_news", "offline_roundtrip", "Expected 2 inserted football news items", start, artifacts=[relative(db_path), relative(artifact)], details={"inserted": inserted})
+    if "阿森纳继续追逐英超冠军" not in search_result:
+        return fail_result("football_news", "offline_roundtrip", "Inserted Premier League item was not returned by search", start, artifacts=[relative(db_path), relative(chroma_dir), relative(artifact)])
+    return pass_result(
+        "football_news",
+        "offline_roundtrip",
+        "Inserted item and digest documents into isolated football_news collection",
+        start,
+        artifacts=[relative(db_path), relative(chroma_dir), relative(artifact)],
+        details={"inserted": inserted},
     )
 
 
@@ -724,6 +769,13 @@ def build_registry() -> Dict[str, SuiteSpec]:
                 ("local_feature_health", safe_case("commands", "local_feature_health", commands_local_feature_health)),
             ],
         ),
+        "football_news": SuiteSpec(
+            "football_news",
+            "Global football news SQLite and ChromaDB checks",
+            [
+                ("offline_roundtrip", safe_case("football_news", "offline_roundtrip", football_news_offline_roundtrip)),
+            ],
+        ),
         "online": SuiteSpec(
             "online",
             "Opt-in online checks with safe side-effect gating",
@@ -734,7 +786,7 @@ def build_registry() -> Dict[str, SuiteSpec]:
         ),
     }
     core_cases = []
-    for suite_name in ("render", "memory", "chat", "commands"):
+    for suite_name in ("render", "memory", "chat", "commands", "football_news"):
         core_cases.extend(registry[suite_name].cases)
     registry["core"] = SuiteSpec("core", "Default local verification suite (render, memory, chat, commands)", core_cases)
     registry["all"] = SuiteSpec("all", "All offline verification suites", core_cases)

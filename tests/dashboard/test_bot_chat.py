@@ -229,3 +229,33 @@ def test_bot_chat_endpoint_accepts_image_only_request(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["data"]["reply"] == "图已收到"
+
+
+@pytest.mark.anyio
+async def test_bot_chat_service_passes_deepseek_model_into_tool_config(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DEEPSEEK_API_KEY=unit-test-deepseek\n"
+        "DEEPSEEK_MODEL=deepseek-v4-pro\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DASHBOARD_ENV_FILE", str(env_file))
+    monkeypatch.setenv("DASHBOARD_SECRET_KEY", "unit-test-secret")
+
+    captured = {}
+
+    def fake_register_config(**kwargs):
+        captured.update(kwargs)
+
+    class FakeMemoryStore:
+        def initialize(self):
+            return None
+
+    monkeypatch.setattr("dashboard.api.services.bot_chat_service.register_config", fake_register_config)
+    monkeypatch.setattr("dashboard.api.services.bot_chat_service.memory_store", FakeMemoryStore())
+
+    from dashboard.api.services.bot_chat_service import BotChatService
+
+    BotChatService()
+
+    assert captured["deepseek_model"] == "deepseek-v4-pro"

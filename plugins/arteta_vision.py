@@ -1,14 +1,19 @@
 # plugins/arteta_vision.py
-# 纯 vision API 调用层，不依赖 NoneBot 也不读全局配置，方便 Dashboard / 测试单独使用。
+# Pure Vision API layer shared by bot, dashboard, and tests.
 
+import base64
+import io
+import os
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import httpx
+from PIL import Image
 
 
-SILICONFLOW_API_KEY = "sk-vyytntlehtxrglzffknmvwdtxnihhanjpjwiriplgbuqbrdc"
+SILICONFLOW_API_KEY = os.environ.get("SILICONFLOW_API_KEY", "")
 SILICONFLOW_VISION_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
+DEFAULT_VISION_TIMEOUT = 60.0
 
 
 @dataclass
@@ -20,26 +25,53 @@ class VisionConfig:
     image_api_url: str = "https://api.duckcoding.ai"
     siliconflow_api_key: str = SILICONFLOW_API_KEY
     siliconflow_model: str = SILICONFLOW_VISION_MODEL
+    vision_timeout: float = DEFAULT_VISION_TIMEOUT
 
-    def fallback_api_key(self) -> str:
+    def configured_api_key(self) -> str:
         return self.vision_api_key or self.image_api_key
 
-    def fallback_api_url(self) -> str:
+    def configured_api_url(self) -> str:
         return self.vision_api_url or self.image_api_url
+
+    def fallback_api_key(self) -> str:
+        return self.siliconflow_api_key
+
+    def fallback_api_url(self) -> str:
+        return "https://api.siliconflow.cn"
 
 
 def detect_image_format(data: bytes) -> str:
-    if data.startswith(b'\xff\xd8'):
+    if data.startswith(b"\xff\xd8"):
         return "jpeg"
-    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "png"
-    if data.startswith(b'GIF87a') or data.startswith(b'GIF89a'):
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
         return "gif"
-    if data.startswith(b'RIFF') and data[8:12] == b'WEBP':
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         return "webp"
-    if data.startswith(b'\x00\x00\x01\x00') or data.startswith(b'\x00\x00\x00\x1cftyp'):
+    if data.startswith(b"\x00\x00\x01\x00") or data.startswith(b"\x00\x00\x00\x1cftyp"):
         return "heic"
     return "jpeg"
+
+
+_MAX_IMAGE_DIM = 2048
+_JPEG_QUALITY = 85
+
+
+def _normalize_image_data_url(data_url: str) -> str:
+    """Resize oversized images and output a JPEG data URL for predictable API cost."""
+    _media_type, b64 = _split_data_url(data_url)
+    raw = base64.b64decode(b64)
+    img = Image.open(io.BytesIO(raw))
+    w, h = img.size
+    if max(w, h) <= _MAX_IMAGE_DIM:
+        return data_url
+    ratio = _MAX_IMAGE_DIM / max(w, h)
+    new_size = (int(w * ratio), int(h * ratio))
+    img = img.resize(new_size, Image.LANCZOS)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG", quality=_JPEG_QUALITY)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def _is_anthropic_vision_url(api_url: str) -> bool:
@@ -77,7 +109,7 @@ def _build_vision_api_request(api_url: str, api_key: str, model: str, data_url: 
                     {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_data}},
                     {"type": "text", "text": prompt},
                 ]}],
-                "max_tokens": 500,
+                "max_tokens": 2048,
             },
         )
     payload = {
@@ -91,7 +123,7 @@ def _build_vision_api_request(api_url: str, api_key: str, model: str, data_url: 
         payload["messages"].insert(0, {"role": "system", "content": "You are MiMo, an AI assistant developed by Xiaomi."})
         payload["max_completion_tokens"] = 1024
     else:
-        payload["max_tokens"] = 500
+        payload["max_tokens"] = 2048
     return (
         _join_vision_api_path(base_url, "/v1/chat/completions"),
         {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -116,9 +148,9 @@ def _is_error_response(resp: str) -> bool:
     return resp.startswith("[图片识别失败") or resp.startswith("[图片识别异常")
 
 
-async def _call_vision_api(api_url: str, api_key: str, model: str, data_url: str) -> str:
+async def _call_vision_api(api_url: str, api_key: str, model: str, data_url: str, timeout: float = DEFAULT_VISION_TIMEOUT) -> str:
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             url, headers, payload = _build_vision_api_request(api_url, api_key, model, data_url)
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code == 200:
@@ -135,22 +167,34 @@ async def _call_vision_api(api_url: str, api_key: str, model: str, data_url: str
 
 async def analyze_image_base64(data_url: str, config: Optional[VisionConfig] = None) -> str:
     cfg = config or VisionConfig()
-    if cfg.siliconflow_api_key:
+    data_url = _normalize_image_data_url(data_url)
+
+    configured_url = cfg.configured_api_url()
+    configured_key = cfg.configured_api_key()
+    if configured_url and configured_key:
         result = await _call_vision_api(
-            "https://api.siliconflow.cn",
-            cfg.siliconflow_api_key,
-            cfg.siliconflow_model,
+            configured_url,
+            configured_key,
+            cfg.vision_model,
             data_url,
+            cfg.vision_timeout,
         )
         if result and not _is_error_response(result):
             return result
-        print(f"[Vision] SiliconFlow 识别失败（{result[:200]}），fallback 到备用服务")
+        print(f"[Vision] Configured service failed ({result[:200]}), fallback to SiliconFlow")
+
     fallback_url = cfg.fallback_api_url()
     fallback_key = cfg.fallback_api_key()
     if not fallback_url or not fallback_key:
         return "[图片识别失败（无可用备用 Vision 服务）]"
-    fallback = await _call_vision_api(fallback_url, fallback_key, cfg.vision_model, data_url)
+    fallback = await _call_vision_api(
+        fallback_url,
+        fallback_key,
+        cfg.siliconflow_model,
+        data_url,
+        cfg.vision_timeout,
+    )
     if fallback and not _is_error_response(fallback):
         return fallback
-    print(f"[Vision] 备用服务也失败: {fallback[:200]}")
-    return "[图片识别失败（SiliconFlow 和备用服务均失败）]"
+    print(f"[Vision] SiliconFlow also failed: {fallback[:200]}")
+    return "[图片识别失败（配置服务和 SiliconFlow 均失败）]"
