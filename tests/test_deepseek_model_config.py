@@ -28,6 +28,17 @@ def test_chat_registers_tools_with_deepseek_model():
 
 def test_deploy_files_expose_deepseek_model_default():
     deploy_text = _read("deploy/deploy_ecs.sh")
+    env_dev_text = _read(".env.dev")
 
     assert 'DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-v4-pro}"' in deploy_text
     assert "DEEPSEEK_MODEL=${DEEPSEEK_MODEL}" in deploy_text
+    assert "DEEPSEEK_MODEL=deepseek-v4-pro" in env_dev_text
+
+
+def test_env_dev_keeps_secret_values_blank():
+    env_dev_text = _read(".env.dev")
+
+    assert "DEEPSEEK_API_KEY=\n" in env_dev_text
+    assert "IMAGE_API_KEY=\n" in env_dev_text
+    assert "VISION_API_KEY=\n" in env_dev_text
+    assert "sk-" not in env_dev_text
