@@ -2186,3 +2186,24 @@ Verification after the fix:
 - `planner.py` still owns behavior/tool-policy direct update branches.
 - `_answer_after_unavailable_web_result(...)` remains as a compatibility helper and should be revisited separately.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.
+
+### ECS Deployment
+
+- Commit deployed: `8630e6f refactor: remove unreachable planner runtime loop`.
+- Deployment archive: `/tmp/arteta_phase_c_unreachable_runtime_loop_8630e6f.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_unreachable_runtime_loop_20260712025900`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `tests/test_arteta_agent_mood_response.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Unreachable Runtime Loop Cleanup Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
