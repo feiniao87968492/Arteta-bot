@@ -863,6 +863,23 @@ Verification after the fix:
 - `python -m pytest tests -q`
   - Result: `503 passed, 2 warnings`.
 
+### ECS Deployment
+
+- Commit deployed: `052e41c refactor: remove dead planner trace helpers`.
+- Deployment archive: `/tmp/arteta_phase_c_trace_helper_cleanup_052e41c.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_trace_helper_cleanup_20260712010919`.
+- Remote `py_compile` passed for `plugins/arteta_agent/planner.py` and `tests/test_arteta_agent_routing.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+
+### ECS Smoke After Trace Helper Cleanup Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ### Remaining
 
 - Additional planner-local marker sets for UI, memory, document, link, web, and science still need separate routing-module migrations.
