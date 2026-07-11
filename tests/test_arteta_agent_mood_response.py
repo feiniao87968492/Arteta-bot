@@ -70,6 +70,20 @@ def test_mood_finalizer_skips_operational_trace_or_policy_turns():
     assert calls == []
 
 
+def test_planner_mood_wrappers_do_not_keep_unreachable_inline_logic():
+    import inspect
+
+    from plugins.arteta_agent import planner
+
+    allow_source = inspect.getsource(planner._should_allow_forced_mood_emoji)
+    detect_source = inspect.getsource(planner.detect_forced_mood_emoji_args)
+
+    assert "return response_should_allow_forced_mood_emoji(messages, trace)" in allow_source
+    assert "return response_detect_forced_mood_emoji_args(messages, assistant_content)" in detect_source
+    assert allow_source.count("return") == 1
+    assert detect_source.count("return") == 1
+
+
 def test_mood_finalizer_respects_disabled_or_existing_emoji_call():
     calls = []
     state = make_runtime_state(

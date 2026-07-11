@@ -602,6 +602,45 @@ Verification after the fix:
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
 
+## 2026-07-12 - Phase D Slice: Planner Mood Wrapper Cleanup
+
+### Scope
+
+- Removed unreachable inline mood detection and suppression logic left in planner after the mood finalizer moved to `response.mood`.
+- Preserved planner wrapper function names for compatibility with existing tests/imports.
+
+### Changes
+
+- Added a source regression proving planner mood wrappers contain only a single delegation return.
+- `_should_allow_forced_mood_emoji(...)` now delegates directly to `response.mood.should_allow_forced_mood_emoji`.
+- `detect_forced_mood_emoji_args(...)` now delegates directly to `response.mood.detect_forced_mood_emoji_args`.
+- Deleted unreachable duplicate mood keyword lists and policy suppression code from planner.
+
+### Compatibility
+
+- Mood sending behavior is unchanged; runtime finalization still calls `maybe_send_mood_emoji(...)`.
+- Existing planner wrapper names remain available during the compatibility transition.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_mood_response.py::test_planner_mood_wrappers_do_not_keep_unreachable_inline_logic -q`
+  - RED before fix: failed because `_should_allow_forced_mood_emoji` contained four return statements.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_mood_response.py -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_forces_negative_mood_emoji_when_llm_skips_tool tests/test_arteta_agent_registry.py::test_agent_loop_forces_positive_neutral_mood_emoji_for_non_negative_reply tests/test_arteta_agent_registry.py::test_agent_loop_does_not_force_mood_emoji_after_behavior_policy_query -q`
+  - Result: `3 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `498 passed, 2 warnings`.
+
+### Remaining
+
+- Later planner-thinning passes can remove compatibility wrappers once no tests or external code import them directly.
+
 ## 2026-07-11 - Phase E Slice: OpenAI-Compatible Provider Adapter
 
 ### Scope

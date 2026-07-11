@@ -765,18 +765,6 @@ def _trace_has_any_tool(trace, tool_names) -> bool:
 
 def _should_allow_forced_mood_emoji(messages, trace) -> bool:
     return response_should_allow_forced_mood_emoji(messages, trace)
-    # Policy/trace/debug answers are operational diagnostics, not emotional
-    # chat replies. Auto-emoji here makes the agent appear to ignore policy.
-    if _trace_has_any_tool(trace, {
-        "show_behavior_policy",
-        "update_behavior_policy",
-        "show_agent_trace",
-    }):
-        return False
-    text = _latest_user_content(messages)
-    if any(marker in text for marker in ("行为策略", "当前策略", "策略", "trace", "调度", "调用了什么工具")):
-        return False
-    return True
 
 
 def _has_expiring_behavior_policies(group_id: str) -> bool:
@@ -834,50 +822,6 @@ async def _answer_after_unavailable_web_result(state, web_result: str, model: st
 
 def detect_forced_mood_emoji_args(messages, assistant_content: str = "") -> dict:
     return response_detect_forced_mood_emoji_args(messages, assistant_content)
-    user_text = _latest_user_content(messages).strip()
-    if not user_text:
-        return {}
-    content = (assistant_content or "").strip()
-    if not content or content == "[NO_REPLY]" or content.startswith("[PermissionRequired]"):
-        return {}
-    compact = (user_text + "\n" + (assistant_content or "")).replace(" ", "").lower()
-    if any(marker in compact for marker in ("不要发表情", "别发表情", "不用表情", "不要发图", "别发图")):
-        return {}
-
-    negative_markers = (
-        "sb",
-        "傻逼",
-        "傻b",
-        "傻叉",
-        "你是傻",
-        "废物",
-        "垃圾",
-        "蠢",
-        "滚",
-        "stupid",
-        "idiot",
-        "fuck",
-        "痛苦",
-        "难过",
-        "哭",
-        "崩溃",
-        "遗憾",
-        "输麻",
-        "淘汰了",
-        "被淘汰",
-    )
-
-    if any(marker in compact for marker in negative_markers):
-        return {
-            "mood": "negative",
-            "emoji_name": "",
-            "reason": "检测到消极情绪，补发表情。",
-        }
-    return {
-        "mood": "positive_neutral",
-        "emoji_name": "",
-        "reason": "检测到积极或中立情绪，补发表情。",
-    }
 
 
 async def call_llm_with_tools(messages, model: str, api_key: str, api_url: str = DEFAULT_CHAT_API_URL, allowed_permissions=None, disabled_tools=None, temperature: float = 0.9, request_timeout: float = 80.0):
