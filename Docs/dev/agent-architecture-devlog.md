@@ -758,3 +758,22 @@ Verification after the fix:
 
 - Review whether successful admin handlers that also write their own audit logs should be normalized to executor-only events in a later cleanup.
 - Continue checking persistent audit coverage for duplicate consumed confirmations through the explicit planner path.
+
+### ECS Deployment
+
+- Commit deployed: `2f7623d feat: audit explicit confirmation failures`.
+- Deployment archive: `/tmp/arteta_phase_g_audit_confirm_2f7623d.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_g_audit_confirm_20260711212000`.
+- Remote `py_compile` passed for `plugins/arteta_agent/audit.py`, `plugins/arteta_agent/planner.py`, and `tests/test_arteta_agent_registry.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Confirmation Audit Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
