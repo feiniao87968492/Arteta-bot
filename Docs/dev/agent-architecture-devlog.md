@@ -2245,3 +2245,24 @@ Verification after the fix:
 - `planner.py` still owns behavior/tool-policy direct update branches that call `_run_forced_tool_direct(...)`.
 - `planner.py` still exposes provider compatibility entry points and provider call wrappers for legacy tests and callers.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.
+
+### ECS Deployment
+
+- Commit deployed: `5253014 refactor: remove unavailable web fallback helper`.
+- Deployment archive: `/tmp/arteta_phase_c_unavailable_web_cleanup_5253014.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_unavailable_web_cleanup_20260712031051`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `tests/test_arteta_agent_registry.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Unavailable Web Cleanup Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
