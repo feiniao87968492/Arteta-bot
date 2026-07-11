@@ -2462,3 +2462,25 @@ Verification after the fix:
 
 - `planner.py` still performs compatibility orchestration around route, plan, Runtime configuration, response composition, and policy TTL finalization.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
+
+### ECS Deployment
+
+- Commit deployed: `4da04d5 refactor: move pending confirmation handling into runtime`.
+- Deployment archive: `/tmp/arteta_phase_b_confirmation_4da04d5.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_b_confirmation_20260712033809`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/runtime/confirmation.py`;
+  - `tests/test_arteta_agent_runtime.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Pending Confirmation Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
