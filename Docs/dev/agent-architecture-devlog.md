@@ -327,6 +327,25 @@ Verification after the fix:
 - Continue migrating additional planner-local route helpers only with focused route tests.
 - The legacy forced-web detector still lives in planner until the route dataset can cover its remaining Chinese/local-memory edge cases.
 
+### ECS Deployment
+
+- Commit deployed: `5a4e699 refactor: move current fact routing policy to planner plan`.
+- Deployment archive: `/tmp/arteta_phase_c_plan_builder_current_fact_5a4e699.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_plan_builder_current_fact_20260711234000`.
+- Remote `py_compile` passed for `planner.py`, `planning/plan_builder.py`, and routing tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Current-Fact Plan Builder Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ## 2026-07-11 - Phase D Slice: Structured Artifact Marker Boundary
 
 ### Scope
