@@ -10,7 +10,7 @@ from .providers.openai_compatible import (
 from .runtime.confirmation import (
     latest_user_content,
 )
-from .service import run_legacy_agent_loop
+from .service import AgentRequest, run_agent_request
 
 
 def _parse_chat_response(resp, api_url: str):
@@ -38,18 +38,18 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
     # Agent loop entrypoint used by arteta_chat.py when
     # ARTETA_USE_AGENT_REGISTRY=true. It alternates LLM planning and
     # permission-checked tool execution until the model returns final text.
-    return await run_legacy_agent_loop(
-        messages,
-        ctx,
-        model,
-        api_key,
-        api_url,
-        max_rounds,
-        trace,
-        temperature,
-        request_timeout,
-        max_tool_calls,
-        max_same_tool_call_repeats,
-        max_total_observation_chars,
-        call_llm_with_tools,
-    )
+    return await run_agent_request(AgentRequest(
+        messages=list(messages),
+        ctx=ctx,
+        model=model,
+        api_key=api_key,
+        api_url=api_url,
+        max_rounds=max_rounds,
+        trace=trace,
+        temperature=temperature,
+        request_timeout=request_timeout,
+        max_tool_calls=max_tool_calls,
+        max_same_tool_call_repeats=max_same_tool_call_repeats,
+        max_total_observation_chars=max_total_observation_chars,
+        chat_model_call=call_llm_with_tools,
+    ))

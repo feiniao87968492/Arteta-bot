@@ -533,4 +533,18 @@ def test_planner_delegates_agent_loop_orchestration_to_service():
     assert "build_plan(" not in source
     assert "initial_tool_calls_from_plan(" not in source
     assert "detect_contextual_tool_exclusions(" not in source
-    assert "return await run_legacy_agent_loop(" in source
+    assert "return await run_agent_request(" in source
+
+
+def test_planner_uses_structured_agent_request_for_service_entrypoint():
+    from pathlib import Path
+
+    from plugins.arteta_agent import service
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert hasattr(service, "AgentRequest")
+    assert hasattr(service, "run_agent_request")
+    assert "AgentRequest(" in source
+    assert "return await run_agent_request(" in source
+    assert "run_legacy_agent_loop(" not in source

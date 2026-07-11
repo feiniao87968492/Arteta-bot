@@ -30,6 +30,23 @@ class PreparedAgentRun:
     artifact_markers: List[str] = field(default_factory=list)
 
 
+@dataclass
+class AgentRequest:
+    messages: List[dict]
+    ctx: ToolContext
+    model: str
+    api_key: str
+    api_url: str
+    max_rounds: int
+    trace: Optional[dict]
+    temperature: float
+    request_timeout: float
+    max_tool_calls: int
+    max_same_tool_call_repeats: int
+    max_total_observation_chars: int
+    chat_model_call: object
+
+
 def prepare_agent_run(
     messages,
     ctx: ToolContext,
@@ -76,9 +93,28 @@ async def run_legacy_agent_loop(
     max_total_observation_chars: int,
     chat_model_call,
 ) -> str:
+    return await run_agent_request(AgentRequest(
+        messages=list(messages),
+        ctx=ctx,
+        model=model,
+        api_key=api_key,
+        api_url=api_url,
+        max_rounds=max_rounds,
+        trace=trace,
+        temperature=temperature,
+        request_timeout=request_timeout,
+        max_tool_calls=max_tool_calls,
+        max_same_tool_call_repeats=max_same_tool_call_repeats,
+        max_total_observation_chars=max_total_observation_chars,
+        chat_model_call=chat_model_call,
+    ))
+
+
+async def run_agent_request(request: AgentRequest) -> str:
     allowed = {"safe_read", "safe_write", "confirm_write", "admin_action"}
+    ctx = request.ctx
     disabled_tools = get_disabled_tools(ctx.group_id)
-    prepared = prepare_agent_run(messages, ctx, trace, disabled_tools)
+    prepared = prepare_agent_run(request.messages, ctx, request.trace, disabled_tools)
     state = prepared.state
     trace = prepared.trace
     disabled_tools = prepared.disabled_tools
@@ -102,26 +138,26 @@ async def run_legacy_agent_loop(
         initial_result = await run_runtime_loop_from_state(
             state,
             ctx,
-            model,
-            api_key,
-            api_url,
+            request.model,
+            request.api_key,
+            request.api_url,
             allowed,
             schema_excluded_tools,
             disabled_tools,
-            max_rounds,
+            request.max_rounds,
             trace,
-            temperature,
-            request_timeout,
+            request.temperature,
+            request.request_timeout,
             prepared.artifact_markers,
-            max_tool_calls=max_tool_calls,
-            max_same_tool_call_repeats=max_same_tool_call_repeats,
-            max_total_observation_chars=max_total_observation_chars,
+            max_tool_calls=request.max_tool_calls,
+            max_same_tool_call_repeats=request.max_same_tool_call_repeats,
+            max_total_observation_chars=request.max_total_observation_chars,
             initial_tool_calls=planned_initial_calls,
             stop_after_initial_tools=bool(
                 initial_plan.constraints.get("direct_trace_response")
                 or initial_plan.constraints.get("direct_tool_response")
             ),
-            chat_model_call=chat_model_call,
+            chat_model_call=request.chat_model_call,
             emoji_enabled=mood_emoji_enabled,
         )
         if initial_plan.constraints.get("direct_trace_response"):
@@ -131,20 +167,20 @@ async def run_legacy_agent_loop(
     return finish_agent_run(await run_loop_from_state(
         state,
         ctx,
-        model,
-        api_key,
-        api_url,
+        request.model,
+        request.api_key,
+        request.api_url,
         allowed,
         schema_excluded_tools,
         disabled_tools,
-        max_rounds,
+        request.max_rounds,
         trace,
-        temperature,
-        request_timeout,
+        request.temperature,
+        request.request_timeout,
         prepared.artifact_markers,
-        max_tool_calls=max_tool_calls,
-        max_same_tool_call_repeats=max_same_tool_call_repeats,
-        max_total_observation_chars=max_total_observation_chars,
-        chat_model_call=chat_model_call,
+        max_tool_calls=request.max_tool_calls,
+        max_same_tool_call_repeats=request.max_same_tool_call_repeats,
+        max_total_observation_chars=request.max_total_observation_chars,
+        chat_model_call=request.chat_model_call,
         emoji_enabled=mood_emoji_enabled,
     ), ctx, prepared)

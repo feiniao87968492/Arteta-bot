@@ -2843,3 +2843,47 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Planner Cleanup: Introduce AgentRequest Service Entrypoint
+
+### Scope
+
+- Added structured `AgentRequest` to `plugins/arteta_agent/service.py`.
+- Added `run_agent_request(...)` as the primary service-layer entrypoint.
+- Kept `run_legacy_agent_loop(...)` as a compatibility wrapper that builds an `AgentRequest`.
+- Updated `planner.run_agent_loop(...)` to construct `AgentRequest` and delegate to `run_agent_request(...)`.
+
+### Design Decision
+
+- `planner.py` now matches the intended compatibility-entrypoint shape without changing its public function signature.
+- The model-call dependency remains explicit in `AgentRequest`, preserving `planner.call_llm_with_tools` monkeypatch compatibility and avoiding provider coupling inside the service layer.
+- The legacy wrapper remains in the service layer for now so any internal callers can migrate without a flag day.
+
+### Compatibility and Safety
+
+- Public `run_agent_loop(...)` and `call_llm_with_tools(...)` signatures are unchanged.
+- No routing, planning, Runtime, policy, provider, permission, or artifact behavior changed.
+- Existing explicit confirmation and multi-intent plan execution order is unchanged.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_runtime.py::test_planner_uses_structured_agent_request_for_service_entrypoint -q`
+  - RED before implementation: failed because `service.AgentRequest` did not exist.
+  - Result after implementation: passed as part of the Runtime suite.
+- `python -m pytest tests/test_arteta_agent_runtime.py -q`
+  - Result: `14 passed`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\service.py tests\\test_arteta_agent_runtime.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_hides_bulky_tool_categories_for_plain_chat tests/test_arteta_agent_registry.py::test_planner_records_temporary_tool_block_and_does_not_force_emoji tests/test_arteta_agent_registry.py::test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `534 passed, 2 warnings`.
+
+### Remaining
+
+- `run_legacy_agent_loop(...)` can be removed after confirming there are no internal callers left outside planner.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
