@@ -2948,3 +2948,24 @@ Verification after the fix:
 ### Remaining
 
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.
+
+### ECS Deployment
+
+- Commit deployed: `4a4e210 refactor: remove legacy agent loop wrapper`.
+- Deployment archive: `/tmp/arteta_remove_legacy_loop_wrapper_4a4e210.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_remove_legacy_loop_wrapper_20260712042745`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/service.py`;
+  - `tests/test_arteta_agent_runtime.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Legacy Wrapper Removal
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
