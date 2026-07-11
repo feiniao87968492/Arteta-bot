@@ -1001,33 +1001,33 @@ def _tool_call_from_planned(index: int, planned) -> dict:
     }
 
 
-def _initial_tool_calls_from_plan(messages, ctx: ToolContext, disabled_tools) -> list:
-    decision = route_message(messages, ctx)
-    plan = build_plan(decision, ctx)
-    calls = []
+def _available_planned_calls(plan, disabled_tools) -> list:
+    available = []
     for planned in plan.required_tools:
         if planned.name in set(disabled_tools or set()):
             continue
         if not get_tool(planned.name):
             continue
+        available.append(planned)
+    return available
+
+
+def _initial_tool_calls_from_plan(plan, disabled_tools) -> list:
+    calls = []
+    for planned in _available_planned_calls(plan, disabled_tools):
         calls.append(_tool_call_from_planned(len(calls) + 1, planned))
     return calls
 
 
-def _should_execute_initial_plan(messages, ctx: ToolContext, disabled_tools) -> bool:
-    decision = route_message(messages, ctx)
-    plan = build_plan(decision, ctx)
-    available_required = []
-    for planned in plan.required_tools:
-        if planned.name in set(disabled_tools or set()):
-            continue
-        if not get_tool(planned.name):
-            continue
-        available_required.append(planned)
+def _should_execute_initial_plan(plan, disabled_tools) -> bool:
+    available_required = _available_planned_calls(plan, disabled_tools)
     if len(available_required) > 1:
         return True
     if len(available_required) == 1:
-        return any(intent.name == "public_current_fact" for intent in decision.intents or [])
+        return bool(
+            plan.constraints.get("direct_trace_response")
+            or plan.constraints.get("execute_single_required_tool")
+        )
     return False
 
 
@@ -1315,9 +1315,11 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
             consume_group_policy_turn(ctx.group_id)
         return compose_final_response(value, artifacts=tool_artifact_markers, trace=trace)
 
-    planned_initial_calls = _initial_tool_calls_from_plan(state, ctx, disabled_tools)
-    if planned_initial_calls and _should_execute_initial_plan(state, ctx, disabled_tools):
-        return finish(await _run_runtime_loop_from_state(
+    route_decision = route_message(state, ctx)
+    initial_plan = build_plan(route_decision, ctx)
+    planned_initial_calls = _initial_tool_calls_from_plan(initial_plan, disabled_tools)
+    if planned_initial_calls and _should_execute_initial_plan(initial_plan, disabled_tools):
+        initial_result = await _run_runtime_loop_from_state(
             state,
             ctx,
             model,
@@ -1335,24 +1337,11 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
             max_same_tool_call_repeats=max_same_tool_call_repeats,
             max_total_observation_chars=max_total_observation_chars,
             initial_tool_calls=planned_initial_calls,
-        ))
-
-    if wants_trace_tool(state):
-        # A trace request is a test/debug intent, so force the real read-only
-        # trace tool once instead of hoping the model chooses it from prompt.
-        # Return the sanitized trace directly; DeepSeek thinking-mode rejects
-        # hand-crafted assistant tool-call history without reasoning_content.
-        trace_call = {
-            "id": "forced-show-agent-trace-1",
-            "type": "function",
-            "function": {"name": "show_agent_trace", "arguments": "{}"},
-        }
-        await _run_forced_tool_direct(
-            state, ctx, trace_call, model, api_key, api_url, allowed, disabled_tools,
-            max_rounds, trace, temperature, tool_artifact_markers, request_timeout,
-            max_tool_calls, max_same_tool_call_repeats, max_total_observation_chars,
+            stop_after_initial_tools=bool(initial_plan.constraints.get("direct_trace_response")),
         )
-        return finish(compose_trace_response(trace))
+        if initial_plan.constraints.get("direct_trace_response"):
+            return finish(compose_trace_response(trace))
+        return finish(initial_result)
 
     forced_ui_args = detect_forced_ui_preference_args(state)
     if forced_ui_args and get_tool("update_ui_preference") and "update_ui_preference" not in disabled_tools:

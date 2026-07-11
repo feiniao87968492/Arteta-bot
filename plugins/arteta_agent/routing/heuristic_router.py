@@ -12,6 +12,18 @@ MEMORY_PREFERENCE_MARKERS = ("记住", "以后", "下次")
 DOCUMENT_MARKERS = ("pdf", "PDF", "文档", "文件", "附件", "报告")
 MATH_INTENT_MARKERS = ("求解", "计算", "解方程", "证明")
 
+TRACE_MARKERS = (
+    "trace",
+    "agent trace",
+    "tool trace",
+    "调用了什么工具",
+    "调用什么工具",
+    "工具调用",
+    "为什么这样回复",
+    "为什么这么回",
+    "可视化调试",
+)
+
 CURRENT_FACT_ASCII_MARKERS = (
     "latest",
     "recent",
@@ -75,6 +87,16 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
             name="remember_user_preference",
             arguments={"memory": text},
             reason="remember explicit user preference",
+            forced=True,
+        ))
+
+    if _has_any(text, TRACE_MARKERS):
+        decision.intents.append(Intent("agent_trace", 0.95, "explicit trace/debug request"))
+        decision.constraints["direct_trace_response"] = True
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="show_agent_trace",
+            arguments={},
+            reason="show sanitized agent trace",
             forced=True,
         ))
 

@@ -769,6 +769,55 @@ Verification after the fix:
 
 - Planner still owns the decision to force `show_agent_trace`; moving that route decision into structured planning remains separate from response composition.
 
+## 2026-07-12 - Phase C/D Slice: Structured Trace Route Plan
+
+### Scope
+
+- Moved explicit trace/debug requests from a planner keyword branch into `RouteDecision` / `AgentPlan`.
+- Preserved the important compatibility behavior: trace requests execute `show_agent_trace` as a real safe-read tool and return the sanitized trace directly without a follow-up LLM call.
+
+### Changes
+
+- Router now emits an `agent_trace` intent, required `show_agent_trace` call, and `direct_trace_response` constraint for explicit trace/debug requests.
+- `AgentPlan` now carries `constraints` copied from `RouteDecision`.
+- `plan_builder` sets `execute_single_required_tool` for `public_current_fact`, preserving the existing single-tool current-fact execution path after planner stopped checking route intents directly.
+- Planner builds the initial `RouteDecision`/`AgentPlan` once, executes available planned calls, and uses `direct_trace_response` to stop after initial tools and compose the trace response.
+- Removed the `if wants_trace_tool(state)` forced branch from `run_agent_loop`.
+
+### Compatibility
+
+- Existing `show_agent_trace` tool name, permission, trace fields, and output formatting are unchanged.
+- Public-current-fact single-tool route behavior remains enabled through plan constraints.
+- Missing or disabled tools still prevent the planned call from executing.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_routes_trace_requests_with_direct_response_constraint -q`
+  - RED before fix: failed because router did not emit `agent_trace`.
+  - GREEN after fix: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_planner_uses_structured_plan_instead_of_trace_keyword_branch -q`
+  - RED before fix: failed because planner still had `if wants_trace_tool(state)`.
+  - GREEN after fix: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_routes_trace_requests_with_direct_response_constraint tests/test_arteta_agent_routing.py::test_planner_uses_structured_plan_instead_of_trace_keyword_branch tests/test_arteta_agent_registry.py::test_agent_loop_forces_trace_tool_when_user_requests_trace tests/test_arteta_agent_routing.py::test_agent_loop_executes_single_current_fact_plan_before_legacy_forced_web -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `11 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_forces_groksearch_for_public_current_transfer_questions tests/test_arteta_agent_registry.py::test_agent_loop_uses_behavior_policy_route_for_public_current_questions tests/test_arteta_agent_registry.py::test_agent_loop_does_not_force_web_for_casual_future_or_current_words tests/test_arteta_agent_routing.py::test_agent_loop_executes_single_current_fact_plan_before_legacy_forced_web -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py tests/test_arteta_agent_response.py -q`
+  - Result: `18 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `503 passed, 2 warnings`.
+
+### Remaining
+
+- `wants_trace_tool(...)` and `TRACE_REQUEST_MARKERS` are now compatibility/dead planner symbols; a later cleanup can remove them after checking direct imports.
+- Additional planner forced branches for UI, memory, document, link, web, and science still need separate RouteDecision/Plan migrations.
+
 ## 2026-07-11 - Phase E Slice: OpenAI-Compatible Provider Adapter
 
 ### Scope

@@ -331,3 +331,23 @@ def test_plan_builder_selects_available_public_current_fact_fallback_tool(tmp_pa
         "freshness": "recent",
         "max_results": 4,
     }
+
+
+def test_plan_builder_routes_trace_requests_with_direct_response_constraint():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    decision = route_message([{"role": "user", "content": "show agent trace"}], make_context())
+    plan = build_plan(decision, make_context())
+
+    assert any(intent.name == "agent_trace" for intent in decision.intents)
+    assert tool_names(plan) == ["show_agent_trace"]
+    assert plan.constraints.get("direct_trace_response") is True
+
+
+def test_planner_uses_structured_plan_instead_of_trace_keyword_branch():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "if wants_trace_tool(state)" not in source
