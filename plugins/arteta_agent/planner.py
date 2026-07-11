@@ -14,7 +14,7 @@ from .providers.openai_compatible import (
     parse_chat_response,
 )
 from .registry import build_openai_tools, get_tool, list_enabled_tools
-from .response.composer import compose_final_response, prefix_trace_markers, trace_has_marker
+from .response.composer import compose_final_response
 from .response.mood import (
     detect_forced_mood_emoji_args as response_detect_forced_mood_emoji_args,
     maybe_send_mood_emoji,
@@ -746,14 +746,6 @@ def _trace_has_tool(trace, tool_name: str) -> bool:
     if not trace:
         return False
     return any(item.get("name") == tool_name for item in trace.get("tools") or [])
-
-
-def _trace_has_marker(trace, marker: str) -> bool:
-    return trace_has_marker(trace, marker)
-
-
-def _prefix_trace_markers(value: str, trace) -> str:
-    return prefix_trace_markers(value, trace)
 
 
 def _trace_has_any_tool(trace, tool_names) -> bool:

@@ -43,3 +43,14 @@ def test_planner_no_longer_owns_artifact_marker_extraction_protocol():
     assert "extract_artifact_markers" not in source
     assert "_append_missing_artifact_markers" not in source
     assert "_extract_artifact_markers" not in source
+
+
+def test_planner_no_longer_owns_trace_marker_helpers():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "prefix_trace_markers" not in source
+    assert "trace_has_marker" not in source
+    assert "def _prefix_trace_markers" not in source
+    assert "def _trace_has_marker" not in source

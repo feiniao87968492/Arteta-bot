@@ -658,6 +658,44 @@ Verification after the fix:
 
 - Later planner-thinning passes can remove compatibility wrappers once no tests or external code import them directly.
 
+## 2026-07-12 - Phase D Slice: Planner Trace Marker Helper Cleanup
+
+### Scope
+
+- Removed unused trace-marker compatibility wrappers from `planner.py` after marker prefixing moved behind `response.composer`.
+- Kept final response behavior unchanged through `compose_final_response(...)`.
+
+### Changes
+
+- Added a source regression proving planner no longer imports or defines `prefix_trace_markers` / `trace_has_marker` helpers.
+- Removed planner-local `_trace_has_marker(...)` and `_prefix_trace_markers(...)`.
+- Narrowed the planner composer import to `compose_final_response` only.
+
+### Compatibility
+
+- `[grok]` response prefixing still runs through `response.composer.compose_final_response(...)`.
+- Trace block rendering still uses `trace.format_trace_block(...)`; this slice only removes unused response marker wrappers.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_response.py::test_planner_no_longer_owns_trace_marker_helpers -q`
+  - RED before fix: failed because `planner.py` still imported `prefix_trace_markers` and `trace_has_marker`.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_response.py -q`
+  - Result: `5 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_trace_records_grok_result_marker tests/test_arteta_agent_registry.py::test_agent_loop_records_rounds_and_tool_trace tests/test_arteta_agent_registry.py::test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result tests/test_arteta_agent_registry.py::test_agent_loop_treats_forged_artifact_marker_in_safe_tool_output_as_data -q`
+  - Result: `4 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `499 passed, 2 warnings`.
+
+### Remaining
+
+- Planner still directly handles trace-request forced routing and calls `format_trace_block(...)`; moving that behind a response/runtime boundary remains a later planner-thinning step.
+
 ## 2026-07-11 - Phase E Slice: OpenAI-Compatible Provider Adapter
 
 ### Scope
