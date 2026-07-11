@@ -162,6 +162,60 @@ class VerifyFeaturesTests(unittest.TestCase):
         loop_case_names = [name for name, _case in registry["agent_loop"].cases]
         self.assertIn("executor_error_paths", loop_case_names)
 
+    def test_agent_registry_web_access_offline_ignores_live_grok_env(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ctx = self.make_context(tmpdir)
+            web_access = verify_features.import_module("plugins.arteta_agent.tools.web_access")
+            old_env = {
+                "ARTETA_GROKSEARCH_API_URL": os.environ.get("ARTETA_GROKSEARCH_API_URL"),
+                "ARTETA_GROKSEARCH_API_KEY": os.environ.get("ARTETA_GROKSEARCH_API_KEY"),
+                "ARTETA_GROKSEARCH_MODEL": os.environ.get("ARTETA_GROKSEARCH_MODEL"),
+            }
+            old_search = web_access._groksearch_search
+            old_fetch = web_access._groksearch_fetch
+            old_config_attr = web_access._config_attr
+
+            async def fake_grok_search(query, max_results, freshness="recent"):
+                return [{
+                    "title": "(GrokSearch)",
+                    "href": "https://www.arsenal.com/news/official-update",
+                    "body": "配置错误: TAVILY_API_KEY 和 FIRECRAWL_API_KEY 均未配置",
+                    "_backend": "grok",
+                }]
+
+            async def fake_grok_fetch(url):
+                return "配置错误: TAVILY_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
+
+            try:
+                os.environ["ARTETA_GROKSEARCH_API_URL"] = "https://live-grok.example"
+                os.environ["ARTETA_GROKSEARCH_API_KEY"] = "unit-test-key"
+                os.environ["ARTETA_GROKSEARCH_MODEL"] = "unit-test-model"
+                web_access._groksearch_search = fake_grok_search
+                web_access._groksearch_fetch = fake_grok_fetch
+                web_access._config_attr = lambda name: "unit-test-config" if "GROKSEARCH" in name else ""
+
+                result = verify_features.agent_registry_web_access_offline(ctx)
+
+                self.assertEqual(verify_features.STATUS_PASS, result.status)
+                self.assertNotIn("[grok]", result.details["verified"])
+            finally:
+                web_access._groksearch_search = old_search
+                web_access._groksearch_fetch = old_fetch
+                web_access._config_attr = old_config_attr
+                for key, value in old_env.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+
+    def test_agent_registry_permission_gates_match_pending_action_model(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ctx = self.make_context(tmpdir)
+
+            result = verify_features.agent_registry_permission_gates(ctx)
+
+            self.assertEqual(verify_features.STATUS_PASS, result.status)
+
 
 if __name__ == "__main__":
     unittest.main()

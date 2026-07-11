@@ -49,3 +49,26 @@
 - Deploy the changed runtime files to ECS.
 - Run ECS smoke checks.
 - Continue with unified Runtime and `AgentState` after Phase A is deployed.
+
+### ECS Smoke Adjustment
+
+After the initial ECS rollout, the bot and dashboard restarted successfully and `python tools\verify_features.py --suite chat` passed on ECS. Two broader smoke cases exposed verifier issues rather than runtime regressions:
+
+- `agent_registry/web_access_offline` was affected by live GrokSearch environment variables on ECS, so the offline fixture could route through the live Grok branch.
+- `agent_registry/permission_gates` still expected the removed legacy `confirmed_tool` bypass to authorize an admin tool.
+
+Verifier fix:
+
+- The offline web smoke now clears GrokSearch and X-fetch environment/module configuration, including NoneBot config lookup, while it runs its fake DuckDuckGo/fetch fixture.
+- The permission gate smoke now asserts unconfirmed write/admin calls are rejected and legacy `confirmed_tool` does not bypass confirmation. Confirmed execution remains covered by the pending-action executor cases.
+
+Verification after the fix:
+
+- `python -m pytest tests/test_verify_features.py -q`
+  - Result: `7 passed`.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed locally.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `180 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `450 passed, 2 warnings`.

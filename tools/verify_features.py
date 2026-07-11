@@ -767,7 +767,30 @@ def agent_registry_web_access_offline(ctx: RunContext) -> CaseResult:
 
     original_search = web_access._duckduckgo_search
     original_fetch = web_access._fetch_url
+    original_config_attr = web_access._config_attr
+    original_grok_url = getattr(web_access, "GROKSEARCH_API_URL", "")
+    original_grok_key = getattr(web_access, "GROKSEARCH_API_KEY", "")
+    original_grok_model = getattr(web_access, "GROKSEARCH_MODEL", "")
+    original_x_url = getattr(web_access, "X_FETCH_API_URL", "")
+    original_x_key = getattr(web_access, "X_FETCH_API_KEY", "")
+    env_keys = [
+        "ARTETA_GROKSEARCH_API_URL",
+        "ARTETA_GROKSEARCH_API_KEY",
+        "ARTETA_GROKSEARCH_MODEL",
+        "GROKSEARCH_TIMEOUT",
+        "ARTETA_X_FETCH_API_URL",
+        "ARTETA_X_FETCH_API_KEY",
+    ]
+    original_env = {key: os.environ.get(key) for key in env_keys}
     try:
+        for key in env_keys:
+            os.environ.pop(key, None)
+        web_access.GROKSEARCH_API_URL = ""
+        web_access.GROKSEARCH_API_KEY = ""
+        web_access.GROKSEARCH_MODEL = ""
+        web_access.X_FETCH_API_URL = ""
+        web_access.X_FETCH_API_KEY = ""
+        web_access._config_attr = lambda name: ""
         web_access._duckduckgo_search = fake_search
         web_access._fetch_url = fake_fetch
         blocked = asyncio.run(web_access.web_fetch(tool_ctx, url="file:///etc/passwd"))
@@ -776,6 +799,17 @@ def agent_registry_web_access_offline(ctx: RunContext) -> CaseResult:
     finally:
         web_access._duckduckgo_search = original_search
         web_access._fetch_url = original_fetch
+        web_access.GROKSEARCH_API_URL = original_grok_url
+        web_access.GROKSEARCH_API_KEY = original_grok_key
+        web_access.GROKSEARCH_MODEL = original_grok_model
+        web_access.X_FETCH_API_URL = original_x_url
+        web_access.X_FETCH_API_KEY = original_x_key
+        web_access._config_attr = original_config_attr
+        for key, value in original_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
     ok = (
         "只支持 http/https" in blocked
@@ -1053,16 +1087,25 @@ def agent_registry_permission_gates(ctx: RunContext) -> CaseResult:
     admin_spec = registry.ToolSpec("admin_tool", "admin", {"type": "object", "properties": {}}, lambda ctx: "ok", permission="admin_action")
     confirm_allowed, confirm_reason = permissions.check_permission(confirm_spec, tool_ctx, {})
     admin_allowed, admin_reason = permissions.check_permission(admin_spec, tool_ctx, {})
-    admin_confirmed, _ = permissions.check_permission(admin_spec, admin_ctx, {})
-    if confirm_allowed or admin_allowed or not admin_confirmed:
+    legacy_admin_confirmed, legacy_admin_reason = permissions.check_permission(admin_spec, admin_ctx, {})
+    if confirm_allowed or admin_allowed or legacy_admin_confirmed:
         return fail_result(
             "agent_registry",
             "permission_gates",
             "Permission gates returned unexpected decisions",
             start,
-            details={"confirm": [confirm_allowed, confirm_reason], "admin": [admin_allowed, admin_reason], "admin_confirmed": admin_confirmed},
+            details={
+                "confirm": [confirm_allowed, confirm_reason],
+                "admin": [admin_allowed, admin_reason],
+                "legacy_admin_confirmed": [legacy_admin_confirmed, legacy_admin_reason],
+            },
         )
-    return pass_result("agent_registry", "permission_gates", "Permission gates reject unconfirmed/admin actions and allow confirmed admin action", start)
+    return pass_result(
+        "agent_registry",
+        "permission_gates",
+        "Permission gates reject unconfirmed/admin actions and do not honor legacy confirmed_tool bypass",
+        start,
+    )
 
 
 def agent_registry_executor_error_paths(ctx: RunContext) -> CaseResult:
