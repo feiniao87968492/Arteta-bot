@@ -12,6 +12,11 @@ from .planning.plan_builder import build_plan
 from .registry import build_openai_tools, get_tool, list_enabled_tools
 from .response.artifacts import ARTIFACT_MARKER_RE, extract_artifact_markers
 from .response.composer import compose_final_response, prefix_trace_markers, trace_has_marker
+from .response.mood import (
+    detect_forced_mood_emoji_args as response_detect_forced_mood_emoji_args,
+    maybe_send_mood_emoji,
+    should_allow_forced_mood_emoji as response_should_allow_forced_mood_emoji,
+)
 from .result import TOOL_STATUS_PERMISSION_REQUIRED
 from .runtime.config import AgentRunConfig
 from .runtime.loop_guard import loop_guard_message, tool_call_signature
@@ -834,6 +839,7 @@ def _trace_has_any_tool(trace, tool_names) -> bool:
 
 
 def _should_allow_forced_mood_emoji(messages, trace) -> bool:
+    return response_should_allow_forced_mood_emoji(messages, trace)
     # Policy/trace/debug answers are operational diagnostics, not emotional
     # chat replies. Auto-emoji here makes the agent appear to ignore policy.
     if _trace_has_any_tool(trace, {
@@ -902,6 +908,7 @@ async def _answer_after_unavailable_web_result(state, web_result: str, model: st
 
 
 def detect_forced_mood_emoji_args(messages, assistant_content: str = "") -> dict:
+    return response_detect_forced_mood_emoji_args(messages, assistant_content)
     user_text = _latest_user_content(messages).strip()
     if not user_text:
         return {}
@@ -1089,27 +1096,13 @@ async def _runtime_model_call(state_messages, runtime_state: AgentState) -> dict
 
 
 async def _runtime_finalizer(content: str, runtime_state: AgentState) -> FinalizedResponse:
-    forced_emoji_args = detect_forced_mood_emoji_args(runtime_state.messages, content)
-    if (
-        forced_emoji_args
-        and get_tool("send_mood_emoji")
-        and _should_allow_forced_mood_emoji(runtime_state.messages, runtime_state.trace)
-        and _mood_emoji_enabled(runtime_state.ctx.group_id)
-        and "send_mood_emoji" not in set(runtime_state.policy_disabled_tools or set())
-        and not _state_has_tool_call(runtime_state.messages, "send_mood_emoji")
-        and not _trace_has_tool(runtime_state.trace, "send_mood_emoji")
-    ):
-        emoji_call = {
-            "id": "forced-send-mood-emoji-1",
-            "type": "function",
-            "function": {
-                "name": "send_mood_emoji",
-                "arguments": json.dumps(forced_emoji_args, ensure_ascii=False),
-            },
-        }
-        await execute_tool_call(emoji_call, runtime_state.ctx)
-        return FinalizedResponse(content, 1)
-    return FinalizedResponse(content, 0)
+    return await maybe_send_mood_emoji(
+        content,
+        runtime_state,
+        get_tool=get_tool,
+        execute_tool_call=execute_tool_call,
+        emoji_enabled=_mood_emoji_enabled,
+    )
 
 
 def _observe_runtime_tool_result(tool_artifact_markers: list):

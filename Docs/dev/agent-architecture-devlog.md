@@ -344,3 +344,52 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase D Slice: Mood Emoji Response Finalizer
+
+### Scope
+
+- Moved the runtime mood-emoji finalizer decision and execution wrapper into the response package.
+- Kept the existing `send_mood_emoji` tool, permission enforcement, trace recording, and post-reply queue behavior unchanged.
+- Did not change neutral/debug policy: policy and trace/debug turns still do not auto-send emoji.
+
+### Changes
+
+- Added `plugins/arteta_agent/response/mood.py`.
+- Added `maybe_send_mood_emoji(...)` with explicit dependency injection for:
+  - tool lookup;
+  - tool execution;
+  - group emoji policy lookup.
+- Added unit tests in `tests/test_arteta_agent_mood_response.py` for:
+  - negative reply fallback sending an emoji when the model skipped the tool;
+  - policy/trace operational turns not sending emoji;
+  - disabled or already-called emoji tool not sending again.
+- Planner's runtime finalizer now delegates to `maybe_send_mood_emoji(...)`.
+- Planner keeps compatibility wrappers for old helper names to reduce churn while later cleanup removes unreachable legacy bodies.
+
+### Compatibility
+
+- `run_agent_loop` output remains unchanged.
+- Existing `send_mood_emoji` tool schema and permission level remain unchanged.
+- Tool execution still goes through `execute_tool_call`, so schema validation, permission checks, trace, and audit behavior are preserved.
+
+### Risk Notes
+
+- The older unreachable mood helper bodies still exist in planner after an early return because the source contains mojibake text that makes broad deletion riskier. They are no longer on the active runtime path and should be cleaned in a later planner-thinning pass.
+- This slice does not move permission confirmation messages or degradation text yet.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_mood_response.py -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_forces_negative_mood_emoji_when_llm_skips_tool tests/test_arteta_agent_registry.py::test_agent_loop_forces_positive_neutral_mood_emoji_for_non_negative_reply tests/test_arteta_agent_registry.py::test_agent_loop_does_not_force_mood_emoji_after_behavior_policy_query -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_mood_response.py tests/test_arteta_agent_response.py tests/test_arteta_agent_registry.py -q`
+  - Result: `187 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `469 passed, 2 warnings`.
+
+### Remaining
+
+- Continue moving confirmation/degradation copy and trace formatting entrypoints into response adapters.
+- Remove unreachable planner legacy response code during the final planner-thinning phase once coverage around all response branches is complete.
