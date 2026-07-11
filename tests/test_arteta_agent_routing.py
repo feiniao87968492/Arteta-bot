@@ -300,3 +300,34 @@ def test_agent_loop_executes_single_current_fact_plan_before_legacy_forced_web(m
     assert result == "verified answer"
     assert executed == [("verify_recent_claim", "latest Arsenal transfer news", "", 5)]
     assert trace["tools"][0]["name"] == "verify_recent_claim"
+
+
+def test_plan_builder_selects_available_public_current_fact_fallback_tool(tmp_path, monkeypatch):
+    from plugins.arteta_agent import behavior_policy
+    from plugins.arteta_agent.planning.plan_builder import build_public_current_fact_planned_call
+
+    policy_path = tmp_path / "behavior_policy.json"
+    monkeypatch.setenv("ARTETA_AGENT_BEHAVIOR_POLICY_PATH", str(policy_path))
+    monkeypatch.delenv("ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH", raising=False)
+    behavior_policy.set_group_policy(
+        "group-1",
+        "route.public_current_fact.preferred_tool",
+        "verify_recent_claim",
+        reason="prefer verifier for current facts",
+    )
+
+    available = {"grok_search"}
+    planned = build_public_current_fact_planned_call(
+        make_context(group_id="group-1"),
+        {"query": "Arsenal latest injury news", "freshness": "recent", "max_results": 4},
+        disabled_tools={"verify_recent_claim"},
+        is_tool_available=lambda name: name in available,
+    )
+
+    assert planned is not None
+    assert planned.name == "grok_search"
+    assert planned.arguments == {
+        "query": "Arsenal latest injury news",
+        "freshness": "recent",
+        "max_results": 4,
+    }

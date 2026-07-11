@@ -286,6 +286,47 @@ Verification after the fix:
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
 
+## 2026-07-11 - Phase C Slice: Current-Fact Plan Builder Helper
+
+### Scope
+
+- Reduced duplicated public-current-fact route policy logic in `planner.py`.
+- Kept legacy forced-web fallback behavior but made it call the planning layer for tool selection and argument encoding.
+
+### Changes
+
+- Added `build_public_current_fact_planned_call(...)` in `planning.plan_builder`.
+- The helper applies `route.public_current_fact.preferred_tool`, respects disabled tools, accepts a tool-availability callback, and returns a structured `PlannedToolCall`.
+- `planner.run_agent_loop` now uses this helper for the remaining forced-web fallback path.
+- Removed planner-local `_public_current_fact_route_tool`, `_route_args_for_public_current_fact`, and `_select_public_current_fact_route_tool`.
+
+### Compatibility
+
+- Existing default fallback order remains `grok_search`, then `verify_recent_claim`, then `web_search`.
+- Existing behavior-policy route overrides remain compatible.
+- Planner still performs registry/disabled-tool filtering before executing the generated call.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_selects_available_public_current_fact_fallback_tool -q`
+  - RED before fix: failed because `build_public_current_fact_planned_call` did not exist.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `9 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_routes_recent_news_to_available_verifier tests/test_arteta_agent_registry.py::test_agent_loop_uses_behavior_policy_route_for_public_current_questions tests/test_arteta_agent_registry.py::test_agent_loop_falls_back_to_grok_when_route_policy_tool_is_unavailable tests/test_arteta_agent_registry.py::test_agent_loop_continues_answering_when_forced_web_verification_is_unavailable -q`
+  - Result: `4 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `496 passed, 2 warnings`.
+
+### Remaining
+
+- Continue migrating additional planner-local route helpers only with focused route tests.
+- The legacy forced-web detector still lives in planner until the route dataset can cover its remaining Chinese/local-memory edge cases.
+
 ## 2026-07-11 - Phase D Slice: Structured Artifact Marker Boundary
 
 ### Scope

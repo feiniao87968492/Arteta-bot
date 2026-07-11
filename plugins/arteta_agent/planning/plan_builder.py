@@ -34,21 +34,49 @@ def _public_current_fact_args(tool_name: str, planned: PlannedToolCall) -> dict:
     }
 
 
+def build_public_current_fact_planned_call(
+    ctx: ToolContext = None,
+    args: dict = None,
+    disabled_tools=None,
+    is_tool_available=None,
+):
+    disabled = set(disabled_tools or set())
+    available = is_tool_available or (lambda _name: True)
+    candidates = []
+    preferred = _preferred_public_current_fact_tool(ctx)
+    if preferred:
+        candidates.append(preferred)
+    for fallback in PUBLIC_CURRENT_FACT_TOOLS:
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    seed = PlannedToolCall(
+        name="grok_search",
+        arguments=dict(args or {}),
+        reason="verify current public football fact",
+        forced=True,
+    )
+    for tool_name in candidates:
+        if tool_name in disabled or not available(tool_name):
+            continue
+        return PlannedToolCall(
+            name=tool_name,
+            arguments=_public_current_fact_args(tool_name, seed),
+            reason=seed.reason,
+            forced=seed.forced,
+        )
+    return None
+
+
 def _rewrite_public_current_fact_tools(decision: RouteDecision, ctx: ToolContext = None) -> list:
     has_current_fact = any(intent.name == "public_current_fact" for intent in decision.intents or [])
     if not has_current_fact:
         return list(decision.required_tools or [])
 
-    preferred_tool = _preferred_public_current_fact_tool(ctx)
     rewritten = []
     for planned in decision.required_tools or []:
         if planned.name in PUBLIC_CURRENT_FACT_TOOLS:
-            rewritten.append(PlannedToolCall(
-                name=preferred_tool,
-                arguments=_public_current_fact_args(preferred_tool, planned),
-                reason=planned.reason,
-                forced=planned.forced,
-            ))
+            rewritten.append(build_public_current_fact_planned_call(ctx, planned.arguments) or planned)
         else:
             rewritten.append(planned)
     return rewritten

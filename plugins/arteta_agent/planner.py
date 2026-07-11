@@ -6,7 +6,7 @@ from .audit import record_pending_confirmation_failure
 from .context import ToolContext
 from .executor import execute_tool_call, execute_tool_call_result
 from .pending import store_from_context
-from .planning.plan_builder import build_plan
+from .planning.plan_builder import build_plan, build_public_current_fact_planned_call
 from .providers.http_client import get_shared_async_client
 from .providers.openai_compatible import (
     OpenAICompatibleProvider,
@@ -709,45 +709,6 @@ def detect_forced_web_verification_args(messages) -> dict:
         "freshness": "recent",
         "max_results": 5,
     }
-
-
-def _public_current_fact_route_tool(group_id: str) -> str:
-    item = behavior_policy.get_group_policy(group_id, "route.public_current_fact.preferred_tool")
-    tool_name = str(item.get("value") or "").strip()
-    if tool_name in ("grok_search", "verify_recent_claim", "web_search"):
-        return tool_name
-    return "grok_search"
-
-
-def _route_args_for_public_current_fact(tool_name: str, args: dict) -> dict:
-    text = str((args or {}).get("query") or "").strip()
-    max_results = int((args or {}).get("max_results") or 5)
-    if tool_name == "verify_recent_claim":
-        return {
-            "claim": text,
-            "preferred_sources": "official sources, primary reporting, reliable football news",
-            "max_results": max_results,
-        }
-    return {
-        "query": text,
-        "freshness": str((args or {}).get("freshness") or "recent"),
-        "max_results": max_results,
-    }
-
-
-def _select_public_current_fact_route_tool(group_id: str, disabled_tools) -> str:
-    disabled = set(disabled_tools or set())
-    candidates = []
-    preferred = _public_current_fact_route_tool(group_id)
-    if preferred:
-        candidates.append(preferred)
-    for fallback in ("grok_search", "verify_recent_claim", "web_search"):
-        if fallback not in candidates:
-            candidates.append(fallback)
-    for tool_name in candidates:
-        if get_tool(tool_name) and tool_name not in disabled:
-            return tool_name
-    return ""
 
 
 def _state_has_tool_call(messages, tool_name: str) -> bool:
@@ -1607,20 +1568,19 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
         ))
 
     forced_web_args = detect_forced_web_verification_args(state)
-    preferred_web_tool = _select_public_current_fact_route_tool(ctx.group_id, disabled_tools)
-    if (
-        forced_web_args
-        and preferred_web_tool
-    ):
+    planned_web_call = build_public_current_fact_planned_call(
+        ctx,
+        forced_web_args,
+        disabled_tools=disabled_tools,
+        is_tool_available=lambda name: get_tool(name) is not None,
+    ) if forced_web_args else None
+    if planned_web_call:
         tool_call = {
-            "id": "forced-{0}-1".format(preferred_web_tool.replace("_", "-")),
+            "id": "forced-{0}-1".format(planned_web_call.name.replace("_", "-")),
             "type": "function",
             "function": {
-                "name": preferred_web_tool,
-                "arguments": json.dumps(
-                    _route_args_for_public_current_fact(preferred_web_tool, forced_web_args),
-                    ensure_ascii=False,
-                ),
+                "name": planned_web_call.name,
+                "arguments": json.dumps(planned_web_call.arguments, ensure_ascii=False),
             },
         }
         return finish(await _answer_from_forced_tool_result(
