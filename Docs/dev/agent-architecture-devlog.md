@@ -604,3 +604,22 @@ Verification after the fix:
 - Add explicit concurrent update/consume tests.
 - Enable SQLite behavior policy path in ECS deployment once migration backup behavior is accepted.
 - Remove JSON fallback after a stabilization period, or keep it read-only as an import path only.
+
+### ECS Deployment
+
+- Commit deployed: `6ffd540 refactor: add sqlite behavior policy store`.
+- Deployment archive: `/tmp/arteta_phase_f_policy_sqlite_6ffd540.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_f_policy_sqlite_20260711204500`.
+- Remote `py_compile` passed for `plugins/arteta_agent/behavior_policy.py` and `tests/test_arteta_agent_behavior_policy_store.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After SQLite Policy Store Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
