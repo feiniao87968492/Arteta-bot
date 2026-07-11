@@ -2,6 +2,7 @@ import json
 from typing import List
 
 from ..context import ToolContext
+from .contextual_tools import detect_memory_preference_args
 from .contextual_tools import detect_ui_preference_args
 from .models import Intent, PlannedToolCall, RouteDecision
 
@@ -9,7 +10,6 @@ from .models import Intent, PlannedToolCall, RouteDecision
 LOCAL_MEMORY_MARKERS = ("之前", "刚才", "上次", "昨天", "你之前", "你刚才")
 CURRENT_FACT_MARKERS = ("最新", "最近", "现在", "结果", "赛果", "比分", "伤病", "转会")
 FOOTBALL_MARKERS = ("阿森纳", "arsenal", "比赛", "英超", "欧冠", "球队")
-MEMORY_PREFERENCE_MARKERS = ("记住", "以后", "下次")
 DOCUMENT_MARKERS = ("pdf", "PDF", "文档", "文件", "附件", "报告")
 MATH_INTENT_MARKERS = ("求解", "计算", "解方程", "证明")
 
@@ -94,11 +94,12 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
             forced=True,
         ))
 
-    if _has_any(text, MEMORY_PREFERENCE_MARKERS) and not ui_args:
+    memory_args = detect_memory_preference_args(messages)
+    if memory_args and not ui_args:
         decision.intents.append(Intent("memory_preference", 0.9, "explicit future/preference marker"))
         _append_tool_once(decision.required_tools, PlannedToolCall(
             name="remember_user_preference",
-            arguments={"memory": text},
+            arguments=memory_args,
             reason="remember explicit user preference",
             forced=True,
         ))

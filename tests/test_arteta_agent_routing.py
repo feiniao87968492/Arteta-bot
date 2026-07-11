@@ -407,3 +407,45 @@ def test_planner_no_longer_has_forced_ui_preference_branch():
 
     assert "forced_ui_args" not in source
     assert "update_ui_preference\") and \"update_ui_preference\" not in disabled_tools" not in source
+
+
+def test_contextual_tools_detects_memory_preference_args_for_future_rules():
+    from plugins.arteta_agent.routing.contextual_tools import detect_memory_preference_args
+
+    assert detect_memory_preference_args([
+        {"role": "user", "content": "以后我说开会就是提醒我看阿森纳赛程"},
+    ]) == {"memory": "以后我说开会就是提醒我看阿森纳赛程"}
+    assert detect_memory_preference_args([
+        {"role": "user", "content": "以后在回复里，飞鸟这个名字改成深绿，颜色是006400"},
+    ]) == {"memory": "以后在回复里，飞鸟这个名字改成深绿，颜色是006400"}
+    assert detect_memory_preference_args([
+        {"role": "user", "content": "下次阿森纳比赛几点"},
+    ]) == {}
+
+
+def test_plan_builder_routes_memory_preference_requests_as_direct_required_tool():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    decision = route_message([
+        {"role": "user", "content": "以后我说开会就是提醒我看阿森纳赛程"},
+    ], make_context())
+    plan = build_plan(decision, make_context())
+
+    assert any(intent.name == "memory_preference" for intent in decision.intents)
+    assert tool_names(plan) == ["remember_user_preference"]
+    assert plan.required_tools[0].arguments == {
+        "memory": "以后我说开会就是提醒我看阿森纳赛程",
+    }
+    assert plan.constraints.get("execute_single_required_tool") is True
+    assert plan.constraints.get("direct_tool_response") is True
+
+
+def test_planner_no_longer_has_forced_memory_preference_branch():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "def detect_forced_memory_args" not in source
+    assert "forced_memory_args" not in source
+    assert "forced-remember-user-preference" not in source

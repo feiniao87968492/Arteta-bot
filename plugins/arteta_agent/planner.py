@@ -517,42 +517,6 @@ def should_force_link_analysis_tool(messages, ctx: ToolContext) -> bool:
     return not text or _has_any_marker(text, LINK_INTENT_MARKERS)
 
 
-def detect_forced_memory_args(messages) -> dict:
-    text = _latest_user_content(messages).strip()
-    if not text:
-        return {}
-    explicit = ("记住" in text or "記住" in text)
-    future_marker = "以后" in text or "以後" in text or "下次" in text
-    preference_shape = any(marker in text for marker in (
-        "我说",
-        "叫我",
-        "你就",
-        "记得",
-        "記得",
-        "提醒我",
-        "默认",
-        "優先",
-        "优先",
-        "不要",
-        "回复",
-        "回答",
-        "名字",
-        "颜色",
-        "色值",
-        "改成",
-        "换成",
-        "标红",
-        "标蓝",
-        "绿色",
-        "深绿",
-        "浅绿",
-        "亮绿",
-    ))
-    if explicit or (future_marker and preference_shape):
-        return {"memory": text}
-    return {}
-
-
 def detect_forced_web_verification_args(messages) -> dict:
     text = _latest_user_content(messages).strip()
     if not text:
@@ -1232,24 +1196,6 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
         if initial_plan.constraints.get("direct_trace_response"):
             return finish(compose_trace_response(trace))
         return finish(initial_result)
-
-    forced_memory_args = detect_forced_memory_args(state)
-    if forced_memory_args and get_tool("remember_user_preference") and "remember_user_preference" not in disabled_tools:
-        # Explicit "以后/下次/记住" preferences should enter long-term memory
-        # immediately; waiting for summaries loses the user's instruction.
-        tool_call = {
-            "id": "forced-remember-user-preference-1",
-            "type": "function",
-            "function": {
-                "name": "remember_user_preference",
-                "arguments": json.dumps(forced_memory_args, ensure_ascii=False),
-            },
-        }
-        return finish(await _run_forced_tool_direct(
-            state, ctx, tool_call, model, api_key, api_url, allowed, disabled_tools,
-            max_rounds, trace, temperature, tool_artifact_markers, request_timeout,
-            max_tool_calls, max_same_tool_call_repeats, max_total_observation_chars,
-        ))
 
     if should_force_document_tool(state, ctx) and get_tool("read_document") and "read_document" not in disabled_tools:
         tool_call = {

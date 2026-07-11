@@ -1662,3 +1662,49 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Slice: Memory Preference Plan Route
+
+### Scope
+
+- Migrated the explicit `remember_user_preference` forced branch out of `planner.py` and into the structured Routing + Planning path.
+- Kept the existing user-facing behavior for explicit future preferences:
+  - single memory-preference requests still execute `remember_user_preference` immediately and return the tool response;
+  - multi-intent requests such as memory preference plus PDF analysis still execute both required tools and then continue through the unified Runtime for model composition.
+
+### Changes
+
+- Added `detect_memory_preference_args(...)` to `routing/contextual_tools.py`, preserving the prior preference-shape logic for:
+  - explicit `记住` requests;
+  - `以后/下次` plus preference-shape requests such as "我说...", "提醒我...", reply style, names, colors, and replacements.
+- `heuristic_router.route_message(...)` now emits the `memory_preference` intent from that detector instead of the previous broad marker check.
+- `build_plan(...)` now marks a single `remember_user_preference` required tool as `execute_single_required_tool` and `direct_tool_response`.
+- Removed `detect_forced_memory_args(...)` and the `forced-remember-user-preference` branch from `planner.py`.
+
+### Compatibility and Safety
+
+- No tool names, schemas, permissions, or handler behavior changed.
+- The memory tool still runs through the same planned initial-tool Runtime path used by trace, UI preference, and other structured required tools.
+- The broad phrase "下次阿森纳比赛几点" no longer becomes a memory write just because it contains `下次`.
+- UI preference requests keep taking the controlled `update_ui_preference` route and are not silently written into long-term memory.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_contextual_tools_detects_memory_preference_args_for_future_rules tests/test_arteta_agent_routing.py::test_plan_builder_routes_memory_preference_requests_as_direct_required_tool tests/test_arteta_agent_routing.py::test_planner_no_longer_has_forced_memory_preference_branch -q`
+  - RED before fix: failed because the routing detector did not exist, the plan lacked direct-tool constraints, and planner still had the forced memory branch.
+  - GREEN after fix: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_contextual_tools_detects_memory_preference_args_for_future_rules tests/test_arteta_agent_routing.py::test_plan_builder_routes_memory_preference_requests_as_direct_required_tool tests/test_arteta_agent_routing.py::test_planner_no_longer_has_forced_memory_preference_branch tests/test_arteta_agent_routing.py::test_plan_builder_combines_memory_preference_and_document_context tests/test_arteta_agent_routing.py::test_agent_loop_executes_multi_intent_memory_and_document_plan tests/test_arteta_agent_registry.py::test_agent_loop_forces_memory_tool_for_explicit_future_preference tests/test_arteta_agent_registry.py::test_agent_loop_forces_memory_tool_for_reply_phrase_style_preference -q`
+  - Result: `7 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `18 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `510 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still contains legacy forced branches for document/link/web/science flows; migrate them one slice at a time after adding equivalent plan tests.
+- Continue reducing planner constants and helper logic only when a structured routing/planning/response owner exists.

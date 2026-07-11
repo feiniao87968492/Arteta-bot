@@ -8,6 +8,42 @@ def latest_user_content(messages) -> str:
     return ""
 
 
+def detect_memory_preference_args(messages) -> dict:
+    text = latest_user_content(messages).strip()
+    if not text:
+        return {}
+    explicit = "记住" in text or "記住" in text
+    future_marker = "以后" in text or "以後" in text or "下次" in text
+    preference_shape = any(marker in text for marker in (
+        "我说",
+        "叫我",
+        "你就",
+        "记得",
+        "記得",
+        "提醒我",
+        "默认",
+        "優先",
+        "优先",
+        "不要",
+        "回复",
+        "回答",
+        "名字",
+        "颜色",
+        "色值",
+        "改成",
+        "换成",
+        "标红",
+        "标蓝",
+        "绿色",
+        "深绿",
+        "浅绿",
+        "亮绿",
+    ))
+    if explicit or (future_marker and preference_shape):
+        return {"memory": text}
+    return {}
+
+
 CHINESE_NUMBERS = {
     "一": 1,
     "两": 2,
