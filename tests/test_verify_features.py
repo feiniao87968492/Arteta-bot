@@ -216,6 +216,23 @@ class VerifyFeaturesTests(unittest.TestCase):
 
             self.assertEqual(verify_features.STATUS_PASS, result.status)
 
+    def test_agent_loop_verifier_uses_strict_tool_schemas(self):
+        cases = [
+            verify_features.agent_loop_forces_ui_preference_tool,
+            verify_features.agent_loop_forces_reply_body_ui_preference_tool,
+            verify_features.agent_loop_allows_llm_to_choose_web_verification_tool,
+            verify_features.agent_loop_forces_explicit_memory_tool,
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ctx = self.make_context(tmpdir)
+            for case in cases:
+                result = case(ctx)
+                self.assertEqual(
+                    verify_features.STATUS_PASS,
+                    result.status,
+                    "%s failed with details %r" % (result.case, result.details),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

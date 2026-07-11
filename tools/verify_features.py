@@ -38,6 +38,34 @@ STATUS_MANUAL = "manual_required"
 TERMINAL_FAILURE_STATUSES = set([STATUS_FAIL])
 NON_FAILURE_STATUSES = set([STATUS_PASS, STATUS_SKIP, STATUS_MANUAL])
 
+UI_PREFERENCE_VERIFY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "target": {"type": "string"},
+        "color": {"type": "string"},
+        "bold": {"type": "boolean"},
+        "font_size": {"type": "string"},
+        "font_scale": {"type": "number"},
+    },
+    "required": ["target"],
+}
+
+VERIFY_RECENT_CLAIM_VERIFY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "claim": {"type": "string"},
+        "preferred_sources": {"type": "string"},
+        "max_results": {"type": "integer"},
+    },
+    "required": ["claim"],
+}
+
+MEMORY_PREFERENCE_VERIFY_SCHEMA = {
+    "type": "object",
+    "properties": {"memory": {"type": "string"}},
+    "required": ["memory"],
+}
+
 
 @dataclass
 class CaseResult:
@@ -1497,7 +1525,7 @@ def agent_loop_forces_ui_preference_tool(ctx: RunContext) -> CaseResult:
     registry.register_tool(registry.ToolSpec(
         name="update_ui_preference",
         description="update ui",
-        parameters={"type": "object", "properties": {}},
+        parameters=UI_PREFERENCE_VERIFY_SCHEMA,
         handler=ui_handler,
         permission="safe_write",
     ))
@@ -1557,7 +1585,7 @@ def agent_loop_forces_reply_body_ui_preference_tool(ctx: RunContext) -> CaseResu
     registry.register_tool(registry.ToolSpec(
         name="update_ui_preference",
         description="update ui",
-        parameters={"type": "object", "properties": {}},
+        parameters=UI_PREFERENCE_VERIFY_SCHEMA,
         handler=ui_handler,
         permission="safe_write",
     ))
@@ -1627,7 +1655,7 @@ def agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score(ctx: RunCon
     registry.register_tool(registry.ToolSpec(
         name="verify_recent_claim",
         description="verify recent claim",
-        parameters={"type": "object", "properties": {}},
+        parameters=VERIFY_RECENT_CLAIM_VERIFY_SCHEMA,
         handler=web_handler,
         permission="safe_read",
     ))
@@ -1700,7 +1728,7 @@ def agent_loop_allows_llm_to_choose_web_verification_tool(ctx: RunContext) -> Ca
     registry.register_tool(registry.ToolSpec(
         name="verify_recent_claim",
         description="verify recent claim",
-        parameters={"type": "object", "properties": {}},
+        parameters=VERIFY_RECENT_CLAIM_VERIFY_SCHEMA,
         handler=web_handler,
         permission="safe_read",
     ))
@@ -1849,7 +1877,7 @@ def agent_loop_forces_explicit_memory_tool(ctx: RunContext) -> CaseResult:
     registry.register_tool(registry.ToolSpec(
         name="remember_user_preference",
         description="remember",
-        parameters={"type": "object", "properties": {}},
+        parameters=MEMORY_PREFERENCE_VERIFY_SCHEMA,
         handler=memory_handler,
         permission="safe_write",
     ))
