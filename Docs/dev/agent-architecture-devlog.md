@@ -2527,3 +2527,25 @@ Verification after the fix:
 
 - `planner.py` still owns the compatibility orchestration flow: trace setup, policy TTL finalization, route/plan invocation, Runtime invocation, and final response composition.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
+
+### ECS Deployment
+
+- Commit deployed: `2713d9a refactor: move planned tool execution helpers`.
+- Deployment archive: `/tmp/arteta_phase_c_plan_execution_2713d9a.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_plan_execution_20260712034504`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/planning/execution.py`;
+  - `tests/test_arteta_agent_routing.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Planned Execution Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
