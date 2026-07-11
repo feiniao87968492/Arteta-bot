@@ -602,6 +602,40 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase E Slice: Provider Retry And Backoff
+
+### Scope
+
+- Moved retry/backoff responsibility into the OpenAI-compatible Provider adapter.
+- Kept planner/runtime free of provider HTTP retry details.
+
+### Changes
+
+- `OpenAICompatibleProvider` now accepts `max_retries`, `retry_backoff_seconds`, and `retry_status_codes`.
+- Default retry policy permits retrying HTTP `408`, `429`, `500`, `502`, `503`, and `504`.
+- Transport and timeout failures from `httpx` are retryable.
+- Non-retryable HTTP status errors and unclassified programming/data errors are not retried.
+- Backoff is exponential and can be disabled in tests with `retry_backoff_seconds=0`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_provider.py::test_openai_compatible_provider_retries_retryable_status_then_succeeds tests/test_arteta_agent_provider.py::test_openai_compatible_provider_does_not_retry_non_retryable_status -q`
+  - RED before fix: failed because `OpenAICompatibleProvider` had no retry configuration.
+  - GREEN after fix: `2 passed`.
+- `python -m pytest tests/test_arteta_agent_provider.py::test_openai_compatible_provider_does_not_retry_unclassified_errors -q`
+  - RED before tightening: failed because unclassified `ValueError` was retried.
+  - GREEN after tightening: included in provider suite below.
+- `python -m pytest tests/test_arteta_agent_provider.py -q`
+  - Result: `10 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `492 passed` plus existing Windows asyncio/proactor warnings printed after completion.
+
+### Remaining
+
+- Capability-based message encoding for providers without standard tool history support remains a later provider slice.
 - `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
   - Result: `186 passed, 2 warnings`.
 - `python -m pytest tests -q`

@@ -38,6 +38,39 @@ class FakeClient:
         self.closed = True
 
 
+class FakeHTTPStatusError(Exception):
+    def __init__(self, status_code):
+        self.response = type("Response", (), {"status_code": status_code})()
+        super().__init__("HTTP {0}".format(status_code))
+
+
+class FailingStatusResponse:
+    text = ""
+    headers = {"content-type": "application/json"}
+
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        raise FakeHTTPStatusError(self.status_code)
+
+    def json(self):
+        return {}
+
+
+class SequenceClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def post(self, url, headers=None, json=None, timeout=None):
+        self.calls.append((url, headers or {}, json or {}, timeout))
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
 def test_shared_async_client_is_reused_and_closed():
     created = []
 
@@ -122,6 +155,74 @@ def test_openai_compatible_provider_merges_extra_payload_fields():
     assert calls[0][2]["max_tokens"] == 80
     assert calls[0][2]["response_format"] == {"type": "json_object"}
     assert calls[0][3] == 4.0
+
+
+def test_openai_compatible_provider_retries_retryable_status_then_succeeds():
+    client = SequenceClient([
+        FailingStatusResponse(500),
+        FakeResponse({"role": "assistant", "content": "ok after retry"}),
+    ])
+    provider = OpenAICompatibleProvider(
+        client=client,
+        api_url="https://provider.example/v1/chat/completions",
+        max_retries=1,
+        retry_backoff_seconds=0,
+    )
+
+    result = asyncio.run(provider.chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="model",
+        api_key="key",
+    ))
+
+    assert result["content"] == "ok after retry"
+    assert len(client.calls) == 2
+
+
+def test_openai_compatible_provider_does_not_retry_non_retryable_status():
+    client = SequenceClient([FailingStatusResponse(400)])
+    provider = OpenAICompatibleProvider(
+        client=client,
+        api_url="https://provider.example/v1/chat/completions",
+        max_retries=2,
+        retry_backoff_seconds=0,
+    )
+
+    try:
+        asyncio.run(provider.chat(
+            messages=[{"role": "user", "content": "hi"}],
+            model="model",
+            api_key="key",
+        ))
+    except FakeHTTPStatusError:
+        pass
+    else:
+        raise AssertionError("Expected non-retryable provider status to be raised")
+
+    assert len(client.calls) == 1
+
+
+def test_openai_compatible_provider_does_not_retry_unclassified_errors():
+    client = SequenceClient([ValueError("bad payload")])
+    provider = OpenAICompatibleProvider(
+        client=client,
+        api_url="https://provider.example/v1/chat/completions",
+        max_retries=2,
+        retry_backoff_seconds=0,
+    )
+
+    try:
+        asyncio.run(provider.chat(
+            messages=[{"role": "user", "content": "hi"}],
+            model="model",
+            api_key="key",
+        ))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected unclassified provider error to be raised")
+
+    assert len(client.calls) == 1
 
 
 def test_planner_call_llm_with_tools_reuses_shared_client():

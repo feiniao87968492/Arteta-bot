@@ -1,6 +1,9 @@
 import json
+import asyncio
 from dataclasses import dataclass
 from typing import List, Optional
+
+import httpx
 
 
 class ProviderResponseError(Exception):
@@ -50,10 +53,28 @@ class OpenAICompatibleProvider:
         client,
         api_url: str,
         capabilities: Optional[ProviderCapabilities] = None,
+        max_retries: int = 2,
+        retry_backoff_seconds: float = 0.5,
+        retry_status_codes: Optional[set] = None,
     ) -> None:
         self.client = client
         self.api_url = api_url
         self.capabilities = capabilities or ProviderCapabilities()
+        self.max_retries = max(0, int(max_retries or 0))
+        self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds or 0.0))
+        self.retry_status_codes = retry_status_codes or {408, 429, 500, 502, 503, 504}
+
+    def _should_retry_error(self, exc) -> bool:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code is not None:
+            return int(status_code) in self.retry_status_codes
+        return isinstance(exc, (TimeoutError, httpx.TimeoutException, httpx.TransportError))
+
+    async def _sleep_before_retry(self, attempt_index: int) -> None:
+        if self.retry_backoff_seconds <= 0:
+            return
+        await asyncio.sleep(self.retry_backoff_seconds * (2 ** attempt_index))
 
     async def chat(
         self,
@@ -75,13 +96,21 @@ class OpenAICompatibleProvider:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        resp = await self.client.post(
-            self.api_url,
-            headers={"Authorization": "Bearer {0}".format(api_key)},
-            json=payload,
-            timeout=timeout,
-        )
-        resp.raise_for_status()
+        attempts = self.max_retries + 1
+        for attempt_index in range(attempts):
+            try:
+                resp = await self.client.post(
+                    self.api_url,
+                    headers={"Authorization": "Bearer {0}".format(api_key)},
+                    json=payload,
+                    timeout=timeout,
+                )
+                resp.raise_for_status()
+                break
+            except Exception as exc:
+                if attempt_index >= self.max_retries or not self._should_retry_error(exc):
+                    raise
+                await self._sleep_before_retry(attempt_index)
         msg = parse_chat_response(resp, self.api_url)
         out = {"role": msg["role"], "content": msg.get("content", "")}
         if msg.get("tool_calls"):
