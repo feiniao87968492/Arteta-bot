@@ -2821,3 +2821,25 @@ Verification after the fix:
 
 - The service layer still uses a legacy parameter list matching `run_agent_loop(...)`; a future low-risk cleanup can introduce an `AgentRequest` object.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
+
+### ECS Deployment
+
+- Commit deployed: `ff0b3c7 refactor: delegate agent loop to service`.
+- Deployment archive: `/tmp/arteta_planner_delegate_service_ff0b3c7.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_planner_delegate_service_20260712041613`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/service.py`;
+  - `tests/test_arteta_agent_runtime.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Planner Delegation Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
