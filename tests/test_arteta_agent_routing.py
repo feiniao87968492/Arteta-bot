@@ -599,3 +599,15 @@ def test_planner_no_longer_has_forced_science_branch():
     assert "forced_science_tool = detect_forced_science_tool" not in source
     assert "if forced_science_tool and get_tool" not in source
     assert "forced-{0}-1\".format(forced_science_tool)" not in source
+
+
+def test_planner_no_longer_owns_contextual_tool_exposure_rules():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "def detect_contextual_tool_exclusions" not in source
+    assert "SCIENCE_EXPOSURE_MARKERS" not in source
+    assert "FOOTBALL_INTENT_MARKERS" not in source
+    assert "DOCUMENT_INTENT_CATEGORY_MARKERS" not in source
+    assert "def _science_tools_allowed" not in source

@@ -2071,3 +2071,54 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Slice: Extract Contextual Tool Exposure Rules
+
+### Scope
+
+- Moved contextual tool schema exposure and exclusion rules from `planner.py` into `routing/contextual_tools.py`.
+- Kept the existing planner behavior: planner still computes `schema_excluded_tools`, but it now delegates category/marker decisions to routing.
+- Preserved existing UI preference and memory preference detectors in `routing/contextual_tools.py`.
+
+### Changes
+
+- `planner.py` no longer defines:
+  - `detect_contextual_tool_exclusions(...)`;
+  - science/math exposure helpers;
+  - football, group, web, document, image, render, policy, action, admin marker constants for schema exposure.
+- `routing/contextual_tools.py` now owns:
+  - contextual category marker constants;
+  - scoreline-vs-math exposure guard;
+  - `detect_contextual_tool_exclusions(...)`.
+- Added a structure regression test to keep contextual exposure rules out of planner.
+
+### Compatibility and Safety
+
+- No route plan, tool schema, permission, handler, or Runtime execution behavior changed.
+- Ordinary chat still hides unrelated tools.
+- Football intents still keep football and web tools visible.
+- Scoreline-like chat still hides `solve_math_question`.
+- Document/link required-tool turns still hide the already executed tool from follow-up model calls.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_planner_no_longer_owns_contextual_tool_exposure_rules -q`
+  - RED before extraction: failed because planner still defined `detect_contextual_tool_exclusions(...)`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\routing\\contextual_tools.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_planner_no_longer_owns_contextual_tool_exposure_rules tests/test_arteta_agent_registry.py::test_agent_loop_keeps_football_tools_for_football_intent tests/test_arteta_agent_registry.py::test_agent_loop_forces_document_tool_for_pdf_intent_with_plain_download_url tests/test_arteta_agent_registry.py::test_agent_loop_forces_link_analysis_when_link_is_present tests/test_arteta_agent_registry.py::test_agent_loop_does_not_expose_math_tool_for_scoreline_chat -q`
+  - Result: `5 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `31 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `523 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still owns behavior/tool-policy direct update branches.
+- `_answer_after_unavailable_web_result(...)` remains as a compatibility helper and should be revisited separately.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
