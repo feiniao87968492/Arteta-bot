@@ -2751,3 +2751,25 @@ Verification after the fix:
 
 - `planner.py` still owns route/plan invocation and direct calls to Runtime service.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
+
+### ECS Deployment
+
+- Commit deployed: `e708b62 refactor: move agent service finalization`.
+- Deployment archive: `/tmp/arteta_planner_service_finalization_e708b62.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_service_finalization_20260712041008`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/service.py`;
+  - `tests/test_arteta_agent_runtime.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Agent Service Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
