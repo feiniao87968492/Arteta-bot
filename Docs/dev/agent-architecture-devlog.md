@@ -526,7 +526,57 @@ Verification after the fix:
 
 ### ECS Deployment
 
+- Commit deployed: `a71aabf refactor: reuse provider client for activation`.
+- Deployment archive: `/tmp/arteta_phase_e_activation_a71aabf.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_e_activation_20260711203000`.
+- Remote `py_compile` passed for activation, provider adapter, and provider tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Activation Provider Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
+## 2026-07-11 - Phase E Slice: Provider Client Shutdown Hook
+
+### Scope
+
+- Connected the shared OpenAI-compatible provider HTTP client to the NoneBot application shutdown lifecycle.
+
+### Changes
+
+- `bot.py` imports `close_shared_async_client`.
+- The NoneBot driver now registers `driver.on_shutdown(close_shared_async_client)` after initialization.
+
+### Compatibility
+
+- `run_agent_loop` and provider APIs are unchanged.
+- The hook only closes the shared client on application shutdown; tests still use `set_shared_async_client_factory(...)` injection.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_provider.py::test_bot_entry_registers_provider_client_shutdown_hook -q`
+  - RED before fix: failed because `bot.py` did not reference `close_shared_async_client`.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_provider.py -q`
+  - Result: `6 passed`.
+- `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
+  - Result: `190 passed, 2 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `488 passed` plus existing Windows asyncio/proactor warnings printed after completion.
+
+### ECS Deployment
+
 - Commit deployed: `397fbc9 refactor: close provider client on shutdown`.
+- Follow-up docs commit: `14bbf5b docs: record provider shutdown deployment`.
 - Deployment archive: `/tmp/arteta_phase_e_provider_shutdown_397fbc9.tar.gz` on ECS.
 - Remote backup directory: `/opt/arteta_bot/backups/agent_phase_e_provider_shutdown_20260711215200`.
 - Remote `py_compile` passed for `bot.py` and `tests/test_arteta_agent_provider.py`.
@@ -686,28 +736,18 @@ Verification after the fix:
 ### Remaining
 
 - Planner thinning and broader RouteDecision rollout remain open; Provider Phase E is now closer to the task-book requirements but business-layer legacy HTTP clients still need a separate audit/refactor decision.
-- `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
-  - Result: `186 passed, 2 warnings`.
-- `python -m pytest tests -q`
-  - Result: `474 passed, 2 warnings`.
-
-### Remaining
-
-- Add application shutdown integration for the shared provider client.
-- Continue migrating web tools and other LLM HTTP call sites where safe.
-- Add retry/backoff policy in the provider adapter.
 
 ### ECS Deployment
 
-- Commit deployed: `a71aabf refactor: reuse provider client for activation`.
-- Deployment archive: `/tmp/arteta_phase_e_activation_a71aabf.tar.gz` on ECS.
-- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_e_activation_20260711203000`.
-- Remote `py_compile` passed for activation, provider adapter, and provider tests.
+- Commit deployed: `9c95086 refactor: encode provider tool history by capability`.
+- Deployment archive: `/tmp/arteta_phase_e_provider_capability_9c95086.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_e_provider_capability_20260711225000`.
+- Remote `py_compile` passed for `plugins/arteta_agent/providers/openai_compatible.py` and `tests/test_arteta_agent_provider.py`.
 - Restarted `arteta_bot` and `arteta_dashboard`.
 - `supervisorctl status arteta_bot arteta_dashboard`
   - Result: both `RUNNING`.
 
-### ECS Smoke After Activation Provider Deploy
+### ECS Smoke After Provider Capability Deploy
 
 - `python tools/verify_features.py --suite chat`
   - Result: passed on ECS.
@@ -715,6 +755,10 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+### Remaining
+
+- Planner thinning and broader RouteDecision rollout remain open; Provider Phase E is now closer to the task-book requirements but business-layer legacy HTTP clients still need a separate audit/refactor decision.
 
 ## 2026-07-11 - Phase F Slice: SQLite Behavior Policy Store
 
@@ -1034,31 +1078,3 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
-
-## 2026-07-11 - Phase E Slice: Provider Client Shutdown Hook
-
-### Scope
-
-- Connected the shared OpenAI-compatible provider HTTP client to the NoneBot application shutdown lifecycle.
-
-### Changes
-
-- `bot.py` imports `close_shared_async_client`.
-- The NoneBot driver now registers `driver.on_shutdown(close_shared_async_client)` after initialization.
-
-### Compatibility
-
-- `run_agent_loop` and provider APIs are unchanged.
-- The hook only closes the shared client on application shutdown; tests still use `set_shared_async_client_factory(...)` injection.
-
-### Verification
-
-- `python -m pytest tests/test_arteta_agent_provider.py::test_bot_entry_registers_provider_client_shutdown_hook -q`
-  - RED before fix: failed because `bot.py` did not reference `close_shared_async_client`.
-  - GREEN after fix: `1 passed`.
-- `python -m pytest tests/test_arteta_agent_provider.py -q`
-  - Result: `6 passed`.
-- `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
-  - Result: `190 passed, 2 warnings`.
-- `python tools\\verify_features.py --suite agent_loop`
-  - Result: passed.
