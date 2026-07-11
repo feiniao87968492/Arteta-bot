@@ -192,8 +192,26 @@ Verification after the fix:
 - `supervisorctl status arteta_bot arteta_dashboard`
   - Result: both `RUNNING`.
 
+### ECS Deployment
+
+- Commit deployed: `a87891a feat: add structured routing plan models`.
+- Deployment archive: `/tmp/arteta_phase_c_routing_a87891a.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_routing_20260711190304`.
+- Remote `py_compile` passed for planner, routing, and planning modules.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+
+### ECS Smoke After Routing Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
 ### Remaining
 
-- Commit and deploy the new routing/planning modules and planner multi-intent path.
 - Expand RouteDecision coverage to the rest of the task-book samples.
 - Replace single-intent `if ... return` routes with plan construction once coverage is broad enough.
