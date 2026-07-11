@@ -17,6 +17,7 @@ import sqlite3
 import sys
 import time
 import traceback
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from io import BytesIO
@@ -676,6 +677,1180 @@ def football_news_offline_roundtrip(ctx: RunContext) -> CaseResult:
 
 
 # ---------------------------------------------------------------------------
+# Agent registry suite
+# ---------------------------------------------------------------------------
+
+
+def agent_registry_has_tools(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    registry = import_module("plugins.arteta_agent.registry")
+    football = import_module("plugins.arteta_agent.tools.football")
+    registry.clear_registry()
+    football.register_tools()
+    tools = registry.build_openai_tools()
+    names = [tool["function"]["name"] for tool in tools]
+    expected = [
+        "get_arsenal_result",
+        "get_pl_table",
+        "get_arsenal_injuries",
+        "search_news",
+        "get_football_knowledge",
+        "get_group_members",
+        "get_member_relations",
+    ]
+    missing = [name for name in expected if name not in names]
+    if missing:
+        return fail_result("agent_registry", "registry_has_tools", "Missing tools: %s" % ", ".join(missing), start, details={"names": names})
+    return pass_result("agent_registry", "registry_has_tools", "Agent registry exposes %s phase-1 tools" % len(names), start, details={"names": names})
+
+
+def agent_registry_phase2_read_tools(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    registry = import_module("plugins.arteta_agent.registry")
+    tools = import_module("plugins.arteta_agent.tools")
+    registry.clear_registry()
+    tools.register_phase2_tools()
+    specs = {spec.name: spec for spec in registry.list_enabled_tools()}
+    expected = [
+        "search_football_news",
+        "get_user_profile",
+        "get_current_user_profile",
+        "query_group_memory",
+        "get_recent_group_context",
+        "find_recent_messages_by_alias",
+        "search_daily_messages",
+        "web_search",
+        "web_fetch",
+        "verify_recent_claim",
+    ]
+    missing = [name for name in expected if name not in specs]
+    unsafe = [name for name in expected if name in specs and specs[name].permission != "safe_read"]
+    if missing or unsafe:
+        return fail_result(
+            "agent_registry",
+            "phase2_read_tools",
+            "Phase-2 read tools are missing or have unsafe permissions",
+            start,
+            details={"missing": missing, "unsafe": unsafe, "registered": sorted(specs.keys())},
+        )
+    return pass_result(
+        "agent_registry",
+        "phase2_read_tools",
+        "Agent registry exposes phase-2 read-only tools",
+        start,
+        details={"names": expected},
+    )
+
+
+def agent_registry_web_access_offline(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    context_mod = import_module("plugins.arteta_agent.context")
+    web_access = import_module("plugins.arteta_agent.tools.web_access")
+
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="verify-user", group_id="verify-group")
+
+    async def fake_search(query, max_results=5, timelimit=None):
+        return [{
+            "title": "Arsenal official update",
+            "href": "https://www.arsenal.com/news/official-update",
+            "body": "Arsenal published an official update.",
+            "date": "2026-07-01",
+        }]
+
+    async def fake_fetch(url, timeout_seconds=10.0, max_bytes=500000):
+        return {
+            "url": url,
+            "final_url": url,
+            "content_type": "text/html",
+            "text": "<html><head><title>Official update</title><meta property='article:published_time' content='2026-07-01'></head><body><article>Arsenal confirmed the update on the club website.</article></body></html>",
+        }
+
+    original_search = web_access._duckduckgo_search
+    original_fetch = web_access._fetch_url
+    try:
+        web_access._duckduckgo_search = fake_search
+        web_access._fetch_url = fake_fetch
+        blocked = asyncio.run(web_access.web_fetch(tool_ctx, url="file:///etc/passwd"))
+        fetched = asyncio.run(web_access.web_fetch(tool_ctx, url="https://www.arsenal.com/news/official-update"))
+        verified = asyncio.run(web_access.verify_recent_claim(tool_ctx, claim="Arsenal official update 2026"))
+    finally:
+        web_access._duckduckgo_search = original_search
+        web_access._fetch_url = original_fetch
+
+    ok = (
+        "只支持 http/https" in blocked
+        and "发布时间：2026-07-01" in fetched
+        and "来源等级：一手/官方来源" in verified
+        and "https://www.arsenal.com/news/official-update" in verified
+    )
+    if not ok:
+        return fail_result(
+            "agent_registry",
+            "web_access_offline",
+            "Web access tools did not produce safe citable evidence offline",
+            start,
+            details={"blocked": blocked, "fetched": fetched, "verified": verified},
+        )
+    return pass_result(
+        "agent_registry",
+        "web_access_offline",
+        "Web access tools reject unsafe URLs and produce citable source evidence",
+        start,
+        details={"blocked": blocked, "verified": verified},
+    )
+
+
+def agent_registry_phase3_safe_write_tools(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    registry = import_module("plugins.arteta_agent.registry")
+    tools = import_module("plugins.arteta_agent.tools")
+    registry.clear_registry()
+    tools.register_phase3_tools()
+    specs = {spec.name: spec for spec in registry.list_enabled_tools()}
+    expected = [
+        "solve_science_question",
+        "solve_algorithm_problem",
+        "solve_code_question",
+        "solve_math_question",
+        "generate_today_group_summary",
+        "render_markdown_to_image",
+        "generate_image",
+        "generate_weekly_report",
+        "update_behavior_policy",
+        "update_ui_preference",
+    ]
+    missing = [name for name in expected if name not in specs]
+    wrong_permission = [name for name in expected if name in specs and specs[name].permission != "safe_write"]
+    if missing or wrong_permission:
+        return fail_result(
+            "agent_registry",
+            "phase3_safe_write_tools",
+            "Phase-3 safe-write tools are missing or have unexpected permissions",
+            start,
+            details={"missing": missing, "wrong_permission": wrong_permission, "registered": sorted(specs.keys())},
+        )
+    return pass_result(
+        "agent_registry",
+        "phase3_safe_write_tools",
+        "Agent registry exposes phase-3 safe-write generation tools",
+        start,
+        details={"names": expected},
+    )
+
+
+def agent_registry_phase3_read_tools(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    registry = import_module("plugins.arteta_agent.registry")
+    tools = import_module("plugins.arteta_agent.tools")
+    registry.clear_registry()
+    tools.register_phase3_tools()
+    specs = {spec.name: spec for spec in registry.list_enabled_tools()}
+    expected = [
+        "analyze_image",
+        "show_behavior_policy",
+        "show_agent_trace",
+    ]
+    missing = [name for name in expected if name not in specs]
+    wrong_permission = [name for name in expected if name in specs and specs[name].permission != "safe_read"]
+    if missing or wrong_permission:
+        return fail_result(
+            "agent_registry",
+            "phase3_read_tools",
+            "Phase-3 read/debug tools are missing or have unexpected permissions",
+            start,
+            details={"missing": missing, "wrong_permission": wrong_permission, "registered": sorted(specs.keys())},
+        )
+    return pass_result(
+        "agent_registry",
+        "phase3_read_tools",
+        "Agent registry exposes phase-3 image analysis and trace read tools",
+        start,
+        details={"names": expected},
+    )
+
+
+def agent_registry_phase4_confirm_write_tools(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    registry = import_module("plugins.arteta_agent.registry")
+    tools = import_module("plugins.arteta_agent.tools")
+    executor = import_module("plugins.arteta_agent.executor")
+    context_mod = import_module("plugins.arteta_agent.context")
+    pending = import_module("plugins.arteta_agent.pending")
+    registry.clear_registry()
+    tools.register_phase4_tools()
+    specs = {spec.name: spec for spec in registry.list_enabled_tools()}
+    expected_confirm = ["send_like", "send_group_message", "clear_group_memory", "update_user_profile_by_llm"]
+    expected_safe_write = ["send_mood_emoji"]
+    expected = expected_confirm + expected_safe_write
+    missing = [name for name in expected if name not in specs]
+    wrong_permission = [
+        name for name in expected_confirm
+        if name in specs and specs[name].permission != "confirm_write"
+    ] + [
+        name for name in expected_safe_write
+        if name in specs and specs[name].permission != "safe_write"
+    ]
+    db_path = ctx.run_path("agent_registry", "pending_actions_%s.db" % uuid.uuid4().hex)
+    tool_ctx = context_mod.ToolContext(
+        bot=None,
+        event=None,
+        user_id="verify-user",
+        group_id="verify-group",
+        extra={"pending_action_db_path": db_path},
+    )
+    denied = asyncio.run(executor.execute_tool_call(
+        {"id": "call-verify", "function": {"name": "clear_group_memory", "arguments": "{}"}},
+        tool_ctx,
+    ))
+    actions = pending.PendingActionStore(db_path).list_actions(user_id="verify-user", group_id="verify-group")
+    if missing or wrong_permission or not denied.startswith("[PermissionRequired]") or len(actions) != 1:
+        return fail_result(
+            "agent_registry",
+            "phase4_confirm_write_tools",
+            "Phase-4 QQ/action tools or pending action behavior failed",
+            start,
+            artifacts=[relative(db_path)],
+            details={
+                "missing": missing,
+                "wrong_permission": wrong_permission,
+                "denied": denied,
+                "actions": actions,
+                "registered": sorted(specs.keys()),
+            },
+        )
+    return pass_result(
+        "agent_registry",
+        "phase4_confirm_write_tools",
+        "Agent registry exposes phase-4 QQ/action tools and records pending actions",
+        start,
+        artifacts=[relative(db_path)],
+        details={"names": expected, "pending_action": actions[0]["id"]},
+    )
+
+
+def agent_registry_remember_user_preference_tool(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    registry = import_module("plugins.arteta_agent.registry")
+    tools = import_module("plugins.arteta_agent.tools")
+    memory_actions = import_module("plugins.arteta_agent.tools.memory_actions")
+    context_mod = import_module("plugins.arteta_agent.context")
+
+    registry.clear_registry()
+    tools.register_phase4_tools()
+    spec = registry.get_tool("remember_user_preference")
+    calls = []
+
+    class FakeMemoryStore(object):
+        def add_memory(self, group_id, user_id, user_msg, assistant_reply, nickname="", aliases=None):
+            calls.append((group_id, user_id, user_msg, assistant_reply, nickname, aliases))
+
+    original_get_memory = memory_actions._get_arteta_memory
+    memory_actions._get_arteta_memory = lambda: type("FakeMemoryModule", (), {"memory_store": FakeMemoryStore()})()
+    try:
+        result = memory_actions.remember_user_preference(
+            context_mod.ToolContext(bot=None, event=None, user_id="u1", group_id="g1", nickname="Nick"),
+            memory="以后我说开会就是提醒我看阿森纳赛程",
+        )
+    finally:
+        memory_actions._get_arteta_memory = original_get_memory
+
+    if not spec or spec.permission != "safe_write" or not result.startswith("已写入长期记忆") or not calls or calls[0][0:2] != ("g1", "u1"):
+        return fail_result(
+            "agent_registry",
+            "remember_user_preference_tool",
+            "Explicit memory tool was not registered or did not write scoped memory",
+            start,
+            details={"permission": getattr(spec, "permission", None), "result": result, "calls": calls},
+        )
+    return pass_result(
+        "agent_registry",
+        "remember_user_preference_tool",
+        "Explicit future preferences write immediately to scoped long-term memory",
+        start,
+        details={"permission": spec.permission, "call": calls[0]},
+    )
+
+
+def agent_registry_phase5_admin_tools(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    registry = import_module("plugins.arteta_agent.registry")
+    tools = import_module("plugins.arteta_agent.tools")
+    context_mod = import_module("plugins.arteta_agent.context")
+    audit = import_module("plugins.arteta_agent.audit")
+    admin_tools = import_module("plugins.arteta_agent.tools.admin")
+    registry.clear_registry()
+    tools.register_phase5_tools()
+    specs = {spec.name: spec for spec in registry.list_enabled_tools()}
+    expected = ["mute_member", "read_logs", "run_verify_suite", "check_config", "update_config", "delete_message"]
+    missing = [name for name in expected if name not in specs]
+    wrong_permission = [name for name in expected if name in specs and specs[name].permission != "admin_action"]
+
+    unique = uuid.uuid4().hex
+    env_file = ctx.run_path("agent_registry", "phase5_%s.env" % unique)
+    write_text(env_file, "DEEPSEEK_MODEL=deepseek-v4-pro\n")
+    audit_db = ctx.run_path("agent_registry", "agent_audit_%s.db" % unique)
+    tool_ctx = context_mod.ToolContext(
+        bot=None,
+        event=None,
+        user_id="admin-user",
+        group_id="admin-group",
+        is_admin=True,
+        extra={"env_file": env_file, "audit_db_path": audit_db},
+    )
+    config_result = admin_tools.check_config(tool_ctx)
+    records = audit.AuditStore(audit_db).list_records()
+    if missing or wrong_permission or "DEEPSEEK_MODEL" not in config_result or not records:
+        return fail_result(
+            "agent_registry",
+            "phase5_admin_tools",
+            "Phase-5 admin tools or audit logging failed",
+            start,
+            artifacts=[relative(env_file), relative(audit_db)],
+            details={
+                "missing": missing,
+                "wrong_permission": wrong_permission,
+                "config_result": config_result[:200],
+                "records": records,
+                "registered": sorted(specs.keys()),
+            },
+        )
+    return pass_result(
+        "agent_registry",
+        "phase5_admin_tools",
+        "Agent registry exposes phase-5 admin tools and writes audit logs",
+        start,
+        artifacts=[relative(env_file), relative(audit_db)],
+        details={"names": expected, "audit_tool": records[0]["tool_name"]},
+    )
+
+
+def agent_registry_duplicate_rejected(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    registry.clear_registry()
+
+    async def handler(ctx):
+        return "ok"
+
+    spec = registry.ToolSpec("verify_duplicate", "duplicate", {"type": "object", "properties": {}}, handler)
+    registry.register_tool(spec)
+    try:
+        registry.register_tool(spec)
+    except ValueError:
+        return pass_result("agent_registry", "duplicate_rejected", "Duplicate tool registration is rejected", start)
+    return fail_result("agent_registry", "duplicate_rejected", "Duplicate tool registration was accepted", start)
+
+
+def agent_registry_permission_gates(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    context_mod = import_module("plugins.arteta_agent.context")
+    permissions = import_module("plugins.arteta_agent.permissions")
+    registry = import_module("plugins.arteta_agent.registry")
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="u", group_id="g", is_admin=False)
+    admin_ctx = context_mod.ToolContext(bot=None, event=None, user_id="u", group_id="g", is_admin=True, extra={"confirmed_tool": "admin_tool"})
+    confirm_spec = registry.ToolSpec("confirm_tool", "confirm", {"type": "object", "properties": {}}, lambda ctx: "ok", permission="confirm_write")
+    admin_spec = registry.ToolSpec("admin_tool", "admin", {"type": "object", "properties": {}}, lambda ctx: "ok", permission="admin_action")
+    confirm_allowed, confirm_reason = permissions.check_permission(confirm_spec, tool_ctx, {})
+    admin_allowed, admin_reason = permissions.check_permission(admin_spec, tool_ctx, {})
+    admin_confirmed, _ = permissions.check_permission(admin_spec, admin_ctx, {})
+    if confirm_allowed or admin_allowed or not admin_confirmed:
+        return fail_result(
+            "agent_registry",
+            "permission_gates",
+            "Permission gates returned unexpected decisions",
+            start,
+            details={"confirm": [confirm_allowed, confirm_reason], "admin": [admin_allowed, admin_reason], "admin_confirmed": admin_confirmed},
+        )
+    return pass_result("agent_registry", "permission_gates", "Permission gates reject unconfirmed/admin actions and allow confirmed admin action", start)
+
+
+def agent_registry_executor_error_paths(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    executor = import_module("plugins.arteta_agent.executor")
+    registry.clear_registry()
+
+    async def slow(ctx):
+        await asyncio.sleep(0.05)
+        return "slow"
+
+    registry.register_tool(registry.ToolSpec("slow_tool", "slow", {"type": "object", "properties": {}}, slow, timeout_seconds=0.001))
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="u", group_id="g")
+    unknown = asyncio.run(executor.execute_tool_call({"function": {"name": "missing", "arguments": "{}"}}, tool_ctx))
+    timeout = asyncio.run(executor.execute_tool_call({"function": {"name": "slow_tool", "arguments": "{}"}}, tool_ctx))
+    if "未知工具" not in unknown or not timeout.startswith("[ToolTimeout]"):
+        return fail_result("agent_registry", "executor_error_paths", "Executor error paths did not return readable errors", start, details={"unknown": unknown, "timeout": timeout})
+    return pass_result("agent_registry", "executor_error_paths", "Executor returns readable unknown-tool and timeout errors", start)
+
+
+def agent_activation_candidate_gates(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    activation = import_module("plugins.arteta_agent.activation")
+    plain = activation.is_activation_candidate("罗哥的比赛是七点", has_image=False)
+    task = activation.is_activation_candidate("最近阿森纳怎么样", has_image=False)
+    pure_image = activation.is_activation_candidate("", has_image=True)
+    trace = activation.is_activation_candidate("show trace", has_image=False)
+    if plain or not task or pure_image or not trace:
+        return fail_result(
+            "agent_loop",
+            "activation_candidate_gates",
+            "Activation candidate gates returned unexpected decisions",
+            start,
+            details={"plain": plain, "task": task, "pure_image": pure_image, "trace": trace},
+        )
+    return pass_result(
+        "agent_loop",
+        "activation_candidate_gates",
+        "Activation gates reject plain chatter while allowing task-like messages",
+        start,
+        details={"plain": plain, "task": task, "pure_image": pure_image, "trace": trace},
+    )
+
+
+def agent_activation_judge_fail_closed(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    activation = import_module("plugins.arteta_agent.activation")
+
+    async def invalid_llm(messages, model, api_key, timeout):
+        return "maybe"
+
+    async def broken_llm(messages, model, api_key, timeout):
+        raise TimeoutError("slow")
+
+    invalid = asyncio.run(activation.decide_activation_with_agent(
+        "查一下阿森纳",
+        False,
+        "verify-group",
+        "model",
+        "key",
+        llm_call=invalid_llm,
+    ))
+    broken = asyncio.run(activation.decide_activation_with_agent(
+        "查一下阿森纳",
+        False,
+        "verify-group",
+        "model",
+        "key",
+        llm_call=broken_llm,
+    ))
+    if invalid.should_reply or broken.should_reply:
+        return fail_result(
+            "agent_loop",
+            "activation_judge_fail_closed",
+            "Activation judge should fail closed on invalid or failed LLM responses",
+            start,
+            details={"invalid": asdict(invalid), "broken": asdict(broken)},
+        )
+    return pass_result(
+        "agent_loop",
+        "activation_judge_fail_closed",
+        "Activation judge fails closed on invalid or failed LLM responses",
+        start,
+        details={"invalid": asdict(invalid), "broken": asdict(broken)},
+    )
+
+
+def agent_loop_forces_trace_tool(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    trace_tool = import_module("plugins.arteta_agent.tools.trace")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    trace_tool.register_tools()
+    agent_trace = trace_mod.new_trace("agent_registry")
+    tool_ctx = context_mod.ToolContext(
+        bot=None,
+        event=None,
+        user_id="verify-user",
+        group_id="verify-group",
+        extra={"agent_trace": agent_trace},
+    )
+    original_call = planner.call_llm_with_tools
+    llm_called = False
+
+    async def fake_call(messages, model, api_key, allowed_permissions):
+        nonlocal llm_called
+        llm_called = True
+        return {"role": "assistant", "content": "should not be used"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "show trace"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=2,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    if llm_called or "调用工具：show_agent_trace" not in result or not tools or tools[0].get("name") != "show_agent_trace" or tools[0].get("status") != "ok":
+        return fail_result(
+            "agent_loop",
+            "forces_trace_tool",
+            "Trace request did not return show_agent_trace result directly",
+            start,
+            details={"result": result, "tools": tools, "llm_called": llm_called},
+        )
+    return pass_result(
+        "agent_loop",
+        "forces_trace_tool",
+        "Trace requests force the read-only show_agent_trace tool and avoid a second LLM call",
+        start,
+        details={"result": result, "tools": tools, "llm_called": llm_called},
+    )
+
+
+def agent_loop_does_not_force_mood_emoji_after_behavior_policy_query(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+    emoji_calls = []
+
+    def show_policy_handler(ctx):
+        return "No behavior policy is set for this group."
+
+    async def emoji_handler(ctx, mood="", reason="", emoji_name=""):
+        emoji_calls.append({"mood": mood, "reason": reason, "emoji_name": emoji_name})
+        return "emoji sent"
+
+    registry.register_tool(registry.ToolSpec(
+        name="show_behavior_policy",
+        description="show policy",
+        parameters={"type": "object", "properties": {}},
+        handler=show_policy_handler,
+        permission="safe_read",
+    ))
+    registry.register_tool(registry.ToolSpec(
+        name="send_mood_emoji",
+        description="send emoji",
+        parameters={"type": "object", "properties": {"mood": {"type": "string"}}},
+        handler=emoji_handler,
+        permission="safe_write",
+    ))
+
+    responses = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call-policy",
+                "function": {"name": "show_behavior_policy", "arguments": "{}"},
+            }],
+        },
+        {"role": "assistant", "content": "No behavior policy is set for this group."},
+    ]
+    original_call = planner.call_llm_with_tools
+
+    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+        return responses.pop(0)
+
+    tool_ctx = context_mod.ToolContext(
+        bot=None,
+        event=None,
+        user_id="verify-user",
+        group_id="verify-group",
+        extra={"agent_trace": agent_trace},
+    )
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "show behavior policy"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=3,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = [item.get("name") for item in agent_trace.get("tools") or []]
+    if result != "No behavior policy is set for this group." or emoji_calls or tools != ["show_behavior_policy"]:
+        return fail_result(
+            "agent_loop",
+            "does_not_force_mood_emoji_after_behavior_policy_query",
+            "Behavior policy query incorrectly forced send_mood_emoji",
+            start,
+            details={"result": result, "tools": tools, "emoji_calls": emoji_calls},
+        )
+    return pass_result(
+        "agent_loop",
+        "does_not_force_mood_emoji_after_behavior_policy_query",
+        "Behavior policy and trace/debug turns do not auto-send mood emoji",
+        start,
+        details={"result": result, "tools": tools},
+    )
+
+
+def agent_loop_forces_math_tool(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+
+    async def math_handler(ctx, question=""):
+        return "math solved: {0}".format(question)
+
+    registry.register_tool(registry.ToolSpec(
+        name="solve_math_question",
+        description="solve math",
+        parameters={
+            "type": "object",
+            "properties": {"question": {"type": "string"}},
+            "required": [],
+        },
+        handler=math_handler,
+        permission="safe_write",
+    ))
+    tool_ctx = context_mod.ToolContext(
+        bot=None,
+        event=None,
+        user_id="verify-user",
+        group_id="verify-group",
+        extra={"agent_trace": agent_trace},
+    )
+    original_call = planner.call_llm_with_tools
+    llm_called = False
+
+    async def fake_call(messages, model, api_key, allowed_permissions):
+        nonlocal llm_called
+        llm_called = True
+        return {"role": "assistant", "content": "model answered directly"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "求解数学题：x^2 - 1 = 0"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=2,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    if llm_called or not result.startswith("math solved:") or not tools or tools[0].get("name") != "solve_math_question" or tools[0].get("status") != "ok":
+        return fail_result(
+            "agent_loop",
+            "forces_math_tool",
+            "Obvious math question did not return solve_math_question result directly",
+            start,
+            details={"result": result, "tools": tools, "llm_called": llm_called},
+        )
+    return pass_result(
+        "agent_loop",
+        "forces_math_tool",
+        "Obvious math questions force solve_math_question and keep the call visible in trace",
+        start,
+        details={"result": result, "tools": tools, "llm_called": llm_called},
+    )
+
+
+def agent_loop_does_not_expose_math_tool_for_scoreline_chat(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+
+    def math_handler(ctx, question=""):
+        return "math solved: {0}".format(question)
+
+    registry.register_tool(registry.ToolSpec(
+        name="solve_math_question",
+        description="solve math",
+        parameters={
+            "type": "object",
+            "properties": {"question": {"type": "string"}},
+            "required": [],
+        },
+        handler=math_handler,
+        permission="safe_write",
+    ))
+    tool_ctx = context_mod.ToolContext(
+        bot=None,
+        event=None,
+        user_id="verify-user",
+        group_id="verify-group",
+        extra={"agent_trace": agent_trace},
+    )
+    original_call = planner.call_llm_with_tools
+    llm_called = False
+    exposed_math_tool = True
+
+    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+        nonlocal llm_called, exposed_math_tool
+        llm_called = True
+        exposed_math_tool = "solve_math_question" not in set(disabled_tools or [])
+        return {"role": "assistant", "content": "这是普通聊天，不是数学题。"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "@阿尔特塔 老子1-0"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=2,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    if result != "这是普通聊天，不是数学题。" or tools or not llm_called or exposed_math_tool:
+        return fail_result(
+            "agent_loop",
+            "does_not_expose_math_tool_for_scoreline_chat",
+            "Scoreline-like chat incorrectly forced or exposed solve_math_question",
+            start,
+            details={"result": result, "tools": tools, "llm_called": llm_called, "exposed_math_tool": exposed_math_tool},
+        )
+    return pass_result(
+        "agent_loop",
+        "does_not_expose_math_tool_for_scoreline_chat",
+        "Scoreline-like chat does not force or expose solve_math_question",
+        start,
+        details={"result": result, "tools": tools, "llm_called": llm_called, "exposed_math_tool": exposed_math_tool},
+    )
+
+
+def agent_loop_forces_ui_preference_tool(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+
+    def ui_handler(ctx, target="", color="", bold=None, font_size="", font_scale=None):
+        return "ui updated: {0} {1} {2} {3}".format(target, color, bold, font_size)
+
+    registry.register_tool(registry.ToolSpec(
+        name="update_ui_preference",
+        description="update ui",
+        parameters={"type": "object", "properties": {}},
+        handler=ui_handler,
+        permission="safe_write",
+    ))
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="verify-user", group_id="verify-group", extra={"agent_trace": agent_trace})
+    original_call = planner.call_llm_with_tools
+    llm_called = False
+
+    async def fake_call(messages, model, api_key, allowed_permissions):
+        nonlocal llm_called
+        llm_called = True
+        return {"role": "assistant", "content": "model answered directly"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "下次 agent 调度的字样标红、加粗、放大"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=2,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    if llm_called or result != "ui updated: agent_trace_title red True large" or not tools or tools[0].get("name") != "update_ui_preference" or tools[0].get("status") != "ok":
+        return fail_result(
+            "agent_loop",
+            "forces_ui_preference_tool",
+            "UI customization request did not force update_ui_preference",
+            start,
+            details={"result": result, "tools": tools, "llm_called": llm_called},
+        )
+    return pass_result(
+        "agent_loop",
+        "forces_ui_preference_tool",
+        "UI customization requests force update_ui_preference and stay visible in trace",
+        start,
+        details={"result": result, "tools": tools, "llm_called": llm_called},
+    )
+
+
+def agent_loop_forces_reply_body_ui_preference_tool(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+
+    def ui_handler(ctx, target="", color="", bold=None, font_size="", font_scale=None):
+        return "ui updated: {0} {1} {2} {3} {4}".format(target, color, bold, font_size, font_scale)
+
+    registry.register_tool(registry.ToolSpec(
+        name="update_ui_preference",
+        description="update ui",
+        parameters={"type": "object", "properties": {}},
+        handler=ui_handler,
+        permission="safe_write",
+    ))
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="verify-user", group_id="verify-group", extra={"agent_trace": agent_trace})
+    original_call = planner.call_llm_with_tools
+    llm_called = False
+
+    async def fake_call(messages, model, api_key, allowed_permissions):
+        nonlocal llm_called
+        llm_called = True
+        return {"role": "assistant", "content": "model answered directly"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "下次回复文字标红、加粗、放大五倍"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=2,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    if llm_called or result != "ui updated: reply_body red True  5.0" or not tools or tools[0].get("name") != "update_ui_preference" or tools[0].get("status") != "ok":
+        return fail_result(
+            "agent_loop",
+            "forces_reply_body_ui_preference_tool",
+            "Reply-body UI customization request did not force update_ui_preference",
+            start,
+            details={"result": result, "tools": tools, "llm_called": llm_called},
+        )
+    return pass_result(
+        "agent_loop",
+        "forces_reply_body_ui_preference_tool",
+        "Reply-body UI customization requests force update_ui_preference with exact font_scale",
+        start,
+        details={"result": result, "tools": tools, "llm_called": llm_called},
+    )
+
+
+def agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+
+    def memory_handler(ctx, query=""):
+        return "群记忆：昨天我预测这场比赛是 2-1。"
+
+    def web_handler(ctx, claim="", preferred_sources="", max_results=5):
+        raise AssertionError("memory recall should not be forced through web verification")
+
+    registry.register_tool(registry.ToolSpec(
+        name="query_group_memory",
+        description="query group memory",
+        parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+        handler=memory_handler,
+        permission="safe_read",
+    ))
+    registry.register_tool(registry.ToolSpec(
+        name="verify_recent_claim",
+        description="verify recent claim",
+        parameters={"type": "object", "properties": {}},
+        handler=web_handler,
+        permission="safe_read",
+    ))
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="verify-user", group_id="verify-group", extra={"agent_trace": agent_trace})
+    original_call = planner.call_llm_with_tools
+    calls = []
+
+    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call-memory-1",
+                    "type": "function",
+                    "function": {
+                        "name": "query_group_memory",
+                        "arguments": json.dumps({"query": "昨天预测的这场比赛的比分"}, ensure_ascii=False),
+                    },
+                }],
+            }
+        return {"role": "assistant", "content": "我记得，昨天我预测的是 2-1。"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "塔子你还记得你昨天预测的这场比赛的比分吗"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=3,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    used_web = any(item.get("name") == "verify_recent_claim" for item in tools)
+    if result != "我记得，昨天我预测的是 2-1。" or len(calls) != 2 or not tools or tools[0].get("name") != "query_group_memory" or used_web:
+        return fail_result(
+            "agent_loop",
+            "lets_llm_choose_memory_for_yesterday_prediction_score",
+            "Memory-style score recall incorrectly used web verification or skipped memory",
+            start,
+            details={"result": result, "tools": tools, "calls": len(calls), "used_web": used_web},
+        )
+    return pass_result(
+        "agent_loop",
+        "lets_llm_choose_memory_for_yesterday_prediction_score",
+        "Memory-style score recall stays in LLM-selected memory flow instead of forced web verification",
+        start,
+        details={"result": result, "tools": tools, "calls": len(calls)},
+    )
+
+
+def agent_loop_allows_llm_to_choose_web_verification_tool(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+
+    def web_handler(ctx, claim="", preferred_sources="", max_results=5):
+        return "verified: {0}".format(claim)
+
+    registry.register_tool(registry.ToolSpec(
+        name="verify_recent_claim",
+        description="verify recent claim",
+        parameters={"type": "object", "properties": {}},
+        handler=web_handler,
+        permission="safe_read",
+    ))
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="verify-user", group_id="verify-group", extra={"agent_trace": agent_trace})
+    original_call = planner.call_llm_with_tools
+    calls = []
+
+    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call-web-1",
+                    "type": "function",
+                    "function": {
+                        "name": "verify_recent_claim",
+                        "arguments": json.dumps({"claim": "2026 年阿森纳最新转会新闻"}, ensure_ascii=False),
+                    },
+                }],
+            }
+        return {"role": "assistant", "content": "查到的最新转会新闻已核验。"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "查一下 2026 年阿森纳最新转会新闻"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=2,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    if result != "查到的最新转会新闻已核验。" or len(calls) != 2 or not tools or tools[0].get("name") != "verify_recent_claim" or tools[0].get("status") != "ok":
+        return fail_result(
+            "agent_loop",
+            "allows_llm_to_choose_web_verification_tool",
+            "LLM-chosen recent factual verification did not execute verify_recent_claim",
+            start,
+            details={"result": result, "tools": tools, "calls": len(calls)},
+        )
+    return pass_result(
+        "agent_loop",
+        "allows_llm_to_choose_web_verification_tool",
+        "Recent factual questions can be verified when the LLM chooses verify_recent_claim",
+        start,
+        details={"result": result, "tools": tools, "calls": len(calls)},
+    )
+
+
+def agent_loop_continues_after_unavailable_web_verification(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+
+    def web_handler(ctx, claim="", preferred_sources="", max_results=5):
+        return "未找到可靠网页来源，不能确认该说法。"
+
+    registry.register_tool(registry.ToolSpec(
+        name="verify_recent_claim",
+        description="verify recent claim",
+        parameters={"type": "object", "properties": {}},
+        handler=web_handler,
+        permission="safe_read",
+    ))
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="verify-user", group_id="verify-group", extra={"agent_trace": agent_trace})
+    original_call = planner.call_llm_with_tools
+    calls = []
+
+    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call-web-1",
+                    "type": "function",
+                    "function": {
+                        "name": "verify_recent_claim",
+                        "arguments": json.dumps({"claim": "2026 年阿森纳最新转会新闻"}, ensure_ascii=False),
+                    },
+                }],
+            }
+        return {"role": "assistant", "content": "我没核到可靠来源，所以不能确认；但会继续针对原问题回答。"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "查一下 2026 年阿森纳最新转会新闻"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=2,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    if (
+        len(calls) != 2
+        or not result.startswith("我没核到可靠来源")
+        or not tools
+        or tools[0].get("name") != "verify_recent_claim"
+    ):
+        return fail_result(
+            "agent_loop",
+            "continues_after_unavailable_web_verification",
+            "Unavailable web verification did not return to answering the original question",
+            start,
+            details={"result": result, "tools": tools, "calls": len(calls)},
+        )
+    return pass_result(
+        "agent_loop",
+        "continues_after_unavailable_web_verification",
+        "Unavailable web verification is passed back as context instead of becoming the final answer",
+        start,
+        details={"result": result, "tools": tools, "calls": len(calls)},
+    )
+
+
+def agent_loop_forces_explicit_memory_tool(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+
+    def memory_handler(ctx, memory=""):
+        return "remembered: {0}".format(memory)
+
+    registry.register_tool(registry.ToolSpec(
+        name="remember_user_preference",
+        description="remember",
+        parameters={"type": "object", "properties": {}},
+        handler=memory_handler,
+        permission="safe_write",
+    ))
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="verify-user", group_id="verify-group", extra={"agent_trace": agent_trace})
+    original_call = planner.call_llm_with_tools
+    llm_called = False
+
+    async def fake_call(messages, model, api_key, allowed_permissions):
+        nonlocal llm_called
+        llm_called = True
+        return {"role": "assistant", "content": "model answered directly"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "以后我说开会就是提醒我看阿森纳赛程"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=2,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    if llm_called or not result.startswith("remembered:") or not tools or tools[0].get("name") != "remember_user_preference" or tools[0].get("status") != "ok":
+        return fail_result(
+            "agent_loop",
+            "forces_explicit_memory_tool",
+            "Explicit future preference did not force remember_user_preference",
+            start,
+            details={"result": result, "tools": tools, "llm_called": llm_called},
+        )
+    return pass_result(
+        "agent_loop",
+        "forces_explicit_memory_tool",
+        "Explicit future preferences force remember_user_preference and skip free-form answering",
+        start,
+        details={"result": result, "tools": tools, "llm_called": llm_called},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Online suite
 # ---------------------------------------------------------------------------
 
@@ -776,6 +1951,51 @@ def build_registry() -> Dict[str, SuiteSpec]:
                 ("offline_roundtrip", safe_case("football_news", "offline_roundtrip", football_news_offline_roundtrip)),
             ],
         ),
+        "agent_registry": SuiteSpec(
+            "agent_registry",
+            "Unified agent tool registry, permission, and executor checks",
+            [
+                ("registry_has_tools", safe_case("agent_registry", "registry_has_tools", agent_registry_has_tools)),
+                ("phase2_read_tools", safe_case("agent_registry", "phase2_read_tools", agent_registry_phase2_read_tools)),
+                ("web_access_offline", safe_case("agent_registry", "web_access_offline", agent_registry_web_access_offline)),
+                ("phase3_read_tools", safe_case("agent_registry", "phase3_read_tools", agent_registry_phase3_read_tools)),
+                ("phase3_safe_write_tools", safe_case("agent_registry", "phase3_safe_write_tools", agent_registry_phase3_safe_write_tools)),
+                ("phase4_confirm_write_tools", safe_case("agent_registry", "phase4_confirm_write_tools", agent_registry_phase4_confirm_write_tools)),
+                ("remember_user_preference_tool", safe_case("agent_registry", "remember_user_preference_tool", agent_registry_remember_user_preference_tool)),
+                ("phase5_admin_tools", safe_case("agent_registry", "phase5_admin_tools", agent_registry_phase5_admin_tools)),
+                ("duplicate_rejected", safe_case("agent_registry", "duplicate_rejected", agent_registry_duplicate_rejected)),
+                ("permission_gates", safe_case("agent_registry", "permission_gates", agent_registry_permission_gates)),
+                ("executor_error_paths", safe_case("agent_registry", "executor_error_paths", agent_registry_executor_error_paths)),
+            ],
+        ),
+        "agent_permissions": SuiteSpec(
+            "agent_permissions",
+            "Agent tool permission, confirmation, pending action, and admin audit checks",
+            [
+                ("permission_gates", safe_case("agent_permissions", "permission_gates", agent_registry_permission_gates)),
+                ("phase4_confirm_write_tools", safe_case("agent_permissions", "phase4_confirm_write_tools", agent_registry_phase4_confirm_write_tools)),
+                ("phase5_admin_tools", safe_case("agent_permissions", "phase5_admin_tools", agent_registry_phase5_admin_tools)),
+            ],
+        ),
+        "agent_loop": SuiteSpec(
+            "agent_loop",
+            "Agent executor error-path and observation-loop safety checks",
+            [
+                ("executor_error_paths", safe_case("agent_loop", "executor_error_paths", agent_registry_executor_error_paths)),
+                ("activation_candidate_gates", safe_case("agent_loop", "activation_candidate_gates", agent_activation_candidate_gates)),
+                ("activation_judge_fail_closed", safe_case("agent_loop", "activation_judge_fail_closed", agent_activation_judge_fail_closed)),
+                ("forces_trace_tool", safe_case("agent_loop", "forces_trace_tool", agent_loop_forces_trace_tool)),
+                ("does_not_force_mood_emoji_after_behavior_policy_query", safe_case("agent_loop", "does_not_force_mood_emoji_after_behavior_policy_query", agent_loop_does_not_force_mood_emoji_after_behavior_policy_query)),
+                ("forces_math_tool", safe_case("agent_loop", "forces_math_tool", agent_loop_forces_math_tool)),
+                ("does_not_expose_math_tool_for_scoreline_chat", safe_case("agent_loop", "does_not_expose_math_tool_for_scoreline_chat", agent_loop_does_not_expose_math_tool_for_scoreline_chat)),
+                ("forces_ui_preference_tool", safe_case("agent_loop", "forces_ui_preference_tool", agent_loop_forces_ui_preference_tool)),
+                ("forces_reply_body_ui_preference_tool", safe_case("agent_loop", "forces_reply_body_ui_preference_tool", agent_loop_forces_reply_body_ui_preference_tool)),
+                ("lets_llm_choose_memory_for_yesterday_prediction_score", safe_case("agent_loop", "lets_llm_choose_memory_for_yesterday_prediction_score", agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score)),
+                ("allows_llm_to_choose_web_verification_tool", safe_case("agent_loop", "allows_llm_to_choose_web_verification_tool", agent_loop_allows_llm_to_choose_web_verification_tool)),
+                ("continues_after_unavailable_web_verification", safe_case("agent_loop", "continues_after_unavailable_web_verification", agent_loop_continues_after_unavailable_web_verification)),
+                ("forces_explicit_memory_tool", safe_case("agent_loop", "forces_explicit_memory_tool", agent_loop_forces_explicit_memory_tool)),
+            ],
+        ),
         "online": SuiteSpec(
             "online",
             "Opt-in online checks with safe side-effect gating",
@@ -786,7 +2006,7 @@ def build_registry() -> Dict[str, SuiteSpec]:
         ),
     }
     core_cases = []
-    for suite_name in ("render", "memory", "chat", "commands", "football_news"):
+    for suite_name in ("render", "memory", "chat", "commands", "football_news", "agent_registry"):
         core_cases.extend(registry[suite_name].cases)
     registry["core"] = SuiteSpec("core", "Default local verification suite (render, memory, chat, commands)", core_cases)
     registry["all"] = SuiteSpec("all", "All offline verification suites", core_cases)

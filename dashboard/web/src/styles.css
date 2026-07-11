@@ -373,6 +373,23 @@ form button:hover {
   line-height: 1.45;
 }
 
+.inline-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 12px 0 18px;
+}
+
+.inline-actions button {
+  width: auto;
+  min-width: 150px;
+}
+
+.inline-actions .muted {
+  margin-top: 0;
+}
+
 .group-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;
@@ -453,8 +470,8 @@ pre {
 
 .markdown-preview pre {
   padding: 14px;
-  border: 1px solid rgba(122, 162, 255, 0.24);
-  background: rgba(5, 7, 10, 0.64);
+  border: 1px solid rgba(122, 162, 255, 0.28);
+  background: rgba(18, 24, 34, 0.96);
 }
 
 .markdown-preview table {
@@ -659,7 +676,7 @@ pre {
 }
 
 .config-row {
-  grid-template-columns: minmax(180px, 0.7fr) minmax(220px, 1fr) max-content;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(220px, 1fr) max-content max-content;
   align-items: center;
 }
 

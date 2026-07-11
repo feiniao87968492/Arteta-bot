@@ -26,7 +26,8 @@ except AttributeError:
     config = driver.config.dict()
 
 DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
-DEEPSEEK_MODEL = str(config.get("deepseek_model", "deepseek-v4-pro")).strip('"\'')
+DEEPSEEK_API_URL = str(config.get("deepseek_api_url", os.environ.get("DEEPSEEK_API_URL", "https://www.boxying.com/v1/chat/completions"))).strip('"\'')
+DEEPSEEK_MODEL = str(config.get("deepseek_model", "gpt-5.5")).strip('"\'')
 WEEKLY_NEWS_ENABLED = str(config.get("weekly_news_enabled", "true")).lower() in ("true", "1", "yes")
 ADMIN_QQ = "2648955710"
 KNOWLEDGE_BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "knowledge_base")
@@ -271,7 +272,7 @@ async def generate_weekly_report(articles: list) -> str:
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
-                    "https://api.deepseek.com/v1/chat/completions",
+                    DEEPSEEK_API_URL,
                     headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
                     json={
                         "model": DEEPSEEK_MODEL,

@@ -46,6 +46,7 @@ process_chat(bot, event, custom_prompt)
   │     ├── 当前一线队阵容
   │     ├── 用户人格画像（profile_json）
   │     ├── 更衣室概况（活跃成员快照）
+  │     ├── 最近群聊上下文（daily_messages，含机器人上一轮主回复）
   │     └── ChromaDB 相关历史记忆
   │
   ├── 5. run_tool_loop(messages)
@@ -104,6 +105,58 @@ at_cmd = on_message(rule=_message_mentions_bot, priority=11, block=True)
 - `algo_cmd` (priority=9)：独立子系统，调用 GPT-5.5 模型处理算法/数学/代码问题，不经过 Function Calling 流程；与 `process_chat` 行为一致——会解析消息中的 `reply` 段或 `event.reply`，调用 `fetch_quoted_chain` 把被引用消息（含其中图片的 vision 识别结果、嵌套引用、合并转发内容）拼成 `【引用消息】：...` 块和当前消息一起喂给 LLM。这覆盖"引用一张题目图片 + `/算法 这道题怎么做`"的常见场景；纯命令无内容也无引用时返回 `把你需要解决的问题写在白板上！`
 
 `at_cmd` 不直接使用 NoneBot 的 `to_me()` 作为 matcher rule，而是使用 `_message_mentions_bot(event)`。原因是 OneBot v11 的 reply 预处理会移除 `reply` 段以及紧随其后的 `at` 段；当用户“回复自己的图片 + @机器人”时，`event.to_me` 不会被置为 `True`，只看处理后的消息会漏触发。自定义规则会同时检查 `event.original_message` 和 `event.get_message()`，覆盖 reply+@ 的图片追问场景，同时避免匹配正文中间随手 @机器人的普通讨论。
+
+### 管理员工具入口
+
+当 `ARTETA_USE_AGENT_REGISTRY=true` 时，主对话会走新 Registry 链路，`plugins/arteta_agent.tools.admin` 中的 `admin_action` 工具会被暴露给模型。管理员可以在正常对话里让 bot 通过 `update_favor` 工具直接修改其他成员的好感度，支持 `favor` 直接设值和 `delta` 增减两种写法。这个工具仍然受 `admin_action` 权限和二次确认保护，执行后会复用 SQLite 好感度等级阈值并写入审计日志，不会绕过安全边界。
+
+### Agent Registry 工具 schema 收窄
+
+`ARTETA_USE_AGENT_REGISTRY=true` 时，`plugins/arteta_agent/planner.py::detect_contextual_tool_exclusions()` 会按当前消息意图和 `ToolContext.extra` 收窄本轮暴露给 LLM 的工具 schema。普通闲聊默认不暴露工具；阿森纳/积分榜/伤病等足球实时意图会开放 `football`、`football_news`、`knowledge` 和 `web` 类工具，让模型优先使用 `grok_search` / `verify_recent_claim` 核实当前信息；链接、文档、图片、渲染、策略、QQ 动作和管理员工具只在对应意图或上下文出现时开放。
+
+工具注册时会校验 OpenAI-compatible 参数 schema 的本地子集：根节点必须是 object，`properties` 必须是对象，`required` 必须是字符串列表，`type` 只能使用 JSON Schema 基础类型，`additionalProperties` 只能是布尔值或对象 schema。坏 schema 会在 `register_tool()` 阶段 fail-fast，不会等到模型请求工具时才暴露。注册通过后，Registry 会把所有 object schema 归一化为默认 `additionalProperties=false`；工具如果确实需要动态键，必须显式写 `additionalProperties=true` 或声明对象 schema，避免模型多传未知参数进入 handler。
+
+`ToolSpec` 还保留三类 runtime 元数据：`parallel_safe` 表示未来是否允许和其他无依赖工具并行执行，`idempotent` 表示重复执行是否不会改变外部状态，`result_contains_untrusted_content` 表示工具结果是否可能包含网页、文档、搜索结果等不可信外部文本。当前这些字段只作为声明式元数据存储在 Registry 中，不会写入 OpenAI-compatible tool schema，也不会让 planner 自动并行执行；默认值保持保守：串行、非幂等、结果视为不可信。
+
+公网实时事实问题还有一层策略化首跳路由：`route.public_current_fact.preferred_tool`。默认值等价于 `grok_search`，可通过 `update_behavior_policy` 或自然语言偏好（如“以后类似这种实事性的问题统一走grok-research”）写入 Behavior Policy。planner 只在识别到公网当前事实且排除“还记得/群里/刚才”等本地记忆语境时使用这条策略；配置的工具不可用时会按 `grok_search`、`verify_recent_claim`、`web_search` 顺序回退。
+
+这个过滤只影响模型“看得见哪些工具”，不承担安全边界。所有写操作、管理员动作、跨群/跨用户访问仍必须经过 `execute_tool_call()` 的参数校验、权限、确认、超时和 trace 记录。强制路由的文档、链接、科学解题、行为策略写入等路径仍可直接执行对应工具，并会在后续总结回答时把已用工具加入 `disabled_tools`，避免模型重复调用。
+
+`confirm_write` 和 `admin_action` 不再接受旧的 `confirmed_tool` 工具名放行。未确认时 executor 会创建 `PendingAction` 并返回 `PendingAction: <id>`；用户需要发送 `确认 <id>`、`确认执行 <id>` 或 `confirm <id>`。planner 只解析这种显式 action id 形式，并把 `confirmed_action_id` 注入 executor。executor 会按 action id、用户、群、工具名和过期时间原子消费 PendingAction，并使用 PendingAction 保存的原始参数执行；用户确认消息或模型后续 tool call 中的新参数会被忽略。`pending_agent_actions.expires_at` 有独立索引，`PendingActionStore.cleanup_expired_actions()` 可按需清理过期记录。
+
+Agent Registry runtime 还有循环保护：默认单次运行最多执行 10 个工具调用，同一工具同一参数最多重复 2 次，累计工具 observation 最多 80000 字符。触发保护时会返回 `[LoopGuard]` 降级文本，停止继续执行工具，避免模型在同一轮里反复调用同一工具、无限扩张上下文或把外部大文本继续塞回 LLM。
+
+executor 内部已使用结构化 `ToolResult` 表示工具状态、权限、参数 key、PendingAction id 和 marker；旧的 `execute_tool_call()` 仍返回字符串以兼容现有工具和测试。planner 的关键控制流应优先看 `ToolResult.status`，不要再把工具正文中的 `[PermissionRequired]` 等文本前缀当作真实权限状态，避免网页/PDF/工具正文伪造控制标记。
+
+executor 还会对安全相关事件写入 `agent_audit_logs`：参数校验失败、未知/禁用工具、权限拒绝、PendingAction 创建、确认失败、确认后执行，以及受保护工具的超时/异常。executor 级审计的 `detail` 是 JSON 字符串，只保存 `event`、`permission`、`arg_keys`、`request_id`、`pending_action_id`、`confirmed_action_id`、`duration_ms`、`error_code` 等元数据；不会保存原始参数值、用户消息正文、异常正文、API key 或工具输出。普通 `safe_read` 成功调用默认不入库，避免把查询结果和网页正文写进审计表。
+
+自主唤醒还有一层 cheap gate：只有“最近/最新/查/总结/链接/文档/图片/积分榜/伤病/新闻”等任务形态才会进入 activation LLM；普通群聊里只是提到“阿森纳/英超”不会触发 activation 请求，单纯 `?` / `？` 也不再作为任务触发条件，避免慢模型网关在无关聊天上产生 `ReadTimeout` 噪声。显式 PendingAction 确认消息（如 `确认 <id>` / `confirm <id>`）会直接进入主 Agent，不经过 activation LLM。
+
+线上如果出现大面积 `ReadTimeout`，优先检查 `ARTETA_USE_AGENT_REGISTRY`、`DEEPSEEK_MODEL`、`DEEPSEEK_API_URL` 和日志里的 `receive_response_headers.failed`。临时止血可以把 `ARTETA_USE_AGENT_REGISTRY=false` 切回 legacy `run_tool_loop()`，但长期应保持 Agent Registry 的 schema 收窄策略，避免普通聊天携带全量工具定义拖慢 BoxYing 响应。
+
+用户画像更新是主回复发送后的后台维护任务。`update_user_profile()` 的 LLM 请求限制为 JSON object 和最多 600 tokens；这类后台请求超时不应阻断主回复，也不应被当作“所有聊天都断联”的根因。
+
+### 文档与链接分析工具
+
+当 `ARTETA_USE_AGENT_REGISTRY=true` 时，主聊天链路会把当前消息和引用消息中的文档、链接收集到 `ToolContext.extra`：
+
+- `image_urls`：图片 URL，供 `analyze_image` 使用。
+- `document_urls`：PDF/DOCX 文档引用，供 `read_document` 使用。
+- `detected_urls`：消息和引用里的 http/https 链接，供 `analyze_links` 使用。
+
+新增的只读工具：
+
+| 工具 | 权限 | 作用 | 产物 |
+|------|------|------|------|
+| `read_document` | `safe_read` | 读取当前消息/引用中的 PDF 或 DOCX，也可显式传入文档 URL。DOCX 使用标准库 `zipfile` + XML 解析；PDF 优先使用可选依赖 `pypdf` 或 `PyPDF2`。 | 返回文档名、类型、链接和正文摘录 |
+| `analyze_links` | `safe_read` | 自动检测当前消息/引用里的链接，抓取标题、发布时间和正文摘录，并优先用 Playwright 截取网页可视区域截图。 | 保存 JSON 内容快照和 PNG 网页截图到 `artifacts/agent_tools/link_snapshots/`，并在工具结果中返回截图 artifact |
+
+入口约束：
+
+- 只接受 `http/https` URL，不读取本地任意路径。
+- 文档工具只支持 `.pdf` / `.docx` 或对应 Content-Type，其他格式会拒绝。
+- 用户引用文档并提问时，prompt 原则要求模型调用 `read_document`，不要假装读过。
+- 用户要求“看看链接/总结链接/截取快照/这篇讲什么”时，prompt 原则要求模型调用 `analyze_links`。
 
 ---
 
@@ -196,6 +249,39 @@ User: 昨天比赛看了吗？
 Assistant: 当然看了，球员们的能量令人惊叹...
 ```
 
+### 最近群聊上下文
+
+在 ChromaDB 语义检索之外，主聊天链路还会读取 SQLite `daily_messages` 表中的本群最近消息，作为短期时间线注入到 system prompt。它解决的是 ChromaDB 不稳定适合处理的“短距离指代”和“连续对话”问题，例如用户问“那刚刚你说的第二步呢”时，模型应该能看到机器人上一轮已经回复过什么。
+
+读取和注入流程：
+
+```text
+get_recent_group_messages(group_id)
+  -> SELECT ... FROM daily_messages WHERE group_id = ? ORDER BY timestamp DESC LIMIT ?
+  -> format_recent_group_context(rows)
+  -> append_recent_group_context(messages, rows)
+```
+
+写入来源有两个：
+
+- 用户群消息：`plugins/arteta_daily.py::record_message()` 在群消息非空时写入 `daily_messages`。
+- 机器人主回复：`plugins/arteta_chat.py::save_bot_reply_to_daily_messages()` 在主回复图片成功发送后写入 `daily_messages`。
+
+机器人回复写入有几条约束：
+
+- 使用 `context_answer`，它在 trace/debug footer 拼接前截取，因此下一轮 LLM 不会把测试 trace 当成真实对话。
+- 写入前通过 `_strip_context_style_tags()` 清理 `[red]`、`[bold]`、`[color=#...]`、`[font size=...]` 等渲染标签，只保留自然语言内容。
+- 写入失败不影响对话发送，只打印 `[RecentContext] save bot reply failed group=...`。
+- `daily_messages` 读取必须始终限制当前 `group_id`，避免跨群上下文泄露。
+- 最近上下文只用于理解指代和事实，不作为回复风格模板；主链路会在全部上下文注入后调用 `append_current_turn_style_guard()`，把“第一句就要有劲、语气要有起伏”的本轮风格约束放到 system prompt 末尾。
+
+最近群聊上下文和 ChromaDB 记忆的分工：
+
+| 机制 | 作用 |
+|------|------|
+| `daily_messages` 最近窗口 | 当前群最近时间线，适合连续聊天、短距离指代、看见机器人上一轮主回复 |
+| ChromaDB `group_memories` | 长期语义回忆，适合跨天、跨主题、非连续但语义相关的历史问答 |
+
 ---
 
 ## 6. Function Calling 系统
@@ -263,8 +349,8 @@ async def run_tool_loop(user_messages: List[dict]) -> str:
 async def call_deepseek_tool(messages: List[dict]) -> List[dict]:
 ```
 
-- 使用 httpx.AsyncClient 调用 DeepSeek API (`https://api.deepseek.com/v1/chat/completions`)
-- 模型：`deepseek-v4-flash`
+- 使用 httpx.AsyncClient 调用 BoxYing API (`https://www.boxying.com/v1/chat/completions`)
+- 模型：`gpt-5.5`
 - timeout：80s（单次请求）
 - 返回包含 role/content/tool_calls/reasoning_content 的消息字典列表
 
@@ -357,6 +443,7 @@ AI 对话相关的配置通过 NoneBot 的 `.env` 文件加载，通过 `driver.
 | 变量 | 说明 | 类型 |
 |------|------|------|
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | string |
+| `DEEPSEEK_TEMPERATURE` | 主对话生成温度，默认 `0.9`；画像分析仍固定 `0.3`，激活判定仍固定 `0` | float |
 | `FOOTBALL_API_TOKEN` | football-data.org API Token | string |
 | `ARSENAL_ID` | 阿森纳在 football-data.org 的 ID（固定 57） | int |
 
@@ -368,6 +455,7 @@ AI 对话相关的配置通过 NoneBot 的 `.env` 文件加载，通过 `driver.
 register_tools_config(
     football_api_token=FOOTBALL_API_TOKEN,
     deepseek_api_key=DEEPSEEK_API_KEY,
+    deepseek_temperature=DEEPSEEK_TEMPERATURE,
     arsenal_id=ARSENAL_ID,
     has_web_search=HAS_WEB_SEARCH,
 )
@@ -377,9 +465,9 @@ register_tools_config(
 
 | 用途 | 端点 | 模型 |
 |------|------|------|
-| 主对话 + Function Calling | `https://api.deepseek.com/v1/chat/completions` | `deepseek-v4-flash` |
+| 主对话 + Function Calling | `https://www.boxying.com/v1/chat/completions` | `gpt-5.5` |
 | 算法/技术问题 | `https://www.boxying.com/v1/chat/completions` | `gpt-5.5` |
-| 人格画像分析 | `https://api.deepseek.com/v1/chat/completions` | `deepseek-v4-flash` |
+| 人格画像分析 | `https://www.boxying.com/v1/chat/completions` | `gpt-5.5` |
 
 ### 其他相关配置
 

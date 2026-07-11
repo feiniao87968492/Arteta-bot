@@ -17,6 +17,7 @@ dependencies = [
     "uvicorn",
     "python-jose[cryptography]",
     "python-multipart",
+    "pypdf",
 ]
 
 [tool.nonebot]

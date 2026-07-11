@@ -9,6 +9,21 @@ from dashboard.api.security import create_access_token
 from dashboard.api.services.chroma_service import ChromaService
 
 
+def _make_complete_pysqlite3_module():
+    module = types.ModuleType("pysqlite3")
+    module.connect = sqlite3.connect
+    module.DatabaseError = sqlite3.DatabaseError
+    module.Error = sqlite3.Error
+    module.IntegrityError = sqlite3.IntegrityError
+    module.NotSupportedError = sqlite3.NotSupportedError
+    module.OperationalError = sqlite3.OperationalError
+    module.ProgrammingError = sqlite3.ProgrammingError
+    module.Row = sqlite3.Row
+    module.Warning = sqlite3.Warning
+    module.sqlite_version_info = sqlite3.sqlite_version_info
+    return module
+
+
 class FakeCollection:
     def __init__(self):
         self.deleted_ids = []
@@ -112,8 +127,9 @@ def test_service_import_and_health_do_not_require_chromadb(tmp_path, monkeypatch
 def test_service_installs_pysqlite3_before_importing_chromadb(tmp_path, monkeypatch):
     chroma_dir = tmp_path / "chroma_db"
     chroma_dir.mkdir()
-    pysqlite3_module = types.ModuleType("pysqlite3")
+    pysqlite3_module = _make_complete_pysqlite3_module()
     monkeypatch.setitem(sys.modules, "pysqlite3", pysqlite3_module)
+    monkeypatch.setitem(sys.modules, "sqlite3", sqlite3)
     sys.modules.pop("chromadb", None)
     sys.modules.pop("chromadb.config", None)
 
@@ -140,6 +156,41 @@ def test_service_installs_pysqlite3_before_importing_chromadb(tmp_path, monkeypa
     service.health()
 
     assert imported_sqlite == [pysqlite3_module]
+
+
+def test_service_skips_incomplete_pysqlite3_module(tmp_path, monkeypatch):
+    chroma_dir = tmp_path / "chroma_db"
+    chroma_dir.mkdir()
+    incomplete_pysqlite3 = types.ModuleType("pysqlite3")
+    original_sqlite = sys.modules.get("sqlite3")
+    monkeypatch.setitem(sys.modules, "pysqlite3", incomplete_pysqlite3)
+    monkeypatch.setitem(sys.modules, "sqlite3", sqlite3)
+    sys.modules.pop("chromadb", None)
+    sys.modules.pop("chromadb.config", None)
+
+    imported_sqlite = []
+    module = types.ModuleType("chromadb")
+
+    class ImportCheckingClient(FakeClient):
+        def __init__(self, path, settings):
+            imported_sqlite.append(sys.modules.get("sqlite3"))
+            super().__init__(path, settings)
+
+    module.PersistentClient = ImportCheckingClient
+    config_module = types.ModuleType("chromadb.config")
+
+    class Settings:
+        def __init__(self, anonymized_telemetry=False):
+            self.anonymized_telemetry = anonymized_telemetry
+
+    config_module.Settings = Settings
+    monkeypatch.setitem(sys.modules, "chromadb", module)
+    monkeypatch.setitem(sys.modules, "chromadb.config", config_module)
+
+    service = ChromaService(str(chroma_dir))
+    service.health()
+
+    assert imported_sqlite == [sqlite3]
 
 
 def test_service_lists_queries_and_deletes_with_lazy_chromadb(tmp_path, monkeypatch):

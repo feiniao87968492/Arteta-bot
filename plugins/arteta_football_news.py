@@ -14,9 +14,24 @@ from typing import Dict, List, Optional, Tuple
 try:
     import pysqlite3  # type: ignore
     import sys
-    sys.modules["sqlite3"] = pysqlite3
 except ImportError:
-    pass
+    pysqlite3 = None
+
+if pysqlite3 is not None and callable(getattr(pysqlite3, "connect", None)) and all(
+    hasattr(pysqlite3, name)
+    for name in (
+        "DatabaseError",
+        "Error",
+        "IntegrityError",
+        "NotSupportedError",
+        "OperationalError",
+        "ProgrammingError",
+        "Row",
+        "Warning",
+        "sqlite_version_info",
+    )
+):
+    sys.modules["sqlite3"] = pysqlite3
 
 import chromadb
 from chromadb.config import Settings

@@ -14,17 +14,29 @@ DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 # --- 配置（在运行时由 register_config() 注入）---
 FOOTBALL_API_TOKEN = ""
 DEEPSEEK_API_KEY = ""
-DEEPSEEK_MODEL = "deepseek-v4-pro"
+DEEPSEEK_API_URL = "https://www.boxying.com/v1/chat/completions"
+DEEPSEEK_MODEL = "gpt-5.5"
+DEEPSEEK_TEMPERATURE = 0.9
 ARSENAL_ID = 57
 HAS_WEB_SEARCH = False
 
 
+def _coerce_temperature(value, default=0.9):
+    try:
+        temperature = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(2.0, temperature))
+
+
 def register_config(**kwargs):
     """在 bot 启动时注入全局配置"""
-    global FOOTBALL_API_TOKEN, DEEPSEEK_API_KEY, DEEPSEEK_MODEL, ARSENAL_ID, HAS_WEB_SEARCH
+    global FOOTBALL_API_TOKEN, DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_MODEL, DEEPSEEK_TEMPERATURE, ARSENAL_ID, HAS_WEB_SEARCH
     FOOTBALL_API_TOKEN = kwargs.get("football_api_token", "")
     DEEPSEEK_API_KEY = kwargs.get("deepseek_api_key", "")
-    DEEPSEEK_MODEL = kwargs.get("deepseek_model", "deepseek-v4-pro")
+    DEEPSEEK_API_URL = kwargs.get("deepseek_api_url", "https://www.boxying.com/v1/chat/completions")
+    DEEPSEEK_MODEL = kwargs.get("deepseek_model", "gpt-5.5")
+    DEEPSEEK_TEMPERATURE = _coerce_temperature(kwargs.get("deepseek_temperature", 0.9))
     ARSENAL_ID = kwargs.get("arsenal_id", 57)
     HAS_WEB_SEARCH = kwargs.get("has_web_search", False)
 
@@ -193,13 +205,14 @@ async def call_deepseek_tool(messages: List[dict]) -> List[dict]:
     """单次调用 DeepSeek，返回完整响应 messages（含可能的 tool_calls）"""
     async with httpx.AsyncClient(timeout=80.0) as client:
         resp = await client.post(
-            "https://api.deepseek.com/v1/chat/completions",
+            DEEPSEEK_API_URL,
             headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
             json={
                 "model": DEEPSEEK_MODEL,
                 "messages": messages,
                 "tools": TOOLS,
-                "tool_choice": "auto"
+                "tool_choice": "auto",
+                "temperature": DEEPSEEK_TEMPERATURE
             }
         )
         if resp.status_code != 200:

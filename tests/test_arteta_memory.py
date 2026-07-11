@@ -45,6 +45,43 @@ def load_arteta_memory_module():
             sys.modules["chromadb.config"] = previous_config
 
 
+def test_memory_import_does_not_replace_sqlite_with_incomplete_pysqlite3():
+    incomplete_pysqlite = types.ModuleType("pysqlite3")
+    chromadb_stub = types.ModuleType("chromadb")
+    chromadb_stub.PersistentClient = object
+    chromadb_config_stub = types.ModuleType("chromadb.config")
+
+    class FakeSettings(object):
+        def __init__(self, anonymized_telemetry=False):
+            self.anonymized_telemetry = anonymized_telemetry
+
+    chromadb_config_stub.Settings = FakeSettings
+
+    previous_modules = {
+        name: sys.modules.get(name)
+        for name in ("pysqlite3", "chromadb", "chromadb.config", "sqlite3")
+    }
+    sys.modules["pysqlite3"] = incomplete_pysqlite
+    sys.modules["chromadb"] = chromadb_stub
+    sys.modules["chromadb.config"] = chromadb_config_stub
+    sys.modules["sqlite3"] = sqlite3
+    try:
+        spec = importlib.util.spec_from_file_location("arteta_memory_incomplete_pysqlite_test", MODULE_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        self_sqlite = sys.modules["sqlite3"]
+        assert self_sqlite is sqlite3
+        assert hasattr(self_sqlite, "connect")
+        assert hasattr(self_sqlite, "DatabaseError")
+    finally:
+        for name, module in previous_modules.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
 def install_chat_import_stubs(memory_module):
     previous = {}
 
@@ -144,6 +181,7 @@ def install_chat_import_stubs(memory_module):
     render_mod.text_to_tactical_board = lambda *args, **kwargs: None
     render_mod.html_to_image = lambda *args, **kwargs: None
     render_mod.needs_html_render = lambda *args, **kwargs: False
+    render_mod.style_tags_to_html = lambda text: text
     render_mod.favorability_bar_chart = lambda *args, **kwargs: None
     render_mod.close_browser = lambda *args, **kwargs: None
     remember("plugins.arteta_render", render_mod)

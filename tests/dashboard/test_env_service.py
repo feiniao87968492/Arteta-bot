@@ -17,13 +17,26 @@ def test_mask_and_update_whitelisted_key(tmp_path):
     assert "OTHER=value" in text
 
 
+def test_update_syncs_dashboard_runtime_environment(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("DEEPSEEK_MODEL=old-model\n", encoding="utf-8")
+    monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
+    service = EnvService(str(env_file), ["DEEPSEEK_MODEL"])
+
+    service.update("DEEPSEEK_MODEL", "deepseek-v4-flash")
+
+    assert service.get("DEEPSEEK_MODEL") == "deepseek-v4-flash"
+    assert service.check_effective("DEEPSEEK_MODEL")["effective"] is True
+    assert service.check_effective("DEEPSEEK_MODEL")["runtime_value"] == "deepseek-v4-flash"
+
+
 def test_model_and_url_values_are_not_masked(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text(
         "ALGO_API_KEY=sk-secret123456\n"
         "ALGO_API_URL=https://www.boxying.com/v1/chat/completions\n"
         "ALGO_MODEL=gpt-5.5\n"
-        "DEEPSEEK_MODEL=deepseek-v4-pro\n"
+        "DEEPSEEK_MODEL=gpt-5.5\n"
         "IMAGE_BASE_URL=https://image.example.com/v1\n",
         encoding="utf-8",
     )
@@ -37,5 +50,5 @@ def test_model_and_url_values_are_not_masked(tmp_path):
     assert values["ALGO_API_KEY"]["masked"] != "sk-secret123456"
     assert values["ALGO_API_URL"]["masked"] == "https://www.boxying.com/v1/chat/completions"
     assert values["ALGO_MODEL"]["masked"] == "gpt-5.5"
-    assert values["DEEPSEEK_MODEL"]["masked"] == "deepseek-v4-pro"
+    assert values["DEEPSEEK_MODEL"]["masked"] == "gpt-5.5"
     assert values["IMAGE_BASE_URL"]["masked"] == "https://image.example.com/v1"

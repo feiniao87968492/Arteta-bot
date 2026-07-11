@@ -147,6 +147,51 @@ Assistant: 我想试试热苏斯突前...
 
 ChromaDB `n_results=5` 返回空列表时，跳过记忆注入，不影响正常对话流程。
 
+### 4.4 最近群聊上下文窗口（SQLite）
+
+ChromaDB 负责长期语义记忆，但它不是短距离上下文的唯一来源。为了让模型能看见“刚刚机器人自己说了什么”“这句话里的他/那/刚才指谁”，`process_chat()` 还会从 SQLite 的 `daily_messages` 表读取本群最近消息，按时间正序注入 system prompt。
+
+这个窗口是确定性的短期上下文，不依赖向量相似度，主要解决连续聊天、指代、省略主语、回复机器人上一句话等场景。
+
+当前链路：
+
+```text
+用户群消息
+  -> plugins/arteta_daily.py::record_message()
+  -> 写入 daily_messages
+
+机器人主回复发送成功
+  -> plugins/arteta_chat.py::save_bot_reply_to_daily_messages()
+  -> 写入 daily_messages
+
+下一轮 process_chat()
+  -> get_recent_group_messages(group_id)
+  -> format_recent_group_context(rows)
+  -> append_recent_group_context(messages, rows)
+  -> 注入 system prompt
+```
+
+注入格式示例：
+
+```text
+【最近群聊上下文（由旧到新）】：
+[22:10] 张三：刚刚那道题你怎么看
+[22:11] Arteta：先看条件，再拆成两个子问题。
+[22:12] 张三：那第二步为什么这么做？
+
+请优先用这段最近群聊上下文解析“那/这个/他/谁/刚才”等短距离指代，再结合长期记忆回答。
+```
+
+注意事项：
+
+- `daily_messages` 的读取必须带 `WHERE group_id = 当前群号`，不能跨群读上下文。
+- 普通群消息由 `plugins/arteta_daily.py::record_message()` 写入。
+- 机器人主回复由 `plugins/arteta_chat.py::save_bot_reply_to_daily_messages()` 写入，只有回复图片成功发送后才记录。
+- 写入机器人回复时使用 `context_answer`，它在 trace/debug footer 拼接之前截取，所以测试可视化内容不会进入下一轮 prompt。
+- 写入前会通过 `_strip_context_style_tags()` 去掉 `[red]`、`[bold]`、`[font size=...]` 等渲染/样式标签，避免样式标记污染上下文。
+- 写入失败是非阻塞的，只记录 `[RecentContext] save bot reply failed group=...`，不能影响主回复发送。
+- 这个短期窗口只负责最近时间线；长期、跨天、语义相关的回忆仍由 ChromaDB `group_memories` 负责。
+
 ---
 
 ## 5. 写入时机
@@ -253,3 +298,5 @@ async def delayed_response():
 | `plugins/arteta_memory.py` | MemoryStore 类定义（单例） |
 | `chroma_db/` | ChromaDB 持久化数据目录（gitignore） |
 | `plugins/arteta_chat.py` | 使用方：检索（第 1276 行）和写入（第 1341 行） |
+| `plugins/arteta_daily.py` | 写入用户群消息到 `daily_messages`，供日报和最近上下文窗口复用 |
+| `tests/test_recent_group_context.py` | 覆盖最近群聊上下文格式化、按群读取、机器人回复写入与标签清理 |

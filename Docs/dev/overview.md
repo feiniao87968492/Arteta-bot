@@ -20,14 +20,14 @@
 |------|------|------|
 | 框架 | NoneBot2 | 事件驱动机器人框架 |
 | 协议适配 | OneBot V11 (NapCat QQ) | QQ 消息协议适配 |
-| LLM | DeepSeek API (`deepseek-v4-flash`) | AI 对话、Function Calling、周报生成 |
+| LLM | BoxYing API (`gpt-5.5`) | AI 对话、Function Calling、周报生成 |
 | 关系数据库 | SQLite / aiosqlite | 用户数据、发言记录、好感度等结构化数据 |
 | 向量数据库 | ChromaDB (PersistentClient) | 语义化群聊记忆存储与检索 |
 | HTML 渲染 | Playwright + Jinja2 + KaTeX + marked.js | 将 Markdown/LaTeX 渲染为图片输出 |
 | 图片回退渲染 | Pillow + Pilmoji | 纯文本场景无需启动浏览器 |
 | 图表 | matplotlib | 好感度条形图 |
-| 足球数据 | football-data.org API | 比赛结果、积分榜、伤病信息 |
-| 新闻搜索 | DuckDuckGo Search (`duckduckgo_search`) | 足球/转会新闻搜索 |
+| 足球数据 | football-data.org API + GrokSearch/web 工具 | 比赛结果、积分榜、伤病、赛程、转会与新闻核实 |
+| 新闻搜索 | GrokSearch，Bing/DuckDuckGo/Jina fallback | 足球/转会新闻搜索与来源发现 |
 | 图片生成 | gpt-image-2 API (via SiliconFlow / BoxYing) | AI 文生图 |
 | 图片识别 | Vision API (gpt-4o-mini / Qwen3-VL) | 识别用户发送的图片内容 |
 | 定时任务 | APScheduler (nonebot_plugin_apscheduler) | 每日总结、每周周报定时触发 |
@@ -64,7 +64,7 @@
 | `plugins/arteta_image.py` | **AI 图片生成**。`画图` 指令：调用 gpt-image-2 API 生成图片并发送 |
 | `plugins/arteta_help.py` | **帮助菜单**。`帮助/help/menu` 指令：输出战术指令板（图片格式） |
 | `plugins/arteta_like.py` | **QQ 名片赞**。`赞我/点赞我` 指令：调用 QQ 名片赞 API，每日限额 |
-| `plugins/arteta_standings.py` | **英超积分榜**。`英超局势/积分榜/排名` 指令：从 football-data.org 获取数据，LLM 分析后渲染 |
+| `plugins/arteta_standings.py` | **废弃占位插件**。不再注册 `英超局势/积分榜/排名` 命令；实时足球信息统一走主 Agent 的 GrokSearch/web/football 工具 |
 | `plugins/arteta_swear.py` | **誓言系统**。`发誓/立帖为证` 指令：记录用户目标至 JSON 文件；`我的誓言` 查看 |
 
 ### 目录结构
@@ -210,7 +210,7 @@ process_chat(bot, event, custom_prompt)
 |------|------|--------|
 | `ENVIRONMENT` | 环境标识 (`dev`/`prod`) | `dev` |
 | `SUPERUSERS` | 管理员 QQ 号列表（JSON 数组） | `["2648955710"]` |
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | — |
+| `DEEPSEEK_API_KEY` | 主对话 LLM API 密钥 | — |
 | `ZHIPU_API_KEY` | 备用 API 密钥（暂无实际使用） | — |
 | `FOOTBALL_API_TOKEN` | football-data.org API Token | `da24063a4040404c89250b601f8994a2` |
 | `IMAGE_API_KEY` | 图片生成 API 密钥 | — |

@@ -30,7 +30,21 @@ def test_dashboard_config_whitelist_includes_vision_api_key():
 
 
 def test_dashboard_config_whitelist_includes_deepseek_model():
+    assert "DEEPSEEK_API_URL" in ENV_WHITELIST
     assert "DEEPSEEK_MODEL" in ENV_WHITELIST
+    assert "DEEPSEEK_TEMPERATURE" in ENV_WHITELIST
+
+
+def test_dashboard_config_whitelist_includes_groksearch_backend():
+    assert "ARTETA_GROKSEARCH_API_URL" in ENV_WHITELIST
+    assert "ARTETA_GROKSEARCH_API_KEY" in ENV_WHITELIST
+    assert "ARTETA_GROKSEARCH_MODEL" in ENV_WHITELIST
+    assert "ARTETA_GROKSEARCH_TIMEOUT" in ENV_WHITELIST
+
+
+def test_dashboard_config_whitelist_includes_x_fetch_bridge():
+    assert "ARTETA_X_FETCH_API_URL" in ENV_WHITELIST
+    assert "ARTETA_X_FETCH_API_KEY" in ENV_WHITELIST
 
 
 def test_validate_public_settings_rejects_missing_secret(monkeypatch):

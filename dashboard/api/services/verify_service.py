@@ -6,7 +6,19 @@ import time
 from typing import Dict, Generator, List, Optional
 
 
-ALLOWED_SUITES = set(["core", "render", "memory", "chat", "commands", "online", "all"])
+ALLOWED_SUITES = set([
+    "core",
+    "render",
+    "memory",
+    "chat",
+    "commands",
+    "football_news",
+    "agent_registry",
+    "agent_permissions",
+    "agent_loop",
+    "online",
+    "all",
+])
 
 
 class VerifyService:

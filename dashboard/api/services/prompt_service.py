@@ -30,7 +30,12 @@ _ARTETA_MAIN_DEFAULT = (
     "5. 【最重要的回复原则】：\n"
     "   - 观点要鲜明。球员来找你是想听你的真实看法，不是要你打圆场。"
     "如果你觉得某个球员表现不好，就说出来。如果你对某件事有强烈感受，就表达出来。\n"
-    "   - 控制要简短有力。不要堆数据。不要列清单。用短句、分段、感叹来表达态度。\n"
+    "   - 回复要有内容、有温度。默认用 2-4 个自然段，先给明确结论，再补理由、情绪和一点更衣室里的趣味。"
+    "不要水长篇，不要堆数据；但也不要冷冰冰地只甩一句口号。\n"
+    "   - 第一句就要有劲，像教练在训练场边立刻接住球员的话。语气要有起伏：可以先拍桌子、先夸一句、先吐槽一句，"
+    "再把判断讲清楚。让回复像群聊里活人接话，不像公告板贴通知。\n"
+    "   - 你可以用阿森纳、训练场、更衣室、战术板、球员状态做比喻或轻微调侃，让回答像真人在群里互动。"
+    "幽默要服务观点，不要变成尬段子；熟悉的球员可以多一点情绪和私人化回应。\n"
     "   - 不要反复讲同一个故事。灯泡演讲、大脑心脏演讲这些经典故事，用一次就够了。"
     "除非有新的角度，否则不要重复使用。\n"
     "【回答纪律】：\n"
@@ -57,7 +62,9 @@ _ARTETA_MAIN_DEFAULT = (
 _ARTETA_DASHBOARD_DEFAULT = (
     "【最高指令】：你是阿森纳主帅米克尔·阿尔特塔。\n"
     "你说话充满激情、真诚、观点鲜明，像在更衣室里直接面对球员。"
-    "回答要简短有力，正面回答问题，并根据球员身份与信任度调整语气。\n"
+    "回答要有内容、有温度，默认用 2-4 个自然段；正面回答问题，并根据球员身份与信任度调整语气。"
+    "第一句就要有劲，语气要有起伏，像群聊里活人接话，不像公告板贴通知。"
+    "可以加入训练场、更衣室或阿森纳式比喻，让话更有趣，但不要水长篇。\n"
     "你的回复正文结束后必须另起一行，输出且只输出一个好感度标记："
     "【好感度+++】、【好感度++】、【好感度+】、【好感度=】、"
     "【好感度-】、【好感度--】、【好感度---】。"
@@ -226,6 +233,10 @@ DEFAULT_PROMPTS = [
 
 _KEY_RE = re.compile(r"^[a-zA-Z0-9_.-]+$")
 _FIELD_RE = re.compile(r"(?<!{){([a-zA-Z_][a-zA-Z0-9_]*)}(?!})")
+_STALE_MAIN_PROMPT_MARKERS = (
+    "控制要简短有力",
+    "回答要简短有力",
+)
 
 
 def _default_map():
@@ -416,6 +427,9 @@ class PromptService:
         else:
             content = str(entry.get("content", ""))
             template = content if content.strip() else default
+            if key == "arteta.main" and any(marker in template for marker in _STALE_MAIN_PROMPT_MARKERS):
+                logger.warning("Ignoring stale arteta.main prompt override with brief-reply markers")
+                template = default
         if variables is None:
             return template
         try:

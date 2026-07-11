@@ -7,12 +7,13 @@
 - 验证渲染链路：PIL 战术板、HTML/Markdown 图片渲染、引用图预处理。
 - 验证数据链路：SQLite、ChromaDB 向量记忆、本地知识库查询。
 - 验证对话与命令基础健康状态：关键词判断、好感度标记、插件导入、帮助文本和点赞额度 helper。
+- 验证 Agent 工具注册、权限门禁和工具路由：包括 trace、行为策略、科学工具强制调用与普通比分文本不暴露数学工具。
 - 可选验证在线依赖配置与连通性，同时默认阻止真实 QQ 副作用。
 
 ## 模式
 
 - 默认模式：运行 `core` suite，离线、无真实 QQ 副作用。
-- `--suite <name>`：选择 suite，可重复传入；支持 `core`、`render`、`memory`、`chat`、`commands`、`online`、`all`。
+- `--suite <name>`：选择 suite，可重复传入；支持 `core`、`render`、`memory`、`chat`、`commands`、`football_news`、`agent_registry`、`agent_permissions`、`agent_loop`、`online`、`all`。
 - `--case <name>`：只运行已选 suite 中的指定 case，可重复传入。
 - `--online`：在所选 suite 后追加 `online` suite，用于外部依赖检查。
 - `--allow-side-effects`：仅解除在线 suite 的副作用门禁提示；当前脚本没有自动执行真实 QQ 操作。
@@ -26,6 +27,8 @@ python tools/verify_features.py
 python tools/verify_features.py --suite all
 python tools/verify_features.py --suite core --online
 python tools/verify_features.py --suite render --case html_to_image
+python tools/verify_features.py --suite agent_loop --case does_not_expose_math_tool_for_scoreline_chat
+python tools/verify_features.py --suite agent_loop --case lets_llm_choose_memory_for_yesterday_prediction_score
 python tools/verify_features.py --list-suites
 ```
 

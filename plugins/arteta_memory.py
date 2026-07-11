@@ -9,9 +9,24 @@ from datetime import datetime
 # 系统 sqlite3 可能过旧（ChromaDB 要求 >= 3.35.0），使用 pysqlite3-binary 替代
 try:
     import pysqlite3  # type: ignore
-    sys.modules["sqlite3"] = pysqlite3
 except ImportError:
-    pass
+    pysqlite3 = None
+
+if pysqlite3 is not None and callable(getattr(pysqlite3, "connect", None)) and all(
+    hasattr(pysqlite3, name)
+    for name in (
+        "DatabaseError",
+        "Error",
+        "IntegrityError",
+        "NotSupportedError",
+        "OperationalError",
+        "ProgrammingError",
+        "Row",
+        "Warning",
+        "sqlite_version_info",
+    )
+):
+    sys.modules["sqlite3"] = pysqlite3
 
 import chromadb
 from chromadb.config import Settings

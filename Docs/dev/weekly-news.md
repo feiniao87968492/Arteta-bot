@@ -55,8 +55,8 @@
 
 ### generate_weekly_report(articles)
 
-- 模型: `deepseek-v4-flash`
-- API: `https://api.deepseek.com/v1/chat/completions`
+- 模型: `gpt-5.5`
+- API: `https://www.boxying.com/v1/chat/completions`
 - 参数: temperature 0.7, max_tokens 2500
 - 重试: 最多 2 次，首次失败后 sleep 3 秒再试
 - 系统提示词 (`WEEKLY_PROMPT`):

@@ -141,6 +141,27 @@ class VerifyFeaturesTests(unittest.TestCase):
         case_names = [name for name, _case in registry["football_news"].cases]
         self.assertIn("offline_roundtrip", case_names)
 
+    def test_registry_contains_agent_registry_suite(self):
+        registry = verify_features.build_registry()
+        self.assertIn("agent_registry", registry)
+        self.assertIn("agent_permissions", registry)
+        self.assertIn("agent_loop", registry)
+        case_names = [name for name, _case in registry["agent_registry"].cases]
+        self.assertIn("registry_has_tools", case_names)
+        self.assertIn("permission_gates", case_names)
+        self.assertIn("executor_error_paths", case_names)
+        self.assertIn("phase2_read_tools", case_names)
+        self.assertIn("phase3_read_tools", case_names)
+        self.assertIn("phase3_safe_write_tools", case_names)
+        self.assertIn("phase4_confirm_write_tools", case_names)
+        self.assertIn("phase5_admin_tools", case_names)
+        permission_case_names = [name for name, _case in registry["agent_permissions"].cases]
+        self.assertIn("permission_gates", permission_case_names)
+        self.assertIn("phase4_confirm_write_tools", permission_case_names)
+        self.assertIn("phase5_admin_tools", permission_case_names)
+        loop_case_names = [name for name, _case in registry["agent_loop"].cases]
+        self.assertIn("executor_error_paths", loop_case_names)
+
 
 if __name__ == "__main__":
     unittest.main()

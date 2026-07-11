@@ -7,6 +7,7 @@
 - 自动清理 7 天前的消息记录
 """
 import nonebot
+import os
 from nonebot import on_message, on_command, get_driver
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageSegment
 from nonebot_plugin_apscheduler import scheduler
@@ -51,7 +52,8 @@ except AttributeError:
     config = driver.config.dict()
 
 DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
-DEEPSEEK_MODEL = str(config.get("deepseek_model", "deepseek-v4-pro")).strip('"\'')
+DEEPSEEK_API_URL = str(config.get("deepseek_api_url", os.environ.get("DEEPSEEK_API_URL", "https://www.boxying.com/v1/chat/completions"))).strip('"\'')
+DEEPSEEK_MODEL = str(config.get("deepseek_model", "gpt-5.5")).strip('"\'')
 SUMMARY_ENABLED = str(config.get("daily_summary_enabled", "true")).lower() in ("true", "1", "yes")
 
 # --- 3. 消息记录器：捕获所有群消息 ---
@@ -142,7 +144,7 @@ async def generate_summary(messages: list) -> str:
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
-                    "https://api.deepseek.com/v1/chat/completions",
+                    DEEPSEEK_API_URL,
                     headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
                     json={
                         "model": DEEPSEEK_MODEL,

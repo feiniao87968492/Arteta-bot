@@ -39,6 +39,27 @@ class EnvService:
             return self._mask(value)
         return value
 
+    def get(self, key: str) -> str:
+        if key not in self.whitelist:
+            raise ValueError("key not allowed")
+        return self._parse().get(key, "")
+
+    def check_effective(self, key: str) -> Dict[str, object]:
+        if key not in self.whitelist:
+            raise ValueError("key not allowed")
+        file_value = self._parse().get(key, "")
+        runtime_value = os.environ.get(key, "")
+        return {
+            "name": key,
+            "exists": bool(file_value),
+            "file_value": self._display_value(key, file_value),
+            "runtime_value": self._display_value(key, runtime_value),
+            "runtime_exists": bool(runtime_value),
+            "effective": file_value == runtime_value,
+            "requires_bot_restart": True,
+            "note": "Dashboard API runtime is synced immediately; the QQ bot process reads this setting on restart.",
+        }
+
     def list_masked(self) -> List[Dict[str, object]]:
         values = self._parse()
         return [
@@ -66,3 +87,4 @@ class EnvService:
             os.makedirs(parent)
         with open(self.env_file, "w", encoding="utf-8") as f:
             f.write("\n".join(output) + "\n")
+        os.environ[key] = value

@@ -10,6 +10,25 @@ def test_tools_schema_excludes_search_football_news():
     assert "search_football_news" not in names
 
 
+def test_agent_registry_wraps_original_football_tools():
+    from plugins.arteta_agent.registry import build_openai_tools
+    from plugins.arteta_agent.tools import football
+
+    football.register_tools()
+    names = [tool["function"]["name"] for tool in build_openai_tools()]
+
+    for expected in [
+        "get_arsenal_result",
+        "get_pl_table",
+        "get_arsenal_injuries",
+        "search_news",
+        "get_football_knowledge",
+        "get_group_members",
+        "get_member_relations",
+    ]:
+        assert expected in names
+
+
 def test_football_news_shortcuts_are_disabled(monkeypatch):
     calls = []
 
@@ -59,13 +78,55 @@ def test_run_tool_loop_retries_when_model_returns_empty_final_content(monkeypatc
     }
 
 
+def test_call_deepseek_tool_uses_chat_temperature(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, headers, json):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(arteta_tools.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(arteta_tools, "DEEPSEEK_TEMPERATURE", 0.9)
+
+    result = asyncio.run(arteta_tools.call_deepseek_tool([{"role": "user", "content": "hi"}]))
+
+    assert result == [{"role": "assistant", "content": "ok"}]
+    assert captured["json"]["temperature"] == 0.9
+
+
 def test_register_config_accepts_deepseek_model():
     arteta_tools.register_config(
         football_api_token="token",
         deepseek_api_key="deepseek-key",
-        deepseek_model="deepseek-v4-pro",
+        deepseek_model="gpt-5.5",
+        deepseek_temperature="0.95",
         arsenal_id=57,
         has_web_search=False,
     )
 
-    assert arteta_tools.DEEPSEEK_MODEL == "deepseek-v4-pro"
+    assert arteta_tools.DEEPSEEK_MODEL == "gpt-5.5"
+    assert arteta_tools.DEEPSEEK_TEMPERATURE == 0.95
+
+
+def test_register_config_clamps_invalid_deepseek_temperature():
+    arteta_tools.register_config(deepseek_temperature="bad")
+    assert arteta_tools.DEEPSEEK_TEMPERATURE == 0.9
+
+    arteta_tools.register_config(deepseek_temperature="3.5")
+    assert arteta_tools.DEEPSEEK_TEMPERATURE == 2.0

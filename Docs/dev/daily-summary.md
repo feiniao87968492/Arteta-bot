@@ -10,6 +10,7 @@
 
 - **库文件**: `arsenal_data.db`（项目根目录）
 - **表**: `daily_messages`
+- **复用职责**: 除了日报，它也是主聊天的最近群聊上下文窗口数据源。
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -31,6 +32,10 @@
 - `block=False` 不阻断事件传递，消息会继续被其他处理器消费。
 - 记录时机：消息纯文本非空时，异步写入 `daily_messages` 表。
 - 写入键：`user_id`, `group_id`, `nickname`, `message`, `timestamp`。
+
+主聊天链路还会在机器人主回复图片成功发送后，通过 `plugins/arteta_chat.py::save_bot_reply_to_daily_messages()` 把机器人回复写入同一张表。这样下一轮 LLM 能看到上一轮机器人自己说过什么，避免用户追问“刚刚你说的那个”时丢上下文。
+
+机器人回复写入前会清理渲染标签，并且使用 trace/debug footer 拼接之前的 `context_answer`，所以可视化调试信息不会被当作群聊上下文再次喂给模型。写入失败只记录 `[RecentContext] save bot reply failed group=...`，不影响主回复发送。
 
 ## 4. 定时任务
 
@@ -72,6 +77,7 @@
 
 ```
 群消息 → on_message(priority=1) → INSERT daily_messages
+机器人主回复图片发送成功 → save_bot_reply_to_daily_messages() → INSERT daily_messages
   ↓
 每天 22:30 (定时任务) 或 /今日总结 (手动)
   ↓
@@ -80,7 +86,7 @@ SELECT messages WHERE group_id=? AND timestamp IN today
 generate_summary()
   ├─ 拼接聊天日志 {chat_log}
   ├─ 统计：总消息数、发言人数、TOP5 活跃用户
-  └─ 调用 DeepSeek API (deepseek-v4-flash, temp=0.7, max_tokens=1000)
+  └─ 调用 BoxYing API (gpt-5.5, temp=0.7, max_tokens=1000)
   ↓
 组装 final_text（标题 + 日期 + 总结内容）
   ↓
@@ -90,6 +96,22 @@ send_group_msg(image) → 发送到群
   ↓（渲染失败回退）
 send_group_msg(text) → 纯文本发送
 ```
+
+主聊天读取最近上下文时走另一条只读路径：
+
+```text
+process_chat()
+  ↓
+get_recent_group_messages(group_id)
+  ↓
+SELECT messages WHERE group_id=? ORDER BY timestamp DESC LIMIT ?
+  ↓
+format_recent_group_context()
+  ↓
+append_recent_group_context() → 注入 system prompt
+```
+
+所有最近上下文查询都必须限制当前 `group_id`，不能为了“记忆更全”跨群读取。
 
 ### generate_summary() 细节
 
@@ -117,7 +139,7 @@ send_group_msg(text) → 纯文本发送
   5. 使用 `[red]...[/red]` 标记阿森纳相关内容，`[blue]...[/blue]` 标记其他内容。
   6. 最后用一句激励的话收尾。
   7. 不要列数据清单，用自然的段落表达。
-- **模型**: `deepseek-v4-flash`, temperature=0.7, max_tokens=1000。
+- **模型**: `gpt-5.5`, temperature=0.7, max_tokens=1000。
 
 ## 9. 关键配置
 
@@ -131,6 +153,7 @@ send_group_msg(text) → 纯文本发送
 | 文件 | 说明 |
 |---|---|
 | `plugins/arteta_daily.py` | 主逻辑：消息记录、总结生成、定时任务、手动指令 |
+| `plugins/arteta_chat.py` | 主聊天读取最近群聊上下文，并在主回复发送成功后写入机器人回复 |
 | `plugins/arteta_render.py` | 图片渲染：`text_to_tactical_board()` |
 
 ## 11. 注意事项

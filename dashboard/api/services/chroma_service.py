@@ -8,6 +8,23 @@ def _install_pysqlite3() -> None:
         import pysqlite3  # type: ignore
     except ImportError:
         return
+    if not callable(getattr(pysqlite3, "connect", None)):
+        return
+    if not all(
+        hasattr(pysqlite3, name)
+        for name in (
+            "DatabaseError",
+            "Error",
+            "IntegrityError",
+            "NotSupportedError",
+            "OperationalError",
+            "ProgrammingError",
+            "Row",
+            "Warning",
+            "sqlite_version_info",
+        )
+    ):
+        return
     sys.modules["sqlite3"] = pysqlite3
 
 

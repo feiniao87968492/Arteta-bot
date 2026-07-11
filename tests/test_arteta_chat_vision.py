@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import pathlib
+import types
 from typing import Dict, Tuple
 
 from plugins.arteta_vision import (
@@ -13,8 +14,41 @@ def _load_chat_trigger_helpers():
     source = pathlib.Path("plugins/arteta_chat.py").read_text(encoding="utf-8")
     start = source.index("def _segment_mentions_bot")
     end = source.index("# --- 2. 指令定义区 ---")
-    namespace = {}
+    from plugins.arteta_agent.activation import is_activation_candidate
+
+    namespace = {
+        "USE_AGENT_REGISTRY": True,
+        "AGENT_AUTONOMOUS_ACTIVATION": True,
+        "AGENT_ACTIVATION_TIMEOUT": 4.0,
+        "DEEPSEEK_MODEL": "model",
+        "DEEPSEEK_API_KEY": "key",
+        "DEEPSEEK_API_URL": "https://api.example/v1/chat/completions",
+        "re": __import__("re"),
+        "is_activation_candidate": is_activation_candidate,
+        "decide_activation_with_agent": None,
+    }
     exec(source[start:end], namespace)
+    return namespace
+
+
+def _load_fetch_quoted_chain_helper():
+    source = pathlib.Path("plugins/arteta_chat.py").read_text(encoding="utf-8")
+    helper_start = source.index("_URL_RE =")
+    helper_end = source.index("def _segment_mentions_bot")
+    fetch_start = source.index("async def fetch_quoted_chain")
+    end = source.index("# --- 7. 核心引擎与路由 ---")
+    namespace = {
+        "asyncio": asyncio,
+        "json": __import__("json"),
+        "os": __import__("os"),
+        "re": __import__("re"),
+        "urlparse": __import__("urllib.parse").parse.urlparse,
+        "Optional": __import__("typing").Optional,
+        "Path": pathlib.Path,
+        "analyze_image": None,
+        "Bot": object,
+    }
+    exec(source[helper_start:helper_end] + "\n" + source[fetch_start:end], namespace)
     return namespace
 
 
@@ -27,17 +61,23 @@ def _select_vision_api_url(vision_api_url: str, image_api_url: str) -> str:
 
 
 class FakeEvent:
-    def __init__(self, message, original_message=None, to_me=False, self_id="3443862126"):
-        self.message = message
-        self.original_message = original_message if original_message is not None else message
+    def __init__(self, message, original_message=None, to_me=False, self_id="3443862126", group_id="543915926"):
+        self.message = FakeMessage(message)
+        self.original_message = FakeMessage(original_message) if original_message is not None else self.message
         self.to_me = to_me
         self.self_id = self_id
+        self.group_id = group_id
 
     def is_tome(self):
         return self.to_me
 
     def get_message(self):
         return self.message
+
+
+class FakeMessage(list):
+    def extract_plain_text(self):
+        return "".join(str(seg.data.get("text", "")) for seg in self if seg.type == "text")
 
 
 class FakeSegment:
@@ -69,6 +109,101 @@ def test_message_mentions_bot_ignores_middle_mentions():
     )
 
     assert asyncio.run(helper(event)) is False
+
+
+def test_agent_activation_prefilter_accepts_images_questions_and_domain_intents():
+    helper = _load_chat_trigger_helpers()["should_consider_agent_response"]
+
+    assert helper(FakeEvent([FakeSegment("image", {"url": "https://img.example/a.png"})]), raw_text="这张图讲了什么") is True
+    assert helper(FakeEvent([FakeSegment("text", {"text": "塔子 最近阿森纳怎么样"})]), raw_text="塔子 最近阿森纳怎么样") is True
+    assert helper(FakeEvent([FakeSegment("text", {"text": "A leetcode 两数之和"})]), raw_text="A leetcode 两数之和") is True
+    assert helper(FakeEvent([FakeSegment("text", {"text": "A 查一下积分榜"})]), raw_text="A 查一下积分榜") is True
+
+
+def test_agent_activation_prefilter_accepts_explicit_pending_confirmation():
+    helper = _load_chat_trigger_helpers()["should_consider_agent_response"]
+    action_id = "0123456789abcdef0123456789abcdef"
+
+    assert helper(
+        FakeEvent([FakeSegment("text", {"text": "确认 {0}".format(action_id)})]),
+        raw_text="确认 {0}".format(action_id),
+    ) is True
+    assert helper(
+        FakeEvent([FakeSegment("text", {"text": "confirm {0}".format(action_id)})]),
+        raw_text="confirm {0}".format(action_id),
+    ) is True
+
+
+def test_agent_activation_prefilter_rejects_plain_group_chatter():
+    helper = _load_chat_trigger_helpers()["should_consider_agent_response"]
+
+    assert helper(FakeEvent([FakeSegment("text", {"text": "今晚吃什么"})]), raw_text="今晚吃什么") is False
+    assert helper(FakeEvent([FakeSegment("text", {"text": "皇马准备以创纪录价格求购奥利塞，转会费很高"})]), raw_text="皇马准备以创纪录价格求购奥利塞，转会费很高") is False
+
+
+def test_agent_activation_prefilter_rejects_image_without_request_text():
+    helper = _load_chat_trigger_helpers()["should_consider_agent_response"]
+
+    assert helper(FakeEvent([FakeSegment("image", {"url": "https://img.example/a.png"})]), raw_text="") is False
+
+
+def test_message_should_trigger_agent_uses_activation_judge_for_candidate():
+    namespace = _load_chat_trigger_helpers()
+    calls = []
+
+    async def fake_decide(raw_text, has_image, group_id, model, api_key, api_url="", timeout=0):
+        calls.append((raw_text, has_image, group_id, model, api_key, api_url, timeout))
+        return types.SimpleNamespace(should_reply=True, reason="task-like Arsenal question")
+
+    namespace["decide_activation_with_agent"] = fake_decide
+    event = FakeEvent(
+        [FakeSegment("text", {"text": "\u6700\u8fd1\u963f\u68ee\u7eb3\u600e\u4e48\u6837"})],
+        group_id="1104602373",
+    )
+
+    assert asyncio.run(namespace["_message_should_trigger_agent"](event)) is True
+    assert calls == [("\u6700\u8fd1\u963f\u68ee\u7eb3\u600e\u4e48\u6837", False, "1104602373", "model", "key", "https://api.example/v1/chat/completions", 4.0)]
+
+
+def test_message_should_trigger_agent_does_not_judge_plain_chatter():
+    namespace = _load_chat_trigger_helpers()
+
+    async def broken_decide(*args, **kwargs):
+        raise AssertionError("activation judge should not run for ordinary chatter")
+
+    namespace["decide_activation_with_agent"] = broken_decide
+    event = FakeEvent([FakeSegment("text", {"text": "\u7f57\u54e5\u7684\u6bd4\u8d5b\u662f\u4e03\u70b9"})])
+
+    assert asyncio.run(namespace["_message_should_trigger_agent"](event)) is False
+
+
+def test_fetch_quoted_chain_collects_image_urls_without_analyzing_in_agent_mode():
+    pathlib.Path("/tmp").mkdir(exist_ok=True)
+    namespace = _load_fetch_quoted_chain_helper()
+    calls = []
+
+    async def fake_analyze_image(url):
+        calls.append(url)
+        return "should-not-run"
+
+    namespace["analyze_image"] = fake_analyze_image
+
+    class FakeBot:
+        async def get_msg(self, message_id):
+            return {
+                "sender": {"card": "Tester", "user_id": "u1"},
+                "message": [{"type": "image", "data": {"file": "f1", "url": "https://old.example/a.png"}}],
+            }
+
+        async def get_image(self, file):
+            return {"url": "https://fresh.example/a.png"}
+
+    image_urls = []
+    text = asyncio.run(namespace["fetch_quoted_chain"](FakeBot(), 123, image_urls=image_urls, analyze_images=False))
+
+    assert image_urls == ["https://fresh.example/a.png"]
+    assert "可调用 analyze_image" in text
+    assert calls == []
 
 
 def test_select_vision_api_key_prefers_dedicated_key():
