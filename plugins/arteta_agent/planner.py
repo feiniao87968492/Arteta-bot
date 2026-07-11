@@ -14,7 +14,7 @@ from .providers.openai_compatible import (
     parse_chat_response,
 )
 from .registry import build_openai_tools, get_tool, list_enabled_tools
-from .response.composer import compose_final_response
+from .response.composer import compose_final_response, compose_trace_response
 from .response.mood import (
     detect_forced_mood_emoji_args as response_detect_forced_mood_emoji_args,
     maybe_send_mood_emoji,
@@ -32,7 +32,7 @@ from .tool_policy import (
     parse_tool_block_instruction,
     set_group_tool_block,
 )
-from .trace import format_trace_block, record_round
+from .trace import record_round
 
 
 PENDING_ACTION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12,}$")
@@ -1352,7 +1352,7 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
             max_rounds, trace, temperature, tool_artifact_markers, request_timeout,
             max_tool_calls, max_same_tool_call_repeats, max_total_observation_chars,
         )
-        return finish(format_trace_block(trace) or "[Agent Trace]\ntools: none")
+        return finish(compose_trace_response(trace))
 
     forced_ui_args = detect_forced_ui_preference_args(state)
     if forced_ui_args and get_tool("update_ui_preference") and "update_ui_preference" not in disabled_tools:

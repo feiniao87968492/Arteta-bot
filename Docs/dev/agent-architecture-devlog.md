@@ -713,6 +713,45 @@ Verification after the fix:
 
 - Planner still directly handles trace-request forced routing and calls `format_trace_block(...)`; moving that behind a response/runtime boundary remains a later planner-thinning step.
 
+## 2026-07-12 - Phase D Slice: Trace Response Composer Boundary
+
+### Scope
+
+- Moved trace-response text composition out of `planner.py` and behind `response.composer`.
+- Kept the existing trace-request forced tool path unchanged so `show_agent_trace` still appears as a real safe-read tool call.
+
+### Changes
+
+- Added `compose_trace_response(trace)` to `plugins/arteta_agent/response/composer.py`.
+- `planner.run_agent_loop(...)` now calls `compose_trace_response(trace)` instead of importing/calling `format_trace_block(...)` directly.
+- Added source regression proving planner no longer references `format_trace_block`.
+
+### Compatibility
+
+- Trace formatting still uses `plugins.arteta_agent.trace.format_trace_block(...)` internally.
+- Existing fallback text remains `[Agent Trace]\ntools: none`.
+- `show_agent_trace` tool behavior and sanitized trace fields are unchanged.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_response.py::test_response_composer_formats_trace_response_with_fallback tests/test_arteta_agent_response.py::test_planner_no_longer_calls_trace_formatter_directly -q`
+  - RED before fix: failed because `compose_trace_response` did not exist and planner still imported `format_trace_block`.
+  - GREEN after fix: `2 passed`.
+- `python -m pytest tests/test_arteta_agent_response.py -q`
+  - Result: `7 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_forces_trace_tool_when_user_requests_trace tests/test_arteta_agent_registry.py::test_show_agent_trace_tool_returns_sanitized_trace_block tests/test_arteta_agent_registry.py::test_agent_loop_records_rounds_and_tool_trace tests/test_arteta_agent_registry.py::test_trace_records_grok_result_marker -q`
+  - Result: `4 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `501 passed, 2 warnings`.
+
+### Remaining
+
+- Planner still owns the decision to force `show_agent_trace`; moving that route decision into structured planning remains separate from response composition.
+
 ## 2026-07-11 - Phase E Slice: OpenAI-Compatible Provider Adapter
 
 ### Scope

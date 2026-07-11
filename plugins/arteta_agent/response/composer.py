@@ -1,5 +1,7 @@
 from typing import Iterable, Optional
 
+from ..trace import format_trace_block
+
 
 def trace_has_marker(trace, marker: str) -> bool:
     if not trace:
@@ -27,3 +29,7 @@ def compose_final_response(
         if marker and marker not in output:
             output = "{0}\n{1}".format(output.strip(), marker).strip()
     return prefix_trace_markers(output, trace)
+
+
+def compose_trace_response(trace) -> str:
+    return format_trace_block(trace) or "[Agent Trace]\ntools: none"

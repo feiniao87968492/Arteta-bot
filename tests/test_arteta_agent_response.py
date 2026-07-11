@@ -34,6 +34,13 @@ def test_response_composer_prefixes_grok_marker_from_trace():
     assert result == "[grok]\nanswer"
 
 
+def test_response_composer_formats_trace_response_with_fallback():
+    from plugins.arteta_agent.response import composer
+
+    assert hasattr(composer, "compose_trace_response")
+    assert composer.compose_trace_response({}) == "[Agent Trace]\ntools: none"
+
+
 def test_planner_no_longer_owns_artifact_marker_extraction_protocol():
     from pathlib import Path
 
@@ -54,3 +61,11 @@ def test_planner_no_longer_owns_trace_marker_helpers():
     assert "trace_has_marker" not in source
     assert "def _prefix_trace_markers" not in source
     assert "def _trace_has_marker" not in source
+
+
+def test_planner_no_longer_calls_trace_formatter_directly():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "format_trace_block" not in source
