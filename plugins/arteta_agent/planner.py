@@ -1,5 +1,4 @@
 import json
-import inspect
 import re
 
 from . import behavior_policy
@@ -953,19 +952,16 @@ async def call_llm_with_tools(messages, model: str, api_key: str, api_url: str =
 
 
 async def _call_llm_with_policy(state, model: str, api_key: str, api_url: str, allowed_permissions, disabled_tools, temperature: float, request_timeout: float = 80.0):
-    parameters = inspect.signature(call_llm_with_tools).parameters
-    kwargs = {}
-    if "temperature" in parameters:
-        kwargs["temperature"] = temperature
-    if "request_timeout" in parameters:
-        kwargs["request_timeout"] = request_timeout
-    if "api_url" in parameters:
-        if "disabled_tools" in parameters:
-            return await call_llm_with_tools(state, model, api_key, api_url=api_url, allowed_permissions=allowed_permissions, disabled_tools=disabled_tools, **kwargs)
-        return await call_llm_with_tools(state, model, api_key, api_url=api_url, allowed_permissions=allowed_permissions, **kwargs)
-    if "disabled_tools" in parameters:
-        return await call_llm_with_tools(state, model, api_key, allowed_permissions, disabled_tools=disabled_tools, **kwargs)
-    return await call_llm_with_tools(state, model, api_key, allowed_permissions, **kwargs)
+    return await call_llm_with_tools(
+        state,
+        model,
+        api_key,
+        api_url=api_url,
+        allowed_permissions=allowed_permissions,
+        disabled_tools=disabled_tools,
+        temperature=temperature,
+        request_timeout=request_timeout,
+    )
 
 
 def _remember_artifact_markers(markers: list, tool_result) -> None:

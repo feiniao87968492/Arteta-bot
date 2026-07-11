@@ -190,3 +190,9 @@ def test_bot_entry_registers_provider_client_shutdown_hook():
 
     assert "close_shared_async_client" in source
     assert "driver.on_shutdown(close_shared_async_client)" in source
+
+
+def test_planner_provider_call_uses_fixed_adapter_protocol():
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "inspect.signature(call_llm_with_tools)" not in source

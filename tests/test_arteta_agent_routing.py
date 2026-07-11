@@ -108,7 +108,7 @@ def test_agent_loop_executes_multi_intent_memory_and_document_plan(monkeypatch):
 
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         assert messages[-1]["role"] == "tool"
         return {"role": "assistant", "content": "done"}
@@ -173,7 +173,7 @@ def test_agent_loop_executes_multi_intent_memory_and_web_plan(monkeypatch):
         permission="safe_read",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         assert messages[-1]["role"] == "tool"
         return {"role": "assistant", "content": "combined answer"}
 

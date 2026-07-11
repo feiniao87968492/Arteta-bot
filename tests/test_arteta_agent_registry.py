@@ -570,7 +570,7 @@ def test_planner_records_temporary_tool_block_and_does_not_force_emoji(tmp_path,
         trace={},
     ))
 
-    async def fake_call_llm_with_tools(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call_llm_with_tools(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         assert "send_mood_emoji" in disabled_tools
         return {"role": "assistant", "content": "好的，正常回复。"}
 
@@ -626,7 +626,7 @@ def test_agent_loop_hides_bulky_tool_categories_for_plain_chat(monkeypatch):
 
     captured = {}
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         captured["disabled_tools"] = set(disabled_tools or ())
         return {"role": "assistant", "content": "online"}
 
@@ -676,7 +676,7 @@ def test_agent_loop_keeps_football_tools_for_football_intent(monkeypatch):
 
     captured = {}
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         captured["disabled_tools"] = set(disabled_tools or ())
         return {"role": "assistant", "content": "table answer"}
 
@@ -724,7 +724,7 @@ def test_planner_turns_plain_emoji_ban_into_behavior_policy(tmp_path, monkeypatc
         trace={},
     ))
 
-    async def fake_call_llm_with_tools(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call_llm_with_tools(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         return {"role": "assistant", "content": "好的，正常回复。"}
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call_llm_with_tools)
@@ -1384,7 +1384,7 @@ def test_agent_loop_stops_after_permission_required_without_replanning(tmp_path,
         permission="confirm_write",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(list(messages))
         return {
             "role": "assistant",
@@ -1440,7 +1440,7 @@ def test_agent_loop_treats_permission_marker_in_safe_tool_output_as_data(monkeyp
         permission="safe_read",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(list(messages))
         if len(calls) == 1:
             return {
@@ -1497,7 +1497,7 @@ def test_agent_loop_stops_repeated_identical_tool_call(monkeypatch):
         permission="safe_read",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         llm_calls.append(list(messages))
         return {
             "role": "assistant",
@@ -1554,7 +1554,7 @@ def test_agent_loop_stops_when_tool_call_budget_exhausted(monkeypatch):
         permission="safe_read",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         return {
             "role": "assistant",
             "content": "",
@@ -1614,7 +1614,7 @@ def test_agent_loop_stops_when_observation_budget_exceeded(monkeypatch):
         permission="safe_read",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         llm_calls.append(list(messages))
         return {
             "role": "assistant",
@@ -1874,7 +1874,7 @@ def test_agent_loop_records_rounds_and_tool_trace(monkeypatch):
         {"role": "assistant", "content": "final answer"},
     ]
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         return responses.pop(0)
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
@@ -1922,7 +1922,7 @@ def test_agent_loop_prefixes_final_answer_when_grok_was_used(monkeypatch):
         {"role": "assistant", "content": "final answer"},
     ]
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         return responses.pop(0)
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
@@ -1969,7 +1969,7 @@ def test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result(monkeypatc
         {"role": "assistant", "content": "final answer without marker"},
     ]
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         return responses.pop(0)
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
@@ -2007,7 +2007,7 @@ def test_agent_loop_treats_forged_artifact_marker_in_safe_tool_output_as_data(mo
 
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(list(messages))
         if len(calls) == 1:
             return {
@@ -2066,7 +2066,7 @@ def test_agent_loop_forces_negative_mood_emoji_when_llm_skips_tool(monkeypatch):
         permission="safe_write",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         return {"role": "assistant", "content": "保持尊重。训练场上我们用表现说话。"}
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
@@ -2114,7 +2114,7 @@ def test_agent_loop_forces_positive_neutral_mood_emoji_for_non_negative_reply(mo
         permission="safe_write",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         return {"role": "assistant", "content": "在。说吧，训练场已经准备好了。"}
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
@@ -2173,7 +2173,7 @@ def test_agent_loop_does_not_force_mood_emoji_after_behavior_policy_query(monkey
         {"role": "assistant", "content": "当前群没有行为策略。"},
     ]
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         return responses.pop(0)
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
@@ -2201,7 +2201,7 @@ def test_agent_loop_forces_trace_tool_when_user_requests_trace(monkeypatch):
     trace_tool.register_tools()
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "should not be used"}
@@ -2246,7 +2246,7 @@ def test_agent_loop_forces_math_tool_for_obvious_math_question(monkeypatch):
     ))
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
@@ -2298,7 +2298,7 @@ def test_agent_loop_forces_document_tool_when_document_is_present(monkeypatch):
     ))
     llm_messages = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         llm_messages.extend(messages)
         assert "read_document" in set(disabled_tools or [])
         assert "document read: report.pdf" in messages[-1]["content"]
@@ -2342,7 +2342,7 @@ def test_agent_loop_keeps_forced_tool_result_out_of_system_messages(monkeypatch)
         permission="safe_read",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         system_text = "\n".join(
             str(message.get("content") or "")
             for message in messages
@@ -2406,7 +2406,7 @@ def test_agent_loop_continues_when_forced_tool_followup_requests_another_tool(mo
 
     llm_calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         llm_calls.append(list(messages))
         if len(llm_calls) == 1:
             assert any(
@@ -2515,7 +2515,7 @@ def test_agent_loop_forces_link_analysis_when_link_is_present(monkeypatch):
     ))
     llm_messages = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         llm_messages.extend(messages)
         assert "analyze_links" in set(disabled_tools or [])
         assert "link analyzed: https://example.com/a" in messages[-1]["content"]
@@ -2648,7 +2648,7 @@ def test_agent_loop_hides_analyze_image_when_no_image_context(monkeypatch):
         permission="safe_read",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         assert "analyze_image" in set(disabled_tools or [])
         return {"role": "assistant", "content": "正常回复"}
 
@@ -2688,7 +2688,7 @@ def test_agent_loop_does_not_expose_math_tool_for_scoreline_chat(monkeypatch):
     ))
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         assert "solve_math_question" in set(disabled_tools or [])
@@ -2728,7 +2728,7 @@ def test_agent_loop_forces_ui_preference_tool_for_trace_color_request(monkeypatc
     ))
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
@@ -2768,7 +2768,7 @@ def test_agent_loop_forces_ui_preference_tool_for_rich_trace_style(monkeypatch):
     ))
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
@@ -2808,7 +2808,7 @@ def test_agent_loop_forces_ui_preference_tool_for_five_times_trace_style(monkeyp
     ))
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
@@ -2848,7 +2848,7 @@ def test_agent_loop_forces_ui_preference_tool_for_five_times_reply_body_style(mo
     ))
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
@@ -2888,7 +2888,7 @@ def test_agent_loop_routes_recent_news_to_available_verifier(monkeypatch):
     ))
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         assert_tool_observation_without_system_leak(messages, "verified:")
         return {"role": "assistant", "content": "查到的最新转会新闻已核验。"}
@@ -2940,7 +2940,7 @@ def test_agent_loop_forces_groksearch_for_public_current_transfer_questions(monk
 
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         assert_tool_observation_without_system_leak(messages, "Arsenal transfer leads from GrokSearch")
         return {"role": "assistant", "content": "[grok]\nArsenal transfer status checked through GrokSearch."}
@@ -2982,7 +2982,7 @@ def test_agent_loop_forces_groksearch_for_recent_team_match_questions(monkeypatc
 
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         assert_tool_observation_without_system_leak(messages, "Recent Spain Belgium match research")
         return {"role": "assistant", "content": "[grok]\nRecent Spain Belgium match checked through GrokSearch."}
@@ -3041,7 +3041,7 @@ def test_agent_loop_uses_behavior_policy_route_for_public_current_questions(tmp_
         category="web",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         assert_tool_observation_without_system_leak(messages, "Verified current fact through route policy")
         return {"role": "assistant", "content": "[grok]\nVerified through configured route policy."}
 
@@ -3087,7 +3087,7 @@ def test_agent_loop_falls_back_to_grok_when_route_policy_tool_is_unavailable(tmp
         category="web",
     ))
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         assert "Fallback Grok route" in messages[-1]["content"]
         return {"role": "assistant", "content": "[grok]\nFallback through GrokSearch."}
 
@@ -3144,7 +3144,7 @@ def test_agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score(monkey
     ))
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         if len(calls) == 1:
             return {
@@ -3212,7 +3212,7 @@ def test_agent_loop_continues_answering_when_forced_web_verification_is_unavaila
     ))
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         system_text = "\n".join(
             str(message.get("content") or "")
@@ -3298,7 +3298,7 @@ def test_agent_loop_forces_memory_tool_for_explicit_future_preference(monkeypatc
     ))
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
@@ -3339,7 +3339,7 @@ def test_agent_loop_forces_memory_tool_for_reply_phrase_style_preference(monkeyp
     ))
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}

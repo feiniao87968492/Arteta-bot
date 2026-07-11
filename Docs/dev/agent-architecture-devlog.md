@@ -542,6 +542,47 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase E Slice: Fixed Provider Adapter Protocol
+
+### Scope
+
+- Removed the remaining runtime `inspect.signature(...)` compatibility branch from the planner provider call path.
+- Kept the public `call_llm_with_tools(...)` compatibility entrypoint, but made `_call_llm_with_policy(...)` call the fixed OpenAI-compatible adapter protocol directly.
+
+### Changes
+
+- `planner._call_llm_with_policy(...)` now always passes `api_url`, `allowed_permissions`, `disabled_tools`, `temperature`, and `request_timeout` as explicit keyword arguments.
+- Removed the unused `inspect` import from `planner.py`.
+- Updated local pytest fakes and `tools/verify_features.py` smoke fakes to implement the fixed provider protocol.
+- Added a source regression test proving `planner.py` no longer calls `inspect.signature(call_llm_with_tools)`.
+
+### Compatibility
+
+- Production behavior remains OpenAI-compatible and DeepSeek-compatible through the existing provider adapter.
+- Existing external callers can still call `planner.call_llm_with_tools(...)` with its current signature.
+- Test and smoke fixtures were updated rather than keeping production runtime reflection for legacy fake signatures.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_provider.py::test_planner_provider_call_uses_fixed_adapter_protocol -q`
+  - RED before fix: failed because `planner.py` still contained `inspect.signature(call_llm_with_tools)`.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_routing.py tests/test_arteta_agent_registry.py -q`
+  - Result: `197 passed, 2 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_routing.py tests/test_arteta_agent_registry.py tests/test_verify_features.py -q`
+  - Result: `205 passed, 2 warnings`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed` plus existing Windows asyncio/proactor warnings after completion.
+- `python -m pytest tests -q`
+  - Result: `489 passed` plus existing Windows asyncio/proactor warnings after completion.
+
+### Remaining
+
+- Provider retry/backoff and capability-based message encoding still need a later focused provider slice.
+- `planner.py` still contains substantial routing/response compatibility code and remains a later Phase I thinning target.
 - `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
   - Result: `186 passed, 2 warnings`.
 - `python -m pytest tests -q`

@@ -1244,7 +1244,7 @@ def agent_loop_forces_trace_tool(ctx: RunContext) -> CaseResult:
     original_call = planner.call_llm_with_tools
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "should not be used"}
@@ -1326,7 +1326,7 @@ def agent_loop_does_not_force_mood_emoji_after_behavior_policy_query(ctx: RunCon
     ]
     original_call = planner.call_llm_with_tools
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         return responses.pop(0)
 
     tool_ctx = context_mod.ToolContext(
@@ -1401,7 +1401,7 @@ def agent_loop_forces_math_tool(ctx: RunContext) -> CaseResult:
     original_call = planner.call_llm_with_tools
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
@@ -1472,7 +1472,7 @@ def agent_loop_does_not_expose_math_tool_for_scoreline_chat(ctx: RunContext) -> 
     llm_called = False
     exposed_math_tool = True
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called, exposed_math_tool
         llm_called = True
         exposed_math_tool = "solve_math_question" not in set(disabled_tools or [])
@@ -1533,7 +1533,7 @@ def agent_loop_forces_ui_preference_tool(ctx: RunContext) -> CaseResult:
     original_call = planner.call_llm_with_tools
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
@@ -1593,7 +1593,7 @@ def agent_loop_forces_reply_body_ui_preference_tool(ctx: RunContext) -> CaseResu
     original_call = planner.call_llm_with_tools
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
@@ -1663,7 +1663,7 @@ def agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score(ctx: RunCon
     original_call = planner.call_llm_with_tools
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         if len(calls) == 1:
             return {
@@ -1736,7 +1736,7 @@ def agent_loop_allows_llm_to_choose_web_verification_tool(ctx: RunContext) -> Ca
     original_call = planner.call_llm_with_tools
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         if len(calls) == 1:
             return {
@@ -1808,7 +1808,7 @@ def agent_loop_continues_after_unavailable_web_verification(ctx: RunContext) -> 
     original_call = planner.call_llm_with_tools
     calls = []
 
-    async def fake_call(messages, model, api_key, allowed_permissions, disabled_tools=None):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         if len(calls) == 1:
             return {
@@ -1885,7 +1885,7 @@ def agent_loop_forces_explicit_memory_tool(ctx: RunContext) -> CaseResult:
     original_call = planner.call_llm_with_tools
     llm_called = False
 
-    async def fake_call(messages, model, api_key, allowed_permissions):
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         nonlocal llm_called
         llm_called = True
         return {"role": "assistant", "content": "model answered directly"}
