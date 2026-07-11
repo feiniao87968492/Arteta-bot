@@ -78,38 +78,6 @@ def finish_agent_run(value: str, ctx: ToolContext, prepared: PreparedAgentRun) -
     )
 
 
-async def run_legacy_agent_loop(
-    messages,
-    ctx: ToolContext,
-    model: str,
-    api_key: str,
-    api_url: str,
-    max_rounds: int,
-    trace,
-    temperature: float,
-    request_timeout: float,
-    max_tool_calls: int,
-    max_same_tool_call_repeats: int,
-    max_total_observation_chars: int,
-    chat_model_call,
-) -> str:
-    return await run_agent_request(AgentRequest(
-        messages=list(messages),
-        ctx=ctx,
-        model=model,
-        api_key=api_key,
-        api_url=api_url,
-        max_rounds=max_rounds,
-        trace=trace,
-        temperature=temperature,
-        request_timeout=request_timeout,
-        max_tool_calls=max_tool_calls,
-        max_same_tool_call_repeats=max_same_tool_call_repeats,
-        max_total_observation_chars=max_total_observation_chars,
-        chat_model_call=chat_model_call,
-    ))
-
-
 async def run_agent_request(request: AgentRequest) -> str:
     allowed = {"safe_read", "safe_write", "confirm_write", "admin_action"}
     ctx = request.ctx

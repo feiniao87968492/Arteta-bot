@@ -525,7 +525,6 @@ def test_planner_delegates_agent_loop_orchestration_to_service():
 
     source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
 
-    assert hasattr(service, "run_legacy_agent_loop")
     assert "from .planning." not in source
     assert "from .routing." not in source
     assert "run_runtime_loop_from_state" not in source
@@ -548,3 +547,11 @@ def test_planner_uses_structured_agent_request_for_service_entrypoint():
     assert "AgentRequest(" in source
     assert "return await run_agent_request(" in source
     assert "run_legacy_agent_loop(" not in source
+
+
+def test_agent_service_has_no_unused_legacy_loop_wrapper():
+    from pathlib import Path
+
+    service_source = Path("plugins/arteta_agent/service.py").read_text(encoding="utf-8")
+
+    assert "def run_legacy_agent_loop(" not in service_source

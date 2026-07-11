@@ -2909,3 +2909,42 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Planner Cleanup: Remove Legacy Agent Loop Wrapper
+
+### Scope
+
+- Removed unused `run_legacy_agent_loop(...)` from `plugins/arteta_agent/service.py`.
+- `run_agent_request(...)` is now the only service-layer Agent loop entrypoint.
+- Updated the planner structure tests to assert the legacy wrapper is gone.
+
+### Design Decision
+
+- Static search showed no callers for `run_legacy_agent_loop(...)` outside its own definition.
+- Removing the wrapper avoids leaving a second service entrypoint that could drift from `AgentRequest`.
+- `planner.run_agent_loop(...)` remains the only legacy public compatibility entrypoint.
+
+### Compatibility and Safety
+
+- Public `planner.run_agent_loop(...)` signature is unchanged.
+- No runtime execution order, permissions, routing, planning, provider, trace, artifact, or policy behavior changed.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_runtime.py::test_agent_service_has_no_unused_legacy_loop_wrapper -q`
+  - RED before implementation: failed because `service.py` still defined `run_legacy_agent_loop(...)`.
+  - Result after implementation: passed as part of the Runtime suite.
+- `python -m pytest tests/test_arteta_agent_runtime.py -q`
+  - Result: `15 passed`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\service.py tests\\test_arteta_agent_runtime.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `535 passed, 2 warnings`.
+
+### Remaining
+
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.
