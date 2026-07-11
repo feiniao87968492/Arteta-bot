@@ -2887,3 +2887,25 @@ Verification after the fix:
 
 - `run_legacy_agent_loop(...)` can be removed after confirming there are no internal callers left outside planner.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
+
+### ECS Deployment
+
+- Commit deployed: `3483399 refactor: add agent request service entrypoint`.
+- Deployment archive: `/tmp/arteta_agent_request_entrypoint_3483399.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_request_entrypoint_20260712042255`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/service.py`;
+  - `tests/test_arteta_agent_runtime.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After AgentRequest Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
