@@ -11,6 +11,7 @@ from .pending import store_from_context
 from .planning.plan_builder import build_plan
 from .registry import build_openai_tools, get_tool, list_enabled_tools
 from .response.artifacts import ARTIFACT_MARKER_RE, extract_artifact_markers
+from .response.composer import compose_final_response, prefix_trace_markers, trace_has_marker
 from .result import TOOL_STATUS_PERMISSION_REQUIRED
 from .runtime.config import AgentRunConfig
 from .runtime.loop_guard import loop_guard_message, tool_call_signature
@@ -818,19 +819,11 @@ def _trace_has_tool(trace, tool_name: str) -> bool:
 
 
 def _trace_has_marker(trace, marker: str) -> bool:
-    if not trace:
-        return False
-    for item in trace.get("tools") or []:
-        if marker in (item.get("markers") or []):
-            return True
-    return False
+    return trace_has_marker(trace, marker)
 
 
 def _prefix_trace_markers(value: str, trace) -> str:
-    text = str(value or "")
-    if _trace_has_marker(trace, "[grok]") and not text.lstrip().startswith("[grok]"):
-        return "[grok]\n" + text
-    return text
+    return prefix_trace_markers(value, trace)
 
 
 def _trace_has_any_tool(trace, tool_names) -> bool:
@@ -1503,11 +1496,7 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
     def finish(value: str) -> str:
         if should_consume_policy_turn:
             consume_group_policy_turn(ctx.group_id)
-        output = str(value or "")
-        for marker in tool_artifact_markers:
-            if marker not in output:
-                output = "{0}\n{1}".format(output.strip(), marker).strip()
-        return _prefix_trace_markers(output, trace)
+        return compose_final_response(value, artifacts=tool_artifact_markers, trace=trace)
 
     planned_initial_calls = _initial_tool_calls_from_plan(state, ctx, disabled_tools)
     if len(planned_initial_calls) > 1:

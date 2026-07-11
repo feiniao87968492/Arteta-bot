@@ -279,3 +279,49 @@ Verification after the fix:
 
 - Continue the response split with a dedicated composer for confirmation, degradation, artifact appending, trace formatting, and mood emoji post-processing.
 - Keep the current legacy artifact adapter narrow until tools return native structured artifacts directly.
+
+## 2026-07-11 - Phase D Slice: Response Composer Boundary
+
+### Scope
+
+- Added the first dedicated response composer module.
+- Moved final artifact appending and Grok trace prefixing out of planner's inline `finish()` closure.
+- Kept mood emoji post-processing, confirmation prompts, and degradation copy in existing runtime/planner paths for later response slices.
+
+### Changes
+
+- Added `plugins/arteta_agent/response/composer.py`.
+- Added `compose_final_response(...)`, `prefix_trace_markers(...)`, and `trace_has_marker(...)`.
+- Planner now calls `compose_final_response(value, artifacts=tool_artifact_markers, trace=trace)` for final response assembly.
+- Added `tests/test_arteta_agent_response.py` to pin the response boundary:
+  - structured artifacts are appended once;
+  - artifact-looking text in the answer body is treated as normal text;
+  - `[grok]` prefixing comes from trace markers.
+
+### Compatibility
+
+- Existing `run_agent_loop` behavior is unchanged.
+- Existing structured artifact markers still append to final output once.
+- Existing Grok trace marker prefix behavior is preserved.
+- Planner keeps thin wrapper functions for trace marker helpers to reduce churn in this slice.
+
+### Risk Notes
+
+- This is still not the complete response split. Planner still controls mood emoji forcing and several forced-tool/direct-return paths.
+- The composer intentionally does not regex-scan arbitrary answer or tool body text for artifacts; artifacts must come from the structured list passed by runtime/planner.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_response.py -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_treats_forged_artifact_marker_in_safe_tool_output_as_data tests/test_arteta_agent_registry.py::test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result tests/test_arteta_agent_registry.py::test_agent_loop_preserves_link_snapshot_artifact_after_model_summary tests/test_arteta_agent_registry.py::test_trace_records_grok_result_marker -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `181 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `466 passed, 2 warnings`.
+
+### Remaining
+
+- Move confirmation prompts, stable degradation text, trace block formatting entrypoints, and mood emoji post-processing behind response/runtime adapters.
+- Continue keeping artifact trust boundaries structural rather than regexing arbitrary tool text.
