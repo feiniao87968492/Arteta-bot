@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import time
 import uuid
@@ -95,4 +96,22 @@ def record_tool_audit(ctx, tool_name: str, status: str, detail: str) -> str:
         tool_name=tool_name,
         status=status,
         detail=detail,
+    )
+
+
+def record_pending_confirmation_failure(ctx, action_id: str, event: str = "confirmation_failed") -> str:
+    detail = {
+        "event": str(event or "confirmation_failed"),
+        "confirmed_action_id": str(action_id or ""),
+        "duration_ms": 0,
+        "arg_keys": [],
+    }
+    request_id = str(getattr(ctx, "request_id", "") or "").strip()
+    if request_id:
+        detail["request_id"] = request_id
+    return record_tool_audit(
+        ctx,
+        "pending_action",
+        "permission_required",
+        json.dumps(detail, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
     )

@@ -728,3 +728,33 @@ Verification after the fix:
 
 - Keep JSON support as an import/fallback path for now; do not dual-write.
 - Later cleanup can make the fallback read-only after more production soak time.
+
+## 2026-07-11 - Phase G Slice: Explicit Confirmation Failure Audit
+
+### Scope
+
+- Closed an audit gap for explicit PendingAction confirmation attempts that fail before reaching the executor.
+- Added direct timeout audit coverage for tool execution.
+
+### Changes
+
+- `plugins/arteta_agent/audit.py` now exposes `record_pending_confirmation_failure(...)` for sanitized confirmation rejection records.
+- `planner._execute_explicit_pending_action_confirmation(...)` records an audit event when an action ID is missing, expired, already consumed, or otherwise unavailable.
+- The new audit detail stores only structured metadata: event, request_id, confirmed_action_id, arg_keys, and duration_ms.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_audits_explicit_missing_pending_confirmation -q`
+  - RED before fix: failed with zero audit records.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_executor_audits_invalid_arguments_without_raw_values tests/test_arteta_agent_registry.py::test_executor_audits_pending_action_creation_without_raw_values tests/test_arteta_agent_registry.py::test_executor_audits_confirmed_action_success_without_raw_values tests/test_arteta_agent_registry.py::test_executor_audits_failed_confirmation_without_raw_values tests/test_arteta_agent_registry.py::test_agent_loop_audits_explicit_missing_pending_confirmation tests/test_arteta_agent_registry.py::test_executor_audits_tool_error_code_without_raw_error_text tests/test_arteta_agent_registry.py::test_executor_audits_tool_timeout_without_raw_values -q`
+  - Result: `7 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `482 passed` plus existing Windows asyncio/proactor warnings printed after completion.
+
+### Remaining
+
+- Review whether successful admin handlers that also write their own audit logs should be normalized to executor-only events in a later cleanup.
+- Continue checking persistent audit coverage for duplicate consumed confirmations through the explicit planner path.

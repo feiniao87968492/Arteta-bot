@@ -1191,6 +1191,37 @@ def test_executor_audits_failed_confirmation_without_raw_values(tmp_path):
     assert "request-secret" not in records[0]["detail"]
 
 
+def test_agent_loop_audits_explicit_missing_pending_confirmation(tmp_path, monkeypatch):
+    from plugins.arteta_agent import planner
+    from plugins.arteta_agent.audit import AuditStore
+
+    clear_registry()
+    audit_path = tmp_path / "audit.db"
+    pending_path = tmp_path / "pending.db"
+    missing_action_id = "missingaction123"
+
+    result = asyncio.run(planner.run_agent_loop(
+        [{"role": "user", "content": "confirm {0}".format(missing_action_id)}],
+        make_context(request_id="req-missing-confirm", extra={
+            "pending_action_db_path": str(pending_path),
+            "audit_db_path": str(audit_path),
+        }),
+        model="model",
+        api_key="key",
+    ))
+
+    assert result.startswith("[PermissionRequired]")
+    records = AuditStore(str(audit_path)).list_records()
+    assert len(records) == 1
+    assert records[0]["tool_name"] == "pending_action"
+    assert records[0]["status"] == "permission_required"
+    detail = json.loads(records[0]["detail"])
+    assert detail["event"] == "confirmation_failed"
+    assert detail["confirmed_action_id"] == missing_action_id
+    assert detail["request_id"] == "req-missing-confirm"
+    assert "arguments" not in detail
+
+
 def test_executor_audits_tool_error_code_without_raw_error_text(tmp_path):
     from plugins.arteta_agent.audit import AuditStore
 
@@ -1235,6 +1266,52 @@ def test_executor_audits_tool_error_code_without_raw_error_text(tmp_path):
     assert detail["duration_ms"] >= 0
     assert "secret-token-value" not in records[0]["detail"]
     assert "raw-error-secret" not in records[0]["detail"]
+
+
+def test_executor_audits_tool_timeout_without_raw_values(tmp_path):
+    from plugins.arteta_agent.audit import AuditStore
+
+    clear_registry()
+
+    async def handler(ctx: ToolContext, token: str):
+        await asyncio.sleep(0.05)
+        return "should not finish {0}".format(token)
+
+    register_tool(ToolSpec(
+        "safe_write_timeout",
+        "safe write timeout",
+        {
+            "type": "object",
+            "properties": {"token": {"type": "string"}},
+            "required": ["token"],
+        },
+        handler,
+        permission="safe_write",
+        timeout_seconds=0.001,
+    ))
+    audit_path = tmp_path / "audit.db"
+
+    result = asyncio.run(execute_tool_call({
+        "id": "call-timeout-audit",
+        "function": {
+            "name": "safe_write_timeout",
+            "arguments": json.dumps({"token": "secret-timeout-token"}),
+        },
+    }, make_context(request_id="req-timeout-audit", extra={"audit_db_path": str(audit_path)})))
+
+    assert result.startswith("[ToolTimeout]")
+    records = AuditStore(str(audit_path)).list_records()
+    assert len(records) == 1
+    assert records[0]["tool_name"] == "safe_write_timeout"
+    assert records[0]["status"] == "timeout"
+    detail = json.loads(records[0]["detail"])
+    assert detail["event"] == "tool_executed"
+    assert detail["permission"] == "safe_write"
+    assert detail["arg_keys"] == ["token"]
+    assert detail["request_id"] == "req-timeout-audit"
+    assert detail["error_code"] == "TimeoutError"
+    assert isinstance(detail["duration_ms"], int)
+    assert "secret-timeout-token" not in records[0]["detail"]
 
 
 def test_agent_loop_stops_after_permission_required_without_replanning(tmp_path, monkeypatch):

@@ -3,6 +3,7 @@ import inspect
 import re
 
 from . import behavior_policy
+from .audit import record_pending_confirmation_failure
 from .context import ToolContext
 from .executor import execute_tool_call, execute_tool_call_result
 from .pending import store_from_context
@@ -773,6 +774,10 @@ def detect_pending_action_confirmation_id(messages) -> str:
 async def _execute_explicit_pending_action_confirmation(action_id: str, ctx: ToolContext, trace) -> str:
     action = store_from_context(ctx).get_action(action_id)
     if not action:
+        try:
+            record_pending_confirmation_failure(ctx, action_id)
+        except Exception:
+            pass
         return "[PermissionRequired] PendingAction {0} expired or already consumed, or does not match this user/group/tool.".format(action_id)
     tool_name = str(action.get("tool_name") or "")
     if not get_tool(tool_name):
