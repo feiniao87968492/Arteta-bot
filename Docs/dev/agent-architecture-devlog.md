@@ -2122,3 +2122,25 @@ Verification after the fix:
 - `planner.py` still owns behavior/tool-policy direct update branches.
 - `_answer_after_unavailable_web_result(...)` remains as a compatibility helper and should be revisited separately.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
+
+### ECS Deployment
+
+- Commit deployed: `29ac74c refactor: extract contextual tool exposure rules`.
+- Deployment archive: `/tmp/arteta_phase_c_contextual_exposure_29ac74c.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_contextual_exposure_20260712025046`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/routing/contextual_tools.py`;
+  - `tests/test_arteta_agent_routing.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Contextual Exposure Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
