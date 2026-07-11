@@ -25,7 +25,6 @@ from .runtime.config import AgentRunConfig
 from .runtime.loop_guard import loop_guard_message, tool_call_signature
 from .runtime.runner import AgentRuntimeRunner
 from .runtime.state import AgentState, FinalizedResponse
-from .routing.contextual_tools import detect_ui_preference_args
 from .routing.heuristic_router import route_message
 from .tool_policy import (
     consume_group_policy_turn,
@@ -1225,29 +1224,14 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
             max_same_tool_call_repeats=max_same_tool_call_repeats,
             max_total_observation_chars=max_total_observation_chars,
             initial_tool_calls=planned_initial_calls,
-            stop_after_initial_tools=bool(initial_plan.constraints.get("direct_trace_response")),
+            stop_after_initial_tools=bool(
+                initial_plan.constraints.get("direct_trace_response")
+                or initial_plan.constraints.get("direct_tool_response")
+            ),
         )
         if initial_plan.constraints.get("direct_trace_response"):
             return finish(compose_trace_response(trace))
         return finish(initial_result)
-
-    forced_ui_args = detect_ui_preference_args(state)
-    if forced_ui_args and get_tool("update_ui_preference") and "update_ui_preference" not in disabled_tools:
-        # UI customization is a controlled config write. Force the registered
-        # tool so visual changes are audited in trace instead of buried in text.
-        tool_call = {
-            "id": "forced-update-ui-preference-1",
-            "type": "function",
-            "function": {
-                "name": "update_ui_preference",
-                "arguments": json.dumps(forced_ui_args, ensure_ascii=False),
-            },
-        }
-        return finish(await _run_forced_tool_direct(
-            state, ctx, tool_call, model, api_key, api_url, allowed, disabled_tools,
-            max_rounds, trace, temperature, tool_artifact_markers, request_timeout,
-            max_tool_calls, max_same_tool_call_repeats, max_total_observation_chars,
-        ))
 
     forced_memory_args = detect_forced_memory_args(state)
     if forced_memory_args and get_tool("remember_user_preference") and "remember_user_preference" not in disabled_tools:

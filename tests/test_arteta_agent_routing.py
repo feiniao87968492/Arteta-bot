@@ -377,3 +377,33 @@ def test_planner_no_longer_defines_ui_preference_detector():
 
     assert "def detect_forced_ui_preference_args" not in source
     assert "def _extract_requested_font_scale" not in source
+
+
+def test_plan_builder_routes_ui_preference_requests_as_required_tool():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    decision = route_message([
+        {"role": "user", "content": "下次回复文字标红、加粗、放大五倍"},
+    ], make_context())
+    plan = build_plan(decision, make_context())
+
+    assert any(intent.name == "ui_preference" for intent in decision.intents)
+    assert tool_names(plan) == ["update_ui_preference"]
+    assert plan.required_tools[0].arguments == {
+        "target": "reply_body",
+        "color": "red",
+        "bold": True,
+        "font_scale": 5.0,
+    }
+    assert plan.constraints.get("execute_single_required_tool") is True
+    assert plan.constraints.get("direct_tool_response") is True
+
+
+def test_planner_no_longer_has_forced_ui_preference_branch():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "forced_ui_args" not in source
+    assert "update_ui_preference\") and \"update_ui_preference\" not in disabled_tools" not in source

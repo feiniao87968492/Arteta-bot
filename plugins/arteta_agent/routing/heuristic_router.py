@@ -2,6 +2,7 @@ import json
 from typing import List
 
 from ..context import ToolContext
+from .contextual_tools import detect_ui_preference_args
 from .models import Intent, PlannedToolCall, RouteDecision
 
 
@@ -81,7 +82,19 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
 
     extra = getattr(ctx, "extra", {}) or {} if ctx is not None else {}
 
-    if _has_any(text, MEMORY_PREFERENCE_MARKERS):
+    ui_args = detect_ui_preference_args(messages)
+    if ui_args:
+        decision.intents.append(Intent("ui_preference", 0.9, "explicit UI preference request"))
+        decision.constraints["execute_single_required_tool"] = True
+        decision.constraints["direct_tool_response"] = True
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="update_ui_preference",
+            arguments=ui_args,
+            reason="update controlled UI preference",
+            forced=True,
+        ))
+
+    if _has_any(text, MEMORY_PREFERENCE_MARKERS) and not ui_args:
         decision.intents.append(Intent("memory_preference", 0.9, "explicit future/preference marker"))
         _append_tool_once(decision.required_tools, PlannedToolCall(
             name="remember_user_preference",
