@@ -473,3 +473,14 @@ def test_runtime_runner_parallel_tool_limit_is_enforced():
     assert result.content == "done"
     assert abs(starts["read_1"] - starts["read_2"]) < 0.025
     assert starts["read_3"] >= finishes["read_1"]
+
+
+def test_runtime_confirmation_module_owns_explicit_pending_confirmation_helpers():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "def detect_pending_action_confirmation_id" not in source
+    assert "def _execute_explicit_pending_action_confirmation" not in source
+    assert "record_pending_confirmation_failure" not in source
+    assert "store_from_context" not in source

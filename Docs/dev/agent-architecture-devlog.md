@@ -2414,3 +2414,51 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase B Cleanup: Move Explicit Pending Confirmation Out Of Planner
+
+### Scope
+
+- Added `plugins/arteta_agent/runtime/confirmation.py`.
+- Moved explicit pending-action confirmation parsing and execution out of `planner.py`.
+- Kept `planner.run_agent_loop(...)` behavior unchanged: it still short-circuits explicit confirmation messages before normal routing/model execution.
+- `planner.py` no longer directly imports or owns:
+  - `record_pending_confirmation_failure`;
+  - `store_from_context`;
+  - `detect_pending_action_confirmation_id(...)`;
+  - `_execute_explicit_pending_action_confirmation(...)`.
+
+### Design Decision
+
+- Explicit confirmation is a Runtime boundary concern because it consumes a server-side pending action and must not be delegated to model reasoning.
+- The new module still executes through `execute_tool_call(...)` with `ctx.extra["confirmed_action_id"]`, so existing executor checks continue to enforce user, group, tool, stored arguments, admin status, atomic consume, and audit behavior.
+- The planner keeps only the orchestration decision: if the latest user message is an explicit confirmation, call the Runtime confirmation helper and return its result.
+
+### Compatibility and Safety
+
+- Confirmation messages such as `confirm <action_id>` and `确认 <action_id>` are still accepted.
+- Missing, expired, wrong-group, wrong-user, or unknown-tool confirmations retain their existing responses.
+- Explicit confirmation still avoids a model call.
+- Existing audit behavior for missing confirmation and executor-level confirmed action success/failure is unchanged.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_runtime.py::test_runtime_confirmation_module_owns_explicit_pending_confirmation_helpers -q`
+  - RED before implementation: failed because planner still defined the confirmation helpers.
+- `python -m pytest tests/test_arteta_agent_runtime.py::test_runtime_confirmation_module_owns_explicit_pending_confirmation_helpers tests/test_arteta_agent_registry.py::test_agent_loop_executes_explicit_pending_action_confirmation tests/test_arteta_agent_registry.py::test_agent_loop_executes_explicit_pending_admin_action_confirmation tests/test_arteta_agent_registry.py::test_agent_loop_rejects_explicit_pending_action_confirmation_for_wrong_group tests/test_arteta_agent_registry.py::test_agent_loop_audits_explicit_missing_pending_confirmation -q`
+  - Result: `5 passed`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\runtime\\confirmation.py tests\\test_arteta_agent_runtime.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_runtime.py -q`
+  - Result: `10 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `528 passed`.
+
+### Remaining
+
+- `planner.py` still performs compatibility orchestration around route, plan, Runtime configuration, response composition, and policy TTL finalization.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.

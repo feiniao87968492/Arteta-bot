@@ -1,11 +1,8 @@
 import json
-import re
 
 from . import behavior_policy
-from .audit import record_pending_confirmation_failure
 from .context import ToolContext
 from .executor import execute_tool_call, execute_tool_call_result
-from .pending import store_from_context
 from .planning.plan_builder import build_plan
 from .providers.chat_completion import (
     DEFAULT_CHAT_API_URL,
@@ -21,6 +18,11 @@ from .response.mood import (
     maybe_send_mood_emoji,
 )
 from .runtime.config import AgentRunConfig
+from .runtime.confirmation import (
+    detect_pending_action_confirmation_id,
+    execute_explicit_pending_action_confirmation,
+    latest_user_content,
+)
 from .runtime.loop_guard import loop_guard_message
 from .runtime.runner import AgentRuntimeRunner
 from .runtime.state import AgentState, FinalizedResponse
@@ -30,10 +32,6 @@ from .tool_policy import (
     consume_group_policy_turn,
     get_disabled_tools,
 )
-from .trace import record_round
-
-
-PENDING_ACTION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12,}$")
 
 
 def _parse_chat_response(resp, api_url: str):
@@ -41,46 +39,7 @@ def _parse_chat_response(resp, api_url: str):
 
 
 def _latest_user_content(messages) -> str:
-    for msg in reversed(messages or []):
-        if msg.get("role") == "user":
-            return str(msg.get("content") or "")
-    return ""
-
-
-def detect_pending_action_confirmation_id(messages) -> str:
-    text = _latest_user_content(messages).strip()
-    if not text:
-        return ""
-    match = re.match(r"^(?:确认执行|确认|confirm|yes)\s+([A-Za-z0-9_-]{12,})$", text, flags=re.IGNORECASE)
-    if not match:
-        return ""
-    action_id = match.group(1).strip()
-    return action_id if PENDING_ACTION_ID_RE.match(action_id) else ""
-
-
-async def _execute_explicit_pending_action_confirmation(action_id: str, ctx: ToolContext, trace) -> str:
-    action = store_from_context(ctx).get_action(action_id)
-    if not action:
-        try:
-            record_pending_confirmation_failure(ctx, action_id)
-        except Exception:
-            pass
-        return "[PermissionRequired] PendingAction {0} expired or already consumed, or does not match this user/group/tool.".format(action_id)
-    tool_name = str(action.get("tool_name") or "")
-    if not get_tool(tool_name):
-        return "[ToolError] PendingAction {0} references unknown tool: {1}".format(action_id, tool_name)
-    tool_call = {
-        "id": "confirmed-pending-action-{0}".format(action_id[:12]),
-        "type": "function",
-        "function": {
-            "name": tool_name,
-            "arguments": "{}",
-        },
-    }
-    ctx.extra = dict(ctx.extra or {})
-    ctx.extra["confirmed_action_id"] = action_id
-    record_round(trace, 1)
-    return await execute_tool_call(tool_call, ctx)
+    return latest_user_content(messages)
 
 
 def _has_expiring_behavior_policies(group_id: str) -> bool:
@@ -348,7 +307,7 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
 
     confirmed_action_id = detect_pending_action_confirmation_id(state)
     if confirmed_action_id:
-        return await _execute_explicit_pending_action_confirmation(confirmed_action_id, ctx, trace)
+        return await execute_explicit_pending_action_confirmation(confirmed_action_id, ctx, trace)
 
     disabled_tools = get_disabled_tools(ctx.group_id)
     schema_excluded_tools = set(disabled_tools) | detect_contextual_tool_exclusions(state, ctx)
