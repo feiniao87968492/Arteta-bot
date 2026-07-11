@@ -351,3 +351,5 @@ def test_planner_uses_structured_plan_instead_of_trace_keyword_branch():
     source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
 
     assert "if wants_trace_tool(state)" not in source
+    assert "def wants_trace_tool" not in source
+    assert "TRACE_REQUEST_MARKERS" not in source

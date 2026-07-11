@@ -42,19 +42,6 @@ def _parse_chat_response(resp, api_url: str):
     return parse_chat_response(resp, api_url)
 
 
-TRACE_REQUEST_MARKERS = (
-    "trace",
-    "agent trace",
-    "tool trace",
-    "\u8c03\u7528\u4e86\u4ec0\u4e48\u5de5\u5177",
-    "\u8c03\u7528\u4ec0\u4e48\u5de5\u5177",
-    "\u5de5\u5177\u8c03\u7528",
-    "\u4e3a\u4ec0\u4e48\u8fd9\u6837\u56de\u590d",
-    "\u4e3a\u4ec0\u4e48\u8fd9\u4e48\u56de",
-    "\u53ef\u89c6\u5316\u8c03\u8bd5",
-)
-
-
 SCIENCE_TOOL_NAMES = {
     "solve_science_question",
     "solve_algorithm_problem",
@@ -330,11 +317,6 @@ def _latest_user_content(messages) -> str:
         if msg.get("role") == "user":
             return str(msg.get("content") or "")
     return ""
-
-
-def wants_trace_tool(messages) -> bool:
-    text = _latest_user_content(messages).lower()
-    return any(marker in text for marker in TRACE_REQUEST_MARKERS)
 
 
 def _has_scoreline_without_technical_context(text: str) -> bool:

@@ -835,6 +835,38 @@ Verification after the fix:
 - `wants_trace_tool(...)` and `TRACE_REQUEST_MARKERS` are now compatibility/dead planner symbols; a later cleanup can remove them after checking direct imports.
 - Additional planner forced branches for UI, memory, document, link, web, and science still need separate RouteDecision/Plan migrations.
 
+## 2026-07-12 - Phase C/D Slice: Remove Dead Planner Trace Helpers
+
+### Scope
+
+- Removed the compatibility/dead trace keyword helper symbols left after structured trace routing landed.
+
+### Changes
+
+- Deleted `TRACE_REQUEST_MARKERS` from `planner.py`.
+- Deleted `wants_trace_tool(...)` from `planner.py`.
+- Strengthened the routing source regression to prove planner no longer owns the trace route marker set or helper.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_planner_uses_structured_plan_instead_of_trace_keyword_branch -q`
+  - RED before fix: failed because `def wants_trace_tool` still existed.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `11 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_forces_trace_tool_when_user_requests_trace tests/test_arteta_agent_registry.py::test_agent_loop_records_rounds_and_tool_trace -q`
+  - Result: `2 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `503 passed, 2 warnings`.
+
+### Remaining
+
+- Additional planner-local marker sets for UI, memory, document, link, web, and science still need separate routing-module migrations.
+
 ## 2026-07-11 - Phase E Slice: OpenAI-Compatible Provider Adapter
 
 ### Scope
