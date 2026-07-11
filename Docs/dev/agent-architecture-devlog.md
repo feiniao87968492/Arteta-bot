@@ -748,6 +748,23 @@ Verification after the fix:
 - `python -m pytest tests -q`
   - Result: `501 passed, 2 warnings`.
 
+### ECS Deployment
+
+- Commit deployed: `7f74e02 refactor: compose trace response outside planner`.
+- Deployment archive: `/tmp/arteta_phase_d_trace_response_7f74e02.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_d_trace_response_20260712004100`.
+- Remote `py_compile` passed for `plugins/arteta_agent/planner.py`, `plugins/arteta_agent/response/composer.py`, and `tests/test_arteta_agent_response.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+
+### ECS Smoke After Trace Response Composer Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ### Remaining
 
 - Planner still owns the decision to force `show_agent_trace`; moving that route decision into structured planning remains separate from response composition.
