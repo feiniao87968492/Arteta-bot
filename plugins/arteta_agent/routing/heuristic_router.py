@@ -11,6 +11,19 @@ LOCAL_MEMORY_MARKERS = ("之前", "刚才", "上次", "昨天", "你之前", "�
 CURRENT_FACT_MARKERS = ("最新", "最近", "现在", "结果", "赛果", "比分", "伤病", "转会")
 FOOTBALL_MARKERS = ("阿森纳", "arsenal", "比赛", "英超", "欧冠", "球队")
 DOCUMENT_MARKERS = ("pdf", "PDF", "文档", "文件", "附件", "报告")
+LINK_INTENT_MARKERS = (
+    "链接",
+    "网址",
+    "网页",
+    "http://",
+    "https://",
+    "总结",
+    "分析",
+    "看看",
+    "快照",
+    "截取",
+    "讲了什么",
+)
 MATH_INTENT_MARKERS = ("求解", "计算", "解方程", "证明")
 
 TRACE_MARKERS = (
@@ -123,6 +136,15 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
                 reason="document context present",
                 forced=True,
             ))
+
+    if extra.get("detected_urls") and (not text or _has_any(text, LINK_INTENT_MARKERS)):
+        decision.intents.append(Intent("link_analysis", 0.9, "link context present with analysis intent"))
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="analyze_links",
+            arguments={},
+            reason="analyze detected link context",
+            forced=True,
+        ))
 
     if _has_any(text, LOCAL_MEMORY_MARKERS):
         decision.intents.append(Intent("group_memory", 0.75, "local memory reference"))

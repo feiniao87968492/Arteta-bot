@@ -437,21 +437,6 @@ DETECTED_URL_DOCUMENT_INTENT_MARKERS = (
     "报告",
 )
 
-LINK_INTENT_MARKERS = (
-    "链接",
-    "网址",
-    "网页",
-    "http://",
-    "https://",
-    "总结",
-    "分析",
-    "看看",
-    "快照",
-    "截取",
-    "讲了什么",
-)
-
-
 def _has_any_marker(text: str, markers) -> bool:
     lowered = str(text or "").lower()
     return any(marker in lowered for marker in markers)
@@ -507,14 +492,6 @@ def forced_document_tool_args(ctx: ToolContext) -> dict:
     if urls:
         return {"url": str(urls[0])}
     return {}
-
-
-def should_force_link_analysis_tool(messages, ctx: ToolContext) -> bool:
-    extra = getattr(ctx, "extra", {}) or {}
-    if not extra.get("detected_urls"):
-        return False
-    text = _latest_user_content(messages).strip()
-    return not text or _has_any_marker(text, LINK_INTENT_MARKERS)
 
 
 def detect_forced_web_verification_args(messages) -> dict:
@@ -1204,35 +1181,6 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
             "function": {
                 "name": "read_document",
                 "arguments": json.dumps(forced_document_tool_args(ctx), ensure_ascii=False),
-            },
-        }
-        return finish(await _answer_from_forced_tool_result(
-            state,
-            ctx,
-            tool_call,
-            model,
-            api_key,
-            api_url,
-            allowed,
-            disabled_tools,
-            schema_excluded_tools,
-            max_rounds,
-            trace,
-            temperature,
-            tool_artifact_markers,
-            request_timeout,
-            max_tool_calls=max_tool_calls,
-            max_same_tool_call_repeats=max_same_tool_call_repeats,
-            max_total_observation_chars=max_total_observation_chars,
-        ))
-
-    if should_force_link_analysis_tool(state, ctx) and get_tool("analyze_links") and "analyze_links" not in disabled_tools:
-        tool_call = {
-            "id": "forced-analyze-links-1",
-            "type": "function",
-            "function": {
-                "name": "analyze_links",
-                "arguments": "{}",
             },
         }
         return finish(await _answer_from_forced_tool_result(

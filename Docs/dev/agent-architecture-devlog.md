@@ -1732,3 +1732,44 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Slice: Link Analysis Plan Route
+
+### Scope
+
+- Migrated the detected-link `analyze_links` forced branch out of `planner.py` and into the structured Routing + Planning path.
+- Preserved existing behavior: link analysis is executed before the model response, and the tool observation is then summarized by the model instead of being returned directly.
+
+### Changes
+
+- Moved the link-analysis intent markers into `routing/heuristic_router.py`.
+- `route_message(...)` now emits a `link_analysis` intent and required `analyze_links` call when `ctx.extra.detected_urls` is present and the user asks to analyze/summarize/view the link.
+- `build_plan(...)` marks a single `analyze_links` required tool as `execute_single_required_tool` without `direct_tool_response`.
+- Removed `LINK_INTENT_MARKERS`, `should_force_link_analysis_tool(...)`, and the `forced-analyze-links` branch from `planner.py`.
+
+### Compatibility and Safety
+
+- No tool schema, permission, or handler behavior changed.
+- Unrelated messages that merely carry a detected URL do not force `analyze_links`.
+- Plain link intent still prefers `analyze_links` over `read_document` when both tools exist.
+- Link snapshot artifact compatibility remains covered through the existing response composer path.
+
+### Verification
+
+- Initial RED used the same route/removal assertions under the temporary name `test_plan_builder_routes_link_analysis_requests_as_direct_required_tool`; it failed because the router did not emit `link_analysis` and planner still had the forced link branch.
+  - During implementation review, the assertion was corrected to match legacy behavior: `analyze_links` should not set `direct_tool_response` because the model still summarizes the tool observation.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_routes_link_analysis_requests_as_required_tool tests/test_arteta_agent_routing.py::test_routing_does_not_force_link_analysis_without_link_intent tests/test_arteta_agent_routing.py::test_planner_no_longer_has_forced_link_analysis_branch tests/test_arteta_agent_registry.py::test_agent_loop_forces_link_analysis_when_link_is_present tests/test_arteta_agent_registry.py::test_agent_loop_prefers_link_analysis_for_plain_link_intent_when_document_tool_exists tests/test_arteta_agent_registry.py::test_agent_loop_preserves_link_snapshot_artifact_after_model_summary -q`
+  - GREEN after fix: `6 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `21 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `513 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still contains legacy forced branches for document, web verification, and science tools.
+- The document branch should be migrated separately because it has two argument modes: current-message document attachments and detected document URLs.

@@ -449,3 +449,43 @@ def test_planner_no_longer_has_forced_memory_preference_branch():
     assert "def detect_forced_memory_args" not in source
     assert "forced_memory_args" not in source
     assert "forced-remember-user-preference" not in source
+
+
+def test_plan_builder_routes_link_analysis_requests_as_required_tool():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    ctx = make_context(extra={"detected_urls": ["https://example.com/a"]})
+    decision = route_message([
+        {"role": "user", "content": "看看这个链接讲了什么"},
+    ], ctx)
+    plan = build_plan(decision, ctx)
+
+    assert any(intent.name == "link_analysis" for intent in decision.intents)
+    assert tool_names(plan) == ["analyze_links"]
+    assert plan.required_tools[0].arguments == {}
+    assert plan.constraints.get("execute_single_required_tool") is True
+    assert plan.constraints.get("direct_tool_response") is not True
+
+
+def test_routing_does_not_force_link_analysis_without_link_intent():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    ctx = make_context(extra={"detected_urls": ["https://example.com/a"]})
+    decision = route_message([
+        {"role": "user", "content": "阿森纳今天训练怎么样"},
+    ], ctx)
+    plan = build_plan(decision, ctx)
+
+    assert "analyze_links" not in tool_names(plan)
+
+
+def test_planner_no_longer_has_forced_link_analysis_branch():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "def should_force_link_analysis_tool" not in source
+    assert "forced-analyze-links" not in source
+    assert "if should_force_link_analysis_tool" not in source
