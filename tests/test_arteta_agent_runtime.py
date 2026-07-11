@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 from plugins.arteta_agent.context import ToolContext
 from plugins.arteta_agent.result import TOOL_STATUS_OK, TOOL_STATUS_PERMISSION_REQUIRED, ToolResult
@@ -232,3 +233,243 @@ def test_runtime_runner_enforces_total_request_timeout():
 
     assert result.stop_reason == "timeout"
     assert "request timeout" in result.content
+
+
+def test_runtime_runner_executes_parallel_safe_read_tools_concurrently_in_order():
+    from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
+    from plugins.arteta_agent.runtime.config import AgentRunConfig
+    from plugins.arteta_agent.runtime.runner import AgentRuntimeRunner
+    from plugins.arteta_agent.runtime.state import AgentState
+
+    clear_registry()
+    register_tool(ToolSpec(
+        "read_a",
+        "read a",
+        {"type": "object", "properties": {}},
+        lambda ctx: "a",
+        permission="safe_read",
+        parallel_safe=True,
+        idempotent=True,
+    ))
+    register_tool(ToolSpec(
+        "read_b",
+        "read b",
+        {"type": "object", "properties": {}},
+        lambda ctx: "b",
+        permission="safe_read",
+        parallel_safe=True,
+        idempotent=True,
+    ))
+    starts = {}
+
+    async def fake_execute(tool_call, ctx):
+        name = tool_call["function"]["name"]
+        starts[name] = time.monotonic()
+        await asyncio.sleep(0.05)
+        return ToolResult(
+            name=name,
+            permission="safe_read",
+            status=TOOL_STATUS_OK,
+            content="{0}-result".format(name),
+        )
+
+    async def fake_model(messages, runtime_state):
+        if not runtime_state.tool_results:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-read-a",
+                        "type": "function",
+                        "function": {"name": "read_a", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call-read-b",
+                        "type": "function",
+                        "function": {"name": "read_b", "arguments": "{}"},
+                    },
+                ],
+            }
+        return {"role": "assistant", "content": "done"}
+
+    state = AgentState(
+        messages=[{"role": "user", "content": "read both"}],
+        ctx=make_context(),
+        allowed_permissions={"safe_read"},
+    )
+    runner = AgentRuntimeRunner(model_call=fake_model, tool_executor=fake_execute)
+
+    started = time.monotonic()
+    result = asyncio.run(runner.run(
+        state,
+        AgentRunConfig(max_rounds=3, max_parallel_tools=3),
+    ))
+    elapsed = time.monotonic() - started
+
+    assert result.content == "done"
+    assert elapsed < 0.09
+    assert abs(starts["read_a"] - starts["read_b"]) < 0.025
+    assert [item.name for item in state.tool_results] == ["read_a", "read_b"]
+    assert [message.get("tool_call_id") for message in state.messages if message["role"] == "tool"] == [
+        "call-read-a",
+        "call-read-b",
+    ]
+
+
+def test_runtime_runner_does_not_parallelize_write_tools():
+    from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
+    from plugins.arteta_agent.runtime.config import AgentRunConfig
+    from plugins.arteta_agent.runtime.runner import AgentRuntimeRunner
+    from plugins.arteta_agent.runtime.state import AgentState
+
+    clear_registry()
+    register_tool(ToolSpec(
+        "read_a",
+        "read a",
+        {"type": "object", "properties": {}},
+        lambda ctx: "a",
+        permission="safe_read",
+        parallel_safe=True,
+        idempotent=True,
+    ))
+    register_tool(ToolSpec(
+        "write_a",
+        "write a",
+        {"type": "object", "properties": {}},
+        lambda ctx: "w",
+        permission="safe_write",
+        parallel_safe=True,
+        idempotent=True,
+    ))
+    started = {}
+    finished = {}
+
+    async def fake_execute(tool_call, ctx):
+        name = tool_call["function"]["name"]
+        started[name] = time.monotonic()
+        await asyncio.sleep(0.03)
+        finished[name] = time.monotonic()
+        return ToolResult(name=name, permission="safe_read" if name == "read_a" else "safe_write", status=TOOL_STATUS_OK, content=name)
+
+    async def fake_model(messages, runtime_state):
+        if not runtime_state.tool_results:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call-read-a", "type": "function", "function": {"name": "read_a", "arguments": "{}"}},
+                    {"id": "call-write-a", "type": "function", "function": {"name": "write_a", "arguments": "{}"}},
+                ],
+            }
+        return {"role": "assistant", "content": "done"}
+
+    state = AgentState(messages=[{"role": "user", "content": "mixed"}], ctx=make_context(), allowed_permissions={"safe_read", "safe_write"})
+    runner = AgentRuntimeRunner(model_call=fake_model, tool_executor=fake_execute)
+
+    result = asyncio.run(runner.run(state, AgentRunConfig(max_rounds=3, max_parallel_tools=3)))
+
+    assert result.content == "done"
+    assert started["write_a"] >= finished["read_a"]
+
+
+def test_runtime_runner_parallel_read_failure_does_not_cancel_other_results():
+    from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
+    from plugins.arteta_agent.result import TOOL_STATUS_ERROR
+    from plugins.arteta_agent.runtime.config import AgentRunConfig
+    from plugins.arteta_agent.runtime.runner import AgentRuntimeRunner
+    from plugins.arteta_agent.runtime.state import AgentState
+
+    clear_registry()
+    for name in ("read_fail", "read_ok"):
+        register_tool(ToolSpec(
+            name,
+            name,
+            {"type": "object", "properties": {}},
+            lambda ctx: name,
+            permission="safe_read",
+            parallel_safe=True,
+            idempotent=True,
+        ))
+
+    async def fake_execute(tool_call, ctx):
+        name = tool_call["function"]["name"]
+        await asyncio.sleep(0.01)
+        if name == "read_fail":
+            return ToolResult(name=name, permission="safe_read", status=TOOL_STATUS_ERROR, content="[ToolError] failed")
+        return ToolResult(name=name, permission="safe_read", status=TOOL_STATUS_OK, content="ok")
+
+    async def fake_model(messages, runtime_state):
+        if not runtime_state.tool_results:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call-fail", "type": "function", "function": {"name": "read_fail", "arguments": "{}"}},
+                    {"id": "call-ok", "type": "function", "function": {"name": "read_ok", "arguments": "{}"}},
+                ],
+            }
+        return {"role": "assistant", "content": "done"}
+
+    state = AgentState(messages=[{"role": "user", "content": "read both"}], ctx=make_context(), allowed_permissions={"safe_read"})
+    runner = AgentRuntimeRunner(model_call=fake_model, tool_executor=fake_execute)
+
+    result = asyncio.run(runner.run(state, AgentRunConfig(max_rounds=3, max_parallel_tools=3)))
+
+    assert result.content == "done"
+    assert [item.name for item in state.tool_results] == ["read_fail", "read_ok"]
+    assert [message.get("tool_call_id") for message in state.messages if message["role"] == "tool"] == [
+        "call-fail",
+        "call-ok",
+    ]
+
+
+def test_runtime_runner_parallel_tool_limit_is_enforced():
+    from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
+    from plugins.arteta_agent.runtime.config import AgentRunConfig
+    from plugins.arteta_agent.runtime.runner import AgentRuntimeRunner
+    from plugins.arteta_agent.runtime.state import AgentState
+
+    clear_registry()
+    for name in ("read_1", "read_2", "read_3"):
+        register_tool(ToolSpec(
+            name,
+            name,
+            {"type": "object", "properties": {}},
+            lambda ctx: name,
+            permission="safe_read",
+            parallel_safe=True,
+            idempotent=True,
+        ))
+
+    starts = {}
+    finishes = {}
+
+    async def fake_execute(tool_call, ctx):
+        name = tool_call["function"]["name"]
+        starts[name] = time.monotonic()
+        await asyncio.sleep(0.03)
+        finishes[name] = time.monotonic()
+        return ToolResult(name=name, permission="safe_read", status=TOOL_STATUS_OK, content=name)
+
+    async def fake_model(messages, runtime_state):
+        if not runtime_state.tool_results:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call-1", "type": "function", "function": {"name": "read_1", "arguments": "{}"}},
+                    {"id": "call-2", "type": "function", "function": {"name": "read_2", "arguments": "{}"}},
+                    {"id": "call-3", "type": "function", "function": {"name": "read_3", "arguments": "{}"}},
+                ],
+            }
+        return {"role": "assistant", "content": "done"}
+
+    state = AgentState(messages=[{"role": "user", "content": "read three"}], ctx=make_context(), allowed_permissions={"safe_read"})
+    runner = AgentRuntimeRunner(model_call=fake_model, tool_executor=fake_execute)
+
+    result = asyncio.run(runner.run(state, AgentRunConfig(max_rounds=3, max_parallel_tools=2)))
+
+    assert result.content == "done"
+    assert abs(starts["read_1"] - starts["read_2"]) < 0.025
+    assert starts["read_3"] >= finishes["read_1"]

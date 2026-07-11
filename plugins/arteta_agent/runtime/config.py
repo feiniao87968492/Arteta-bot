@@ -9,3 +9,4 @@ class AgentRunConfig:
     max_total_observation_chars: int = 80000
     request_timeout_seconds: float = 80.0
     stop_after_initial_tools: bool = False
+    max_parallel_tools: int = 3

@@ -816,3 +816,37 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase H Slice: Parallel-Safe Read Runtime
+
+### Scope
+
+- Enabled bounded concurrent execution for independent read-only tool calls inside the unified Runtime.
+
+### Changes
+
+- `AgentRunConfig` now includes `max_parallel_tools` with default `3`.
+- `AgentRuntimeRunner` groups only contiguous tool calls whose `ToolSpec` is:
+  - `permission == "safe_read"`;
+  - `parallel_safe == True`;
+  - `idempotent == True`.
+- Mixed read/write/admin calls remain serial.
+- Result observation, trace order, tool result order, tool-call ID mapping, LoopGuard checks, permission stopping, observer hooks, and observation budget checks still run in original call order.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_runtime.py::test_runtime_runner_executes_parallel_safe_read_tools_concurrently_in_order -q`
+  - RED before fix: failed because `AgentRunConfig` had no `max_parallel_tools`.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_runtime.py -q`
+  - Result: `9 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_runtime.py tests/test_arteta_agent_registry.py -q`
+  - Result: `193 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `487 passed, 2 warnings`.
+
+### Remaining
+
+- Add a planner-level multi-read test if later routing/planning work emits multiple independent safe-read calls in one model turn.

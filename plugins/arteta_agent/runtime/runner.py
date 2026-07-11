@@ -4,6 +4,7 @@ from typing import Awaitable, Callable, Iterable, Optional
 
 from ..context import ToolContext
 from ..executor import execute_tool_call_result
+from ..registry import get_tool
 from ..result import TOOL_STATUS_PERMISSION_REQUIRED, ToolResult
 from ..trace import record_round
 from .config import AgentRunConfig
@@ -117,33 +118,87 @@ class AgentRuntimeRunner:
     ) -> Optional[AgentRunResult]:
         calls = list(tool_calls or [])
         record_round(state.trace, len(calls))
-        for tool_call in calls:
+        index = 0
+        while index < len(calls):
+            batch = self._parallel_safe_batch(calls, index, config)
+            if len(batch) > 1:
+                for tool_call in batch:
+                    guard_reason = guard.before_tool_call(tool_call, state.tool_call_count)
+                    if guard_reason:
+                        state.stop_reason = STOP_REASON_LOOP_GUARD
+                        return AgentRunResult(loop_guard_message(guard_reason), STOP_REASON_LOOP_GUARD, state)
+                tool_results = await asyncio.gather(*[
+                    self.tool_executor(tool_call, state.ctx) for tool_call in batch
+                ])
+                for tool_call, tool_result in zip(batch, tool_results):
+                    stopped = await self._observe_tool_result(state, guard, tool_call, tool_result)
+                    if stopped is not None:
+                        return stopped
+                index += len(batch)
+                continue
+
+            tool_call = calls[index]
             guard_reason = guard.before_tool_call(tool_call, state.tool_call_count)
             if guard_reason:
                 state.stop_reason = STOP_REASON_LOOP_GUARD
                 return AgentRunResult(loop_guard_message(guard_reason), STOP_REASON_LOOP_GUARD, state)
 
             tool_result = await self.tool_executor(tool_call, state.ctx)
-            state.add_tool_result(tool_result)
-            if self.tool_result_observer:
-                await _maybe_await(self.tool_result_observer(tool_result, state))
+            stopped = await self._observe_tool_result(state, guard, tool_call, tool_result)
+            if stopped is not None:
+                return stopped
+            index += 1
+        return None
 
-            if tool_result.status == TOOL_STATUS_PERMISSION_REQUIRED:
-                state.stop_reason = STOP_REASON_WAITING_CONFIRMATION
-                state.pending_action_id = tool_result.pending_action_id
-                return AgentRunResult(tool_result.content, STOP_REASON_WAITING_CONFIRMATION, state)
+    def _parallel_safe_batch(self, calls: list, start_index: int, config: AgentRunConfig) -> list:
+        limit = max(1, int(getattr(config, "max_parallel_tools", 1) or 1))
+        if limit <= 1:
+            return calls[start_index:start_index + 1]
+        batch = []
+        for tool_call in calls[start_index:start_index + limit]:
+            if not self._is_parallel_safe_read_call(tool_call):
+                break
+            batch.append(tool_call)
+        return batch if batch else calls[start_index:start_index + 1]
 
-            state.total_observation_chars += len(str(tool_result.content or ""))
-            guard_reason = guard.after_observation(state.total_observation_chars)
-            if guard_reason:
-                state.stop_reason = STOP_REASON_LOOP_GUARD
-                return AgentRunResult(loop_guard_message(guard_reason), STOP_REASON_LOOP_GUARD, state)
+    def _is_parallel_safe_read_call(self, tool_call: dict) -> bool:
+        function = (tool_call or {}).get("function") or {}
+        spec = get_tool(str(function.get("name") or ""))
+        if not spec:
+            return False
+        return (
+            spec.permission == "safe_read"
+            and bool(spec.parallel_safe)
+            and bool(spec.idempotent)
+        )
 
-            state.append_message({
-                "role": "tool",
-                "tool_call_id": tool_call.get("id", ""),
-                "content": tool_result.content,
-            })
+    async def _observe_tool_result(
+        self,
+        state: AgentState,
+        guard: LoopGuard,
+        tool_call: dict,
+        tool_result: ToolResult,
+    ) -> Optional[AgentRunResult]:
+        state.add_tool_result(tool_result)
+        if self.tool_result_observer:
+            await _maybe_await(self.tool_result_observer(tool_result, state))
+
+        if tool_result.status == TOOL_STATUS_PERMISSION_REQUIRED:
+            state.stop_reason = STOP_REASON_WAITING_CONFIRMATION
+            state.pending_action_id = tool_result.pending_action_id
+            return AgentRunResult(tool_result.content, STOP_REASON_WAITING_CONFIRMATION, state)
+
+        state.total_observation_chars += len(str(tool_result.content or ""))
+        guard_reason = guard.after_observation(state.total_observation_chars)
+        if guard_reason:
+            state.stop_reason = STOP_REASON_LOOP_GUARD
+            return AgentRunResult(loop_guard_message(guard_reason), STOP_REASON_LOOP_GUARD, state)
+
+        state.append_message({
+            "role": "tool",
+            "tool_call_id": tool_call.get("id", ""),
+            "content": tool_result.content,
+        })
         return None
 
     async def _finish_final_response(self, state: AgentState, assistant_msg: dict) -> AgentRunResult:
