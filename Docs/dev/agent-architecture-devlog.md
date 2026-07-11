@@ -2050,3 +2050,24 @@ Verification after the fix:
 - `planner.py` still owns contextual tool exposure marker logic.
 - Behavior/tool-policy direct update branches still use `_run_forced_tool_direct(...)` and need to be planned separately before removal.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.
+
+### ECS Deployment
+
+- Commit deployed: `0e91414 refactor: remove legacy forced tool followup helper`.
+- Deployment archive: `/tmp/arteta_phase_c_forced_followup_cleanup_0e91414.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_forced_followup_cleanup_20260712023413`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `tests/test_arteta_agent_registry.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Forced Followup Cleanup Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
