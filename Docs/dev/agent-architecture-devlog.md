@@ -1988,3 +1988,26 @@ Verification after the fix:
 - `planner.py` still has forced helper functions for behavior/tool policy updates and mood emoji post-processing.
 - `_answer_from_forced_tool_result(...)` may now be dead after document/link/web migration; verify before removal.
 - Move contextual exposure marker logic out of planner in a separate low-risk slice.
+
+### ECS Deployment
+
+- Commit deployed: `258cb18 refactor: route technical solvers through agent plan`.
+- Deployment archive: `/tmp/arteta_phase_c_technical_plan_258cb18.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_technical_plan_20260712022650`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/planning/plan_builder.py`;
+  - `plugins/arteta_agent/routing/heuristic_router.py`;
+  - `tests/test_arteta_agent_routing.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Technical Solver Plan Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
