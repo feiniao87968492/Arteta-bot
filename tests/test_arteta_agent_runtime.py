@@ -501,3 +501,18 @@ def test_runtime_service_owns_planner_runtime_wiring():
     assert "def _runtime_finalizer" not in source
     assert "def _observe_runtime_tool_result" not in source
     assert "AgentRuntimeRunner(" not in source
+
+
+def test_agent_service_owns_trace_and_final_response_wiring():
+    from pathlib import Path
+
+    from plugins.arteta_agent import service
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert hasattr(service, "prepare_agent_run")
+    assert hasattr(service, "finish_agent_run")
+    assert "ctx.extra[\"agent_trace\"]" not in source
+    assert "trace.setdefault(\"group_id\"" not in source
+    assert "compose_final_response(" not in source
+    assert "consume_policy_turn_if_needed(" not in source

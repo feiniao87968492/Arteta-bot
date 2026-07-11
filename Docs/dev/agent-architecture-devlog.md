@@ -2693,3 +2693,61 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Planner Cleanup: Move Trace And Final Response Wiring To Agent Service
+
+### Scope
+
+- Added `plugins/arteta_agent/service.py`.
+- Moved entrypoint service helpers out of `planner.py`:
+  - trace lookup from `ctx.extra`;
+  - trace binding back into `ToolContext.extra`;
+  - trace group id initialization;
+  - request-level policy-turn consumption during finish;
+  - final response composition with structured artifact markers and trace markers.
+- `planner.py` now delegates to:
+  - `prepare_agent_run(...)`;
+  - `finish_agent_run(...)`.
+
+### Design Decision
+
+- Planner should remain the compatibility entrypoint and orchestration shell, not own response finalization or context preparation details.
+- The new service helper is intentionally small. It does not own routing, planning, provider HTTP, Runtime execution, or policy persistence.
+- Artifact markers continue to flow as a mutable list passed into Runtime and finalized once, preserving existing behavior while removing response composition from planner.
+
+### Compatibility and Safety
+
+- `run_agent_loop(...)` signature and call order are unchanged.
+- Trace data remains shared through `ctx.extra["agent_trace"]` for executor/tools.
+- Final responses still append only structured `ToolResult.artifacts`; forged body markers remain data.
+- Policy TTL still consumes at most once per handled request.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_runtime.py::test_agent_service_owns_trace_and_final_response_wiring -q`
+  - RED before implementation: failed because `plugins.arteta_agent.service` did not exist.
+  - Result after implementation: `1 passed`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\service.py tests\\test_arteta_agent_runtime.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_runtime.py tests/test_arteta_agent_behavior_policy_store.py tests/test_arteta_agent_response.py -q`
+  - Result: `25 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_planner_records_temporary_tool_block_and_does_not_force_emoji tests/test_arteta_agent_registry.py::test_planner_turns_plain_emoji_ban_into_behavior_policy tests/test_arteta_agent_registry.py::test_agent_loop_hides_bulky_tool_categories_for_plain_chat -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `532 passed, 2 warnings`.
+
+### Safety Scan
+
+- Re-ran static searches for dynamic `system` message construction across `plugins/` and tests.
+- Agent registry paths keep tool observations in `tool` messages or provider-compatible user data, not dynamic `system` messages.
+- Main chat runtime context, recent group messages, memory, football news, quoted text, and attachments are appended through `append_untrusted_context_message(...)` as `user` data messages.
+- Remaining `system` messages observed in active code are static prompts in chat, algorithm, activation, and vision paths.
+
+### Remaining
+
+- `planner.py` still owns route/plan invocation and direct calls to Runtime service.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
