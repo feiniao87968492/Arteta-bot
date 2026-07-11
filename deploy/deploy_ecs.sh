@@ -123,7 +123,7 @@ autorestart=true
 startretries=3
 stderr_logfile=/var/log/arteta_bot/error.log
 stdout_logfile=/var/log/arteta_bot/access.log
-environment=ENVIRONMENT="prod",ARTETA_PROMPTS_FILE="/opt/arteta_bot/config/prompts.json"
+environment=ENVIRONMENT="prod",ARTETA_PROMPTS_FILE="/opt/arteta_bot/config/prompts.json",ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH=/opt/arteta_bot/data/agent_behavior_policy.db
 SUPERVISOR_EOF
 
 if [[ -z "$DASHBOARD_ADMIN_PASSWORD" ]]; then
@@ -143,7 +143,7 @@ autorestart=true
 startretries=3
 stderr_logfile=/var/log/arteta_bot/dashboard_error.log
 stdout_logfile=/var/log/arteta_bot/dashboard_access.log
-environment=ENVIRONMENT="prod",DASHBOARD_PUBLIC=true,DASHBOARD_HOST="0.0.0.0",DASHBOARD_PORT="$DASHBOARD_PORT",DASHBOARD_ADMIN_PASSWORD="$DASHBOARD_ADMIN_PASSWORD",DASHBOARD_SECRET_KEY="$DASHBOARD_SECRET_KEY",ARTETA_DB_PATH=/opt/arteta_bot/arsenal_data.db,ARTETA_CHROMA_DIR=/opt/arteta_bot/chroma_db,DASHBOARD_LOGS_DIR=/opt/arteta_bot/logs,DASHBOARD_ENV_FILE=/opt/arteta_bot/.env.prod,DASHBOARD_WEB_DIST=/opt/arteta_bot/dashboard/web/dist,ARTETA_PROMPTS_FILE=/opt/arteta_bot/config/prompts.json
+environment=ENVIRONMENT="prod",DASHBOARD_PUBLIC=true,DASHBOARD_HOST="0.0.0.0",DASHBOARD_PORT="$DASHBOARD_PORT",DASHBOARD_ADMIN_PASSWORD="$DASHBOARD_ADMIN_PASSWORD",DASHBOARD_SECRET_KEY="$DASHBOARD_SECRET_KEY",ARTETA_DB_PATH=/opt/arteta_bot/arsenal_data.db,ARTETA_CHROMA_DIR=/opt/arteta_bot/chroma_db,DASHBOARD_LOGS_DIR=/opt/arteta_bot/logs,DASHBOARD_ENV_FILE=/opt/arteta_bot/.env.prod,DASHBOARD_WEB_DIST=/opt/arteta_bot/dashboard/web/dist,ARTETA_PROMPTS_FILE=/opt/arteta_bot/config/prompts.json,ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH=/opt/arteta_bot/data/agent_behavior_policy.db
 SUPERVISOR_DASHBOARD_EOF
 
 # supervisor 不支持 %(ENV_X)s，直接替换为实际路径

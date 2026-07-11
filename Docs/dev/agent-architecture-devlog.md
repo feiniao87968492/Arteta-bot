@@ -680,3 +680,51 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase F Slice: Enable SQLite Policy Store On ECS
+
+### Scope
+
+- Updated ECS deployment configuration so the bot and dashboard supervisor processes opt into the SQLite behavior-policy store.
+- Verified the live ECS migration path from the legacy JSON file into `/opt/arteta_bot/data/agent_behavior_policy.db`.
+
+### Changes
+
+- `deploy/deploy_ecs.sh` now sets `ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH=/opt/arteta_bot/data/agent_behavior_policy.db` for both `arteta_bot` and `arteta_dashboard`.
+- Added deployment-script coverage to prevent future ECS installs from silently falling back to JSON policy storage.
+
+### ECS Migration Verification
+
+- Remote supervisor config backup: `/opt/arteta_bot/backups/supervisor_policy_sqlite_20260711210500`.
+- Existing legacy file before migration: `/opt/arteta_bot/config/agent_behavior_policy.json`.
+- Migration trigger created `/opt/arteta_bot/data/agent_behavior_policy.db`.
+- SQLite verification:
+  - `behavior_policies`: 2 rows.
+  - `behavior_phrase_styles`: 0 rows.
+- Legacy backup created: `/opt/arteta_bot/config/agent_behavior_policy.json.bak`.
+- Corrected ownership for the SQLite DB and backup file to `arteta:arteta`.
+
+### Verification
+
+- `python -m pytest tests/dashboard/test_deploy_ecs_dashboard.py::test_ecs_deploy_script_enables_sqlite_behavior_policy_store -q`
+  - RED before fix: failed because the deploy script did not set `ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH`.
+- `python -m pytest tests/dashboard/test_deploy_ecs_dashboard.py -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `181 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `480 passed` plus existing Windows asyncio/proactor warnings printed after completion.
+
+### ECS Smoke After SQLite Policy Enablement
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
+### Remaining
+
+- Keep JSON support as an import/fallback path for now; do not dual-write.
+- Later cleanup can make the fallback read-only after more production soak time.

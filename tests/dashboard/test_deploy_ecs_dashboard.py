@@ -39,3 +39,13 @@ def test_ecs_deploy_script_preserves_prompt_registry():
     assert "ARTETA_PROMPTS_FILE=/opt/arteta_bot/config/prompts.json" in script
     assert "config/prompts.json" in script
     assert "if [[ ! -f \"$BOT_DIR/config/prompts.json\" ]]" in script
+
+
+def test_ecs_deploy_script_enables_sqlite_behavior_policy_store():
+    script = _script()
+
+    assert "mkdir -p \"$BOT_DIR/data\"" in script
+    assert (
+        "ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH=/opt/arteta_bot/data/agent_behavior_policy.db"
+        in script
+    )
