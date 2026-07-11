@@ -1131,6 +1131,23 @@ def _initial_tool_calls_from_plan(messages, ctx: ToolContext, disabled_tools) ->
     return calls
 
 
+def _should_execute_initial_plan(messages, ctx: ToolContext, disabled_tools) -> bool:
+    decision = route_message(messages, ctx)
+    plan = build_plan(decision, ctx)
+    available_required = []
+    for planned in plan.required_tools:
+        if planned.name in set(disabled_tools or set()):
+            continue
+        if not get_tool(planned.name):
+            continue
+        available_required.append(planned)
+    if len(available_required) > 1:
+        return True
+    if len(available_required) == 1:
+        return any(intent.name == "public_current_fact" for intent in decision.intents or [])
+    return False
+
+
 async def _run_loop_from_state(
     state,
     ctx: ToolContext,
@@ -1457,7 +1474,7 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
         return compose_final_response(value, artifacts=tool_artifact_markers, trace=trace)
 
     planned_initial_calls = _initial_tool_calls_from_plan(state, ctx, disabled_tools)
-    if len(planned_initial_calls) > 1:
+    if planned_initial_calls and _should_execute_initial_plan(state, ctx, disabled_tools):
         return finish(await _run_runtime_loop_from_state(
             state,
             ctx,

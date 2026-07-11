@@ -12,6 +12,28 @@ MEMORY_PREFERENCE_MARKERS = ("记住", "以后", "下次")
 DOCUMENT_MARKERS = ("pdf", "PDF", "文档", "文件", "附件", "报告")
 MATH_INTENT_MARKERS = ("求解", "计算", "解方程", "证明")
 
+CURRENT_FACT_ASCII_MARKERS = (
+    "latest",
+    "recent",
+    "news",
+    "transfer",
+    "injury",
+    "fixture",
+    "score",
+    "result",
+    "official",
+)
+FOOTBALL_ASCII_MARKERS = (
+    "arsenal",
+    "football",
+    "premier league",
+    "champions league",
+    "club",
+    "team",
+    "match",
+    "game",
+)
+
 
 def _latest_user_content(messages) -> str:
     for msg in reversed(messages or []):
@@ -75,7 +97,10 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
             forced=True,
         ))
 
-    if _has_any(text, CURRENT_FACT_MARKERS) and _has_any(text, FOOTBALL_MARKERS):
+    if (
+        (_has_any(text, CURRENT_FACT_MARKERS) or _has_any(text, CURRENT_FACT_ASCII_MARKERS))
+        and (_has_any(text, FOOTBALL_MARKERS) or _has_any(text, FOOTBALL_ASCII_MARKERS))
+    ):
         decision.intents.append(Intent("public_current_fact", 0.85, "current football fact"))
         _append_tool_once(decision.required_tools, PlannedToolCall(
             name="grok_search",
@@ -94,4 +119,3 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
         ))
 
     return decision
-

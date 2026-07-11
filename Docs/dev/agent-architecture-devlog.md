@@ -216,6 +216,57 @@ Verification after the fix:
 - Expand RouteDecision coverage to the rest of the task-book samples.
 - Replace single-intent `if ... return` routes with plan construction once coverage is broad enough.
 
+## 2026-07-11 - Phase C Slice: Single Current-Fact Route Plan
+
+### Scope
+
+- Moved the first single-intent route from the legacy forced-web chain into the structured `RouteDecision`/`AgentPlan` path.
+- Kept the change deliberately narrow: only `public_current_fact` single-tool plans execute before legacy forced branches.
+
+### Changes
+
+- `routing.heuristic_router` now recognizes ASCII current-football fact samples such as `latest Arsenal transfer news`.
+- `planning.plan_builder` now applies `route.public_current_fact.preferred_tool` and rewrites the planned call to `grok_search`, `verify_recent_claim`, or `web_search` with the correct argument shape.
+- `planner.run_agent_loop` now executes a single required `public_current_fact` plan through the unified Runtime before the old forced-web branch.
+- Other single-intent plans still use the existing forced paths until they receive focused route tests.
+
+### Compatibility
+
+- Default public-current-fact routing remains `grok_search`.
+- Existing behavior-policy overrides for `route.public_current_fact.preferred_tool` are preserved.
+- Disabled or missing tools are still filtered by planner/runtime before execution, preserving fallback behavior.
+
+### Risk Notes
+
+- `planner.py` still contains the legacy forced-web detection as fallback and for unconverted route cases.
+- Broader route scoring and conflict resolution remain open; this slice only closes the current factual football question path that caused GrokSearch routing regressions.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_applies_public_current_fact_route_policy -q`
+  - RED before fix: failed because the plan did not contain `verify_recent_claim`.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_agent_loop_executes_single_current_fact_plan_before_legacy_forced_web -q`
+  - RED before fix: failed because the request fell through to `detect_forced_web_verification_args`.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `8 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_forces_groksearch_for_public_current_transfer_questions tests/test_arteta_agent_registry.py::test_agent_loop_forces_groksearch_for_recent_team_match_questions tests/test_arteta_agent_registry.py::test_agent_loop_uses_behavior_policy_route_for_public_current_questions tests/test_arteta_agent_registry.py::test_agent_loop_falls_back_to_grok_when_route_policy_tool_is_unavailable tests/test_arteta_agent_registry.py::test_agent_loop_does_not_force_web_for_group_local_recent_context tests/test_arteta_agent_registry.py::test_agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score -q`
+  - Result: `6 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_provider.py -q`
+  - Result: `11 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `495 passed` plus existing Windows asyncio/proactor warnings printed after completion.
+
+### Remaining
+
+- Migrate additional single-intent forced branches only after each has route-level RED/GREEN coverage.
+- Continue reducing duplicated route policy logic between planner fallback helpers and `plan_builder`.
+
 ## 2026-07-11 - Phase D Slice: Structured Artifact Marker Boundary
 
 ### Scope

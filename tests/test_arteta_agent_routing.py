@@ -191,3 +191,112 @@ def test_agent_loop_executes_multi_intent_memory_and_web_plan(monkeypatch):
     assert result == "combined answer"
     assert [name for name, _value in executed] == ["query_group_memory", "grok_search"]
     assert [item["name"] for item in trace["tools"][:2]] == ["query_group_memory", "grok_search"]
+
+
+def test_plan_builder_applies_public_current_fact_route_policy(tmp_path, monkeypatch):
+    from plugins.arteta_agent import behavior_policy
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    policy_path = tmp_path / "behavior_policy.json"
+    monkeypatch.setenv("ARTETA_AGENT_BEHAVIOR_POLICY_PATH", str(policy_path))
+    monkeypatch.delenv("ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH", raising=False)
+    behavior_policy.set_group_policy(
+        "group-1",
+        "route.public_current_fact.preferred_tool",
+        "verify_recent_claim",
+        reason="prefer verifier for current facts",
+    )
+
+    messages = [{"role": "user", "content": "latest Arsenal transfer news"}]
+    decision = route_message(messages, make_context(group_id="group-1"))
+    plan = build_plan(decision, make_context(group_id="group-1"))
+
+    assert tool_names(plan) == ["verify_recent_claim"]
+    assert plan.required_tools[0].arguments == {
+        "claim": "latest Arsenal transfer news",
+        "preferred_sources": "",
+        "max_results": 5,
+    }
+
+
+def test_agent_loop_executes_single_current_fact_plan_before_legacy_forced_web(monkeypatch, tmp_path):
+    from plugins.arteta_agent import behavior_policy, planner
+    from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
+    from plugins.arteta_agent.trace import new_trace
+
+    policy_path = tmp_path / "behavior_policy.json"
+    monkeypatch.setenv("ARTETA_AGENT_BEHAVIOR_POLICY_PATH", str(policy_path))
+    monkeypatch.delenv("ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH", raising=False)
+    behavior_policy.set_group_policy(
+        "group-1",
+        "route.public_current_fact.preferred_tool",
+        "verify_recent_claim",
+        reason="prefer verifier for current facts",
+    )
+
+    clear_registry()
+    trace = new_trace("agent_registry")
+    executed = []
+
+    async def verify_handler(ctx: ToolContext, claim: str, preferred_sources: str = "", max_results: int = 5):
+        executed.append(("verify_recent_claim", claim, preferred_sources, max_results))
+        return "verified current fact"
+
+    async def grok_handler(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5):
+        raise AssertionError("route policy should choose verify_recent_claim")
+
+    register_tool(ToolSpec(
+        "verify_recent_claim",
+        "verify current fact",
+        {
+            "type": "object",
+            "properties": {
+                "claim": {"type": "string"},
+                "preferred_sources": {"type": "string"},
+                "max_results": {"type": "integer"},
+            },
+            "required": ["claim"],
+        },
+        verify_handler,
+        permission="safe_read",
+    ))
+    register_tool(ToolSpec(
+        "grok_search",
+        "research",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "freshness": {"type": "string"},
+                "max_results": {"type": "integer"},
+            },
+            "required": ["query"],
+        },
+        grok_handler,
+        permission="safe_read",
+    ))
+
+    def fail_legacy_forced_web(messages):
+        raise AssertionError("single current fact should run through RouteDecision plan first")
+
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
+        assert messages[-1]["role"] == "tool"
+        assert "verified current fact" in messages[-1]["content"]
+        return {"role": "assistant", "content": "verified answer"}
+
+    monkeypatch.setattr(planner, "detect_forced_web_verification_args", fail_legacy_forced_web)
+    monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
+
+    result = __import__("asyncio").run(planner.run_agent_loop(
+        [{"role": "user", "content": "latest Arsenal transfer news"}],
+        make_context(group_id="group-1", extra={"agent_trace": trace}),
+        "model",
+        "key",
+        max_rounds=2,
+        trace=trace,
+    ))
+
+    assert result == "verified answer"
+    assert executed == [("verify_recent_claim", "latest Arsenal transfer news", "", 5)]
+    assert trace["tools"][0]["name"] == "verify_recent_claim"
