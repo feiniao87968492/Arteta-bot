@@ -636,6 +636,25 @@ Verification after the fix:
 ### Remaining
 
 - Capability-based message encoding for providers without standard tool history support remains a later provider slice.
+
+### ECS Deployment
+
+- Commit deployed: `1faaebf refactor: add provider retry policy`.
+- Deployment archive: `/tmp/arteta_phase_e_provider_retry_1faaebf.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_e_provider_retry_20260711224000`.
+- Remote `py_compile` passed for `plugins/arteta_agent/providers/openai_compatible.py` and `tests/test_arteta_agent_provider.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Provider Retry Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
 - `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
   - Result: `186 passed, 2 warnings`.
 - `python -m pytest tests -q`
