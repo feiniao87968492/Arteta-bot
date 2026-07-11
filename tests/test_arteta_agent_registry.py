@@ -544,10 +544,12 @@ def test_name_highlight_behavior_policy_accepts_combined_style_dict(tmp_path, mo
 
 def test_planner_records_temporary_tool_block_and_does_not_force_emoji(tmp_path, monkeypatch):
     from plugins.arteta_agent import planner, tool_policy
+    from plugins.arteta_agent.tools import behavior_policy as behavior_policy_tools
 
     policy_path = tmp_path / "tool_policy.json"
     monkeypatch.setenv("ARTETA_AGENT_TOOL_POLICY_PATH", str(policy_path))
     clear_registry()
+    behavior_policy_tools.register_tools()
 
     async def emoji_handler(ctx: ToolContext, mood: str = "", reason: str = "", emoji_name: str = ""):
         ctx.extra.setdefault("pending_mood_emojis", []).append({"name": "happy", "path": "happy.png"})
@@ -583,7 +585,7 @@ def test_planner_records_temporary_tool_block_and_does_not_force_emoji(tmp_path,
         trace={},
     ))
 
-    assert "已临时禁用工具 send_mood_emoji" in confirmation
+    assert "tool.send_mood_emoji.disabled=true" in confirmation
     assert tool_policy.get_disabled_tools("group-1") == {"send_mood_emoji"}
     assert answer == "好的，正常回复。"
     assert ctx.extra.get("pending_mood_emojis") is None

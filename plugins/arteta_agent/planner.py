@@ -27,8 +27,6 @@ from .routing.heuristic_router import route_message
 from .tool_policy import (
     consume_group_policy_turn,
     get_disabled_tools,
-    parse_tool_block_instruction,
-    set_group_tool_block,
 )
 from .trace import record_round
 
@@ -339,46 +337,6 @@ async def _run_loop_from_state(
     )
 
 
-async def _run_forced_tool_direct(
-    state,
-    ctx: ToolContext,
-    tool_call: dict,
-    model: str,
-    api_key: str,
-    api_url: str,
-    allowed_permissions,
-    disabled_tools,
-    max_rounds: int,
-    trace,
-    temperature: float,
-    tool_artifact_markers: list,
-    request_timeout: float,
-    max_tool_calls: int,
-    max_same_tool_call_repeats: int,
-    max_total_observation_chars: int,
-) -> str:
-    return await _run_runtime_loop_from_state(
-        list(state),
-        ctx,
-        model,
-        api_key,
-        api_url,
-        allowed_permissions,
-        disabled_tools,
-        disabled_tools,
-        max_rounds,
-        trace,
-        temperature,
-        request_timeout,
-        tool_artifact_markers,
-        max_tool_calls=max_tool_calls,
-        max_same_tool_call_repeats=max_same_tool_call_repeats,
-        max_total_observation_chars=max_total_observation_chars,
-        initial_tool_calls=[tool_call],
-        stop_after_initial_tools=True,
-    )
-
-
 async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, api_url: str = DEFAULT_CHAT_API_URL, max_rounds: int = 6, trace=None, temperature: float = 0.9, request_timeout: float = 80.0, max_tool_calls: int = 10, max_same_tool_call_repeats: int = 2, max_total_observation_chars: int = 80000):
     # Agent loop entrypoint used by arteta_chat.py when
     # ARTETA_USE_AGENT_REGISTRY=true. It alternates LLM planning and
@@ -397,67 +355,6 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
     confirmed_action_id = detect_pending_action_confirmation_id(state)
     if confirmed_action_id:
         return await _execute_explicit_pending_action_confirmation(confirmed_action_id, ctx, trace)
-
-    behavior_instruction = behavior_policy.parse_behavior_policy_instruction(_latest_user_content(state))
-    if behavior_instruction:
-        if get_tool("update_behavior_policy"):
-            tool_call = {
-                "id": "forced-update-behavior-policy-1",
-                "type": "function",
-                "function": {
-                    "name": "update_behavior_policy",
-                    "arguments": json.dumps(behavior_instruction, ensure_ascii=False),
-                },
-            }
-            return await _run_forced_tool_direct(
-                state, ctx, tool_call, model, api_key, api_url, allowed, set(),
-                max_rounds, trace, temperature, [], request_timeout,
-                max_tool_calls, max_same_tool_call_repeats, max_total_observation_chars,
-            )
-        value = behavior_policy.parse_policy_value(
-            value_json=str(behavior_instruction.get("value_json") or ""),
-        )
-        item = behavior_policy.set_group_policy(
-            ctx.group_id,
-            str(behavior_instruction.get("key") or ""),
-            value,
-            ttl_turns=behavior_instruction.get("ttl_turns"),
-            reason=str(behavior_instruction.get("reason") or ""),
-            source="planner",
-        )
-        record_round(trace, 0)
-        return "已更新本群行为策略：{0}={1}".format(
-            item["key"],
-            behavior_policy.format_policy_value(item.get("value")),
-        )
-
-    block_instruction = parse_tool_block_instruction(_latest_user_content(state))
-    if block_instruction:
-        tool_name = str(block_instruction["tool_name"])
-        if get_tool(tool_name):
-            turns = int(block_instruction["turns"])
-            if get_tool("update_behavior_policy"):
-                tool_call = {
-                    "id": "forced-update-tool-policy-1",
-                    "type": "function",
-                    "function": {
-                        "name": "update_behavior_policy",
-                        "arguments": json.dumps({
-                            "key": "tool.{0}.disabled".format(tool_name),
-                            "value_json": "true",
-                            "ttl_turns": turns,
-                            "reason": str(block_instruction.get("reason") or ""),
-                        }, ensure_ascii=False),
-                    },
-                }
-                return await _run_forced_tool_direct(
-                    state, ctx, tool_call, model, api_key, api_url, allowed, set(),
-                    max_rounds, trace, temperature, [], request_timeout,
-                    max_tool_calls, max_same_tool_call_repeats, max_total_observation_chars,
-                )
-            set_group_tool_block(ctx.group_id, tool_name, turns=turns, reason=str(block_instruction.get("reason") or ""))
-            record_round(trace, 0)
-            return "已临时禁用工具 {0}，接下来 {1} 轮不会调用。".format(tool_name, turns)
 
     disabled_tools = get_disabled_tools(ctx.group_id)
     schema_excluded_tools = set(disabled_tools) | detect_contextual_tool_exclusions(state, ctx)

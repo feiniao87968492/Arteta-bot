@@ -480,6 +480,45 @@ def test_plan_builder_routes_memory_preference_requests_as_direct_required_tool(
     assert plan.constraints.get("direct_tool_response") is True
 
 
+def test_plan_builder_routes_behavior_policy_instruction_as_required_tool():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    decision = route_message([
+        {"role": "user", "content": "接下来十轮不要发表情"},
+    ], make_context())
+    plan = build_plan(decision, make_context())
+
+    assert any(intent.name == "behavior_policy_update" for intent in decision.intents)
+    assert tool_names(plan) == ["update_behavior_policy"]
+    assert plan.required_tools[0].arguments["key"] == "emoji.enabled"
+    assert plan.required_tools[0].arguments["value_json"] == "false"
+    assert plan.required_tools[0].arguments["ttl_turns"] == 10
+    assert plan.constraints.get("execute_single_required_tool") is True
+    assert plan.constraints.get("direct_tool_response") is True
+
+
+def test_plan_builder_routes_tool_block_instruction_as_behavior_policy_tool():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    decision = route_message([
+        {"role": "user", "content": "十轮内禁止调用send_mood_emoji这个tool"},
+    ], make_context())
+    plan = build_plan(decision, make_context())
+
+    assert any(intent.name == "tool_policy_update" for intent in decision.intents)
+    assert tool_names(plan) == ["update_behavior_policy"]
+    assert plan.required_tools[0].arguments == {
+        "key": "tool.send_mood_emoji.disabled",
+        "value_json": "true",
+        "ttl_turns": 10,
+        "reason": "十轮内禁止调用send_mood_emoji这个tool",
+    }
+    assert plan.constraints.get("execute_single_required_tool") is True
+    assert plan.constraints.get("direct_tool_response") is True
+
+
 def test_planner_no_longer_has_forced_memory_preference_branch():
     from pathlib import Path
 
@@ -611,3 +650,16 @@ def test_planner_no_longer_owns_contextual_tool_exposure_rules():
     assert "FOOTBALL_INTENT_MARKERS" not in source
     assert "DOCUMENT_INTENT_CATEGORY_MARKERS" not in source
     assert "def _science_tools_allowed" not in source
+
+
+def test_planner_no_longer_has_direct_behavior_or_tool_policy_update_branches():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "behavior_instruction =" not in source
+    assert "parse_behavior_policy_instruction(" not in source
+    assert "block_instruction =" not in source
+    assert "parse_tool_block_instruction(" not in source
+    assert "set_group_tool_block(" not in source
+    assert "def _run_forced_tool_direct" not in source

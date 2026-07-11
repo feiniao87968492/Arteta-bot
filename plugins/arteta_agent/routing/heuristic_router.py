@@ -1,10 +1,12 @@
 import json
 from typing import List
 
+from .. import behavior_policy
 from ..context import ToolContext
 from .contextual_tools import detect_memory_preference_args
 from .contextual_tools import detect_ui_preference_args
 from .models import Intent, PlannedToolCall, RouteDecision
+from ..tool_policy import parse_tool_block_instruction
 
 
 LOCAL_MEMORY_MARKERS = ("之前", "刚才", "上次", "昨天", "你之前", "你刚才")
@@ -264,6 +266,38 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
     decision = RouteDecision()
     extra = getattr(ctx, "extra", {}) or {} if ctx is not None else {}
     if not text and not extra.get("document_urls") and not extra.get("detected_urls"):
+        return decision
+
+    behavior_instruction = behavior_policy.parse_behavior_policy_instruction(text)
+    if behavior_instruction:
+        decision.intents.append(Intent("behavior_policy_update", 0.95, "explicit behavior policy update"))
+        decision.constraints["execute_single_required_tool"] = True
+        decision.constraints["direct_tool_response"] = True
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="update_behavior_policy",
+            arguments=dict(behavior_instruction),
+            reason="update behavior policy",
+            forced=True,
+        ))
+        return decision
+
+    tool_block_instruction = parse_tool_block_instruction(text)
+    if tool_block_instruction:
+        tool_name = str(tool_block_instruction.get("tool_name") or "")
+        decision.intents.append(Intent("tool_policy_update", 0.95, "explicit temporary tool block"))
+        decision.constraints["execute_single_required_tool"] = True
+        decision.constraints["direct_tool_response"] = True
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="update_behavior_policy",
+            arguments={
+                "key": "tool.{0}.disabled".format(tool_name),
+                "value_json": "true",
+                "ttl_turns": int(tool_block_instruction.get("turns") or 10),
+                "reason": str(tool_block_instruction.get("reason") or ""),
+            },
+            reason="temporarily disable tool through behavior policy",
+            forced=True,
+        ))
         return decision
 
     ui_args = detect_ui_preference_args(messages)

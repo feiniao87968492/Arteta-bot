@@ -2266,3 +2266,54 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Cleanup: Route Behavior Policy Updates Through Plans
+
+### Scope
+
+- Moved explicit behavior-policy update detection from `planner.py` into `routing/heuristic_router.py`.
+- Moved temporary tool-block commands into routing as `tool_policy_update` intents backed by the existing `update_behavior_policy` tool.
+- Removed `_run_forced_tool_direct(...)` from `planner.py`.
+- Removed the planner-level direct branches for:
+  - `behavior_policy.parse_behavior_policy_instruction(...)`;
+  - `parse_tool_block_instruction(...)`;
+  - direct fallback `behavior_policy.set_group_policy(...)`;
+  - direct fallback `set_group_tool_block(...)`.
+
+### Design Decision
+
+- Behavior preference parsing is routing context, not Runtime behavior.
+- The actual state change still happens through the registered `update_behavior_policy` tool, so server-side schema validation, permissions, trace, Runtime limits, and ToolResult handling remain on the same path as other required tools.
+- Production behavior remains compatible because the normal phase-3 tool registration includes `update_behavior_policy`.
+- Tests that previously relied on a registry missing `update_behavior_policy` were adjusted to register the real behavior policy tool, matching the production registry path.
+
+### Compatibility and Safety
+
+- User-facing behavior for plain emoji bans is preserved: the policy is written, and the following handled turn consumes one TTL.
+- Temporary tool blocks still persist as `tool.<name>.disabled=true` policies and hide the tool from later model schema exposure.
+- The planner no longer creates a parallel direct execution path for policy writes.
+- Policy writes continue to use existing Behavior Policy validation, including key prefix validation and forbidden key parts.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_routes_behavior_policy_instruction_as_required_tool tests/test_arteta_agent_routing.py::test_plan_builder_routes_tool_block_instruction_as_behavior_policy_tool tests/test_arteta_agent_routing.py::test_planner_no_longer_has_direct_behavior_or_tool_policy_update_branches -q`
+  - RED before implementation: failed because routing did not emit policy-update intents and planner still had direct branches.
+  - Result after implementation: `3 passed`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\routing\\heuristic_router.py tests\\test_arteta_agent_routing.py tests\\test_arteta_agent_registry.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `34 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python -m pytest tests/test_arteta_agent_behavior_policy_store.py tests/test_arteta_agent_runtime.py -q`
+  - Result: `14 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `525 passed`.
+
+### Remaining
+
+- `planner.py` still exposes provider compatibility entry points and provider call wrappers for legacy tests and callers.
+- `planner.py` still performs compatibility orchestration around route, plan, Runtime, response composition, and pending confirmations.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.
