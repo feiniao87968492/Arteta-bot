@@ -393,3 +393,22 @@ Verification after the fix:
 
 - Continue moving confirmation/degradation copy and trace formatting entrypoints into response adapters.
 - Remove unreachable planner legacy response code during the final planner-thinning phase once coverage around all response branches is complete.
+
+### ECS Deployment
+
+- Commit deployed: `b80464f refactor: move mood emoji finalizer to response layer`.
+- Deployment archive: `/tmp/arteta_phase_d_mood_b80464f.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_d_mood_20260711200500`.
+- Remote `py_compile` passed for planner, response mood module, and mood response tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Mood Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
