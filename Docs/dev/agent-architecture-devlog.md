@@ -976,6 +976,23 @@ Verification after the fix:
 - `python -m pytest tests -q`
   - Result: `507 passed, 2 warnings`.
 
+### ECS Deployment
+
+- Commit deployed: `60e0bf4 refactor: route ui preferences through agent plan`.
+- Deployment archive: `/tmp/arteta_phase_c_ui_plan_60e0bf4.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_ui_plan_20260712012841`.
+- Remote `py_compile` passed for planner, routing heuristic, and routing tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+
+### ECS Smoke After Structured UI Preference Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ### Remaining
 
 - Memory, document, link, web, and science forced branches still need separate structured-plan migration.
