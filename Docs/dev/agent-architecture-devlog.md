@@ -2317,3 +2317,26 @@ Verification after the fix:
 - `planner.py` still exposes provider compatibility entry points and provider call wrappers for legacy tests and callers.
 - `planner.py` still performs compatibility orchestration around route, plan, Runtime, response composition, and pending confirmations.
 - Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.
+
+### ECS Deployment
+
+- Commit deployed: `adc3fa5 refactor: route policy updates through agent plan`.
+- Deployment archive: `/tmp/arteta_phase_c_policy_plan_adc3fa5.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_policy_plan_20260712032335`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/routing/heuristic_router.py`;
+  - `tests/test_arteta_agent_routing.py`;
+  - `tests/test_arteta_agent_registry.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Policy Plan Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
