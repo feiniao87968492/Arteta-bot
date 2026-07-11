@@ -353,3 +353,27 @@ def test_planner_uses_structured_plan_instead_of_trace_keyword_branch():
     assert "if wants_trace_tool(state)" not in source
     assert "def wants_trace_tool" not in source
     assert "TRACE_REQUEST_MARKERS" not in source
+
+
+def test_contextual_tools_detects_ui_preference_args_for_reply_body_style():
+    from plugins.arteta_agent.routing.contextual_tools import detect_ui_preference_args
+
+    args = detect_ui_preference_args([
+        {"role": "user", "content": "下次回复文字标红、加粗、放大五倍"},
+    ])
+
+    assert args == {
+        "target": "reply_body",
+        "color": "red",
+        "bold": True,
+        "font_scale": 5.0,
+    }
+
+
+def test_planner_no_longer_defines_ui_preference_detector():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "def detect_forced_ui_preference_args" not in source
+    assert "def _extract_requested_font_scale" not in source

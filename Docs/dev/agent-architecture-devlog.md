@@ -884,6 +884,45 @@ Verification after the fix:
 
 - Additional planner-local marker sets for UI, memory, document, link, web, and science still need separate routing-module migrations.
 
+## 2026-07-12 - Phase C Slice: Extract UI Preference Detector
+
+### Scope
+
+- Moved UI preference argument detection out of `planner.py` and into the routing layer.
+- Kept the existing forced `update_ui_preference` execution branch unchanged for this slice.
+
+### Changes
+
+- Added `plugins/arteta_agent/routing/contextual_tools.py`.
+- Moved the UI style/font-scale detector to `detect_ui_preference_args(...)`.
+- Planner now imports and calls the routing detector instead of defining `detect_forced_ui_preference_args(...)`.
+- Added source regression proving planner no longer defines the UI detector helpers.
+
+### Compatibility
+
+- Existing UI preference behavior is unchanged, including `reply_body`, trace title/tool/detail targets, color, bold, font size, and font scale extraction.
+- `update_ui_preference` remains a registered safe-write tool and still executes through the existing runtime path.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_contextual_tools_detects_ui_preference_args_for_reply_body_style tests/test_arteta_agent_routing.py::test_planner_no_longer_defines_ui_preference_detector -q`
+  - RED before fix: failed because `routing.contextual_tools` did not exist and planner still defined the detector.
+  - GREEN after fix: `2 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_forces_ui_preference_tool_for_trace_color_request tests/test_arteta_agent_registry.py::test_agent_loop_forces_ui_preference_tool_for_rich_trace_style tests/test_arteta_agent_registry.py::test_agent_loop_forces_ui_preference_tool_for_five_times_trace_style tests/test_arteta_agent_registry.py::test_agent_loop_forces_ui_preference_tool_for_five_times_reply_body_style -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `13 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `505 passed, 2 warnings`.
+
+### Remaining
+
+- The planner still owns the forced execution branch for `update_ui_preference`; the next routing slice can convert this detector output into a structured plan call.
+
 ## 2026-07-11 - Phase E Slice: OpenAI-Compatible Provider Adapter
 
 ### Scope
