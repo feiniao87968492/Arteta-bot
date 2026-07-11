@@ -138,3 +138,62 @@ Verification after the fix:
 - `python -m pytest tests/test_arteta_agent_runtime.py -q`
   - Result: not run on ECS because the production venv does not include `pytest` (`No module named pytest`).
 - Remote `py_compile` covered the deployed runtime files; local pytest remains the authoritative unit-test run for this slice.
+
+## 2026-07-11 - Phase C Slice: Structured Routing and Multi-Intent Initial Plans
+
+### Scope
+
+- Added the first structured routing/planning model layer.
+- Kept the existing planner forced-route chain in place for single-intent behavior.
+- Only enabled the new plan path when a message produces more than one required tool, reducing regression risk.
+
+### Changes
+
+- Added `plugins/arteta_agent/routing/models.py` with `Intent`, `RouteDecision`, and `PlannedToolCall`.
+- Added `plugins/arteta_agent/routing/heuristic_router.py` for an initial score-like heuristic router.
+- Added `plugins/arteta_agent/planning/models.py` and `plan_builder.py` with `AgentPlan`.
+- Added planner adapter code that converts multi-intent required tools into Runtime initial tool calls.
+- Covered:
+  - remember preference + document read;
+  - group-memory lookup + current public fact verification;
+  - non-math handling for broad numeric phrases such as date, price, and scoreline;
+  - explicit equation routing to math.
+- Fixed `tools/verify_features.py` agent-loop fixtures so they use strict schemas compatible with server-side argument validation instead of empty object schemas.
+
+### Compatibility
+
+- Existing single-tool forced routes still use their old detection path.
+- Existing tool names and schemas are unchanged.
+- The new router currently falls back to `grok_search` for public current football facts when used in a multi-intent plan; existing single-intent policy selection remains in planner.
+
+### Risk Notes
+
+- This is not the final RouteDecision rollout. Planner still contains legacy marker constants and most single-intent `if` branches.
+- The new heuristic router intentionally covers only the first acceptance-critical multi-intent combinations. Broader datasets and conflict resolution remain.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `6 passed`.
+- `python tools\verify_features.py --suite agent_loop`
+  - Result: passed locally.
+- `python -m pytest tests/test_arteta_agent_routing.py tests/test_arteta_agent_runtime.py tests/test_arteta_agent_registry.py -q`
+  - Result: `191 passed, 2 warnings`.
+- `python -m pytest tests/test_verify_features.py -q`
+  - Result: `8 passed`.
+- `python -m pytest tests -q`
+  - Result: `462 passed, 2 warnings`.
+
+### ECS Smoke
+
+- Uploaded the `tools/verify_features.py` schema-fixture fix to ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### Remaining
+
+- Commit and deploy the new routing/planning modules and planner multi-intent path.
+- Expand RouteDecision coverage to the rest of the task-book samples.
+- Replace single-intent `if ... return` routes with plan construction once coverage is broad enough.

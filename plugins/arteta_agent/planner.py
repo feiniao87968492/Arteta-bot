@@ -8,12 +8,14 @@ from . import behavior_policy
 from .context import ToolContext
 from .executor import execute_tool_call, execute_tool_call_result
 from .pending import store_from_context
+from .planning.plan_builder import build_plan
 from .registry import build_openai_tools, get_tool, list_enabled_tools
 from .result import TOOL_STATUS_PERMISSION_REQUIRED
 from .runtime.config import AgentRunConfig
 from .runtime.loop_guard import loop_guard_message, tool_call_signature
 from .runtime.runner import AgentRuntimeRunner
 from .runtime.state import AgentState, FinalizedResponse
+from .routing.heuristic_router import route_message
 from .tool_policy import (
     consume_group_policy_turn,
     get_disabled_tools,
@@ -1160,6 +1162,30 @@ def _build_runtime_state(
     )
 
 
+def _tool_call_from_planned(index: int, planned) -> dict:
+    return {
+        "id": "planned-{0}-{1}".format(str(planned.name).replace("_", "-"), index),
+        "type": "function",
+        "function": {
+            "name": planned.name,
+            "arguments": json.dumps(planned.arguments or {}, ensure_ascii=False),
+        },
+    }
+
+
+def _initial_tool_calls_from_plan(messages, ctx: ToolContext, disabled_tools) -> list:
+    decision = route_message(messages, ctx)
+    plan = build_plan(decision, ctx)
+    calls = []
+    for planned in plan.required_tools:
+        if planned.name in set(disabled_tools or set()):
+            continue
+        if not get_tool(planned.name):
+            continue
+        calls.append(_tool_call_from_planned(len(calls) + 1, planned))
+    return calls
+
+
 async def _run_loop_from_state(
     state,
     ctx: ToolContext,
@@ -1488,6 +1514,28 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
             if marker not in output:
                 output = "{0}\n{1}".format(output.strip(), marker).strip()
         return _prefix_trace_markers(output, trace)
+
+    planned_initial_calls = _initial_tool_calls_from_plan(state, ctx, disabled_tools)
+    if len(planned_initial_calls) > 1:
+        return finish(await _run_runtime_loop_from_state(
+            state,
+            ctx,
+            model,
+            api_key,
+            api_url,
+            allowed,
+            schema_excluded_tools,
+            disabled_tools,
+            max_rounds,
+            trace,
+            temperature,
+            request_timeout,
+            tool_artifact_markers,
+            max_tool_calls=max_tool_calls,
+            max_same_tool_call_repeats=max_same_tool_call_repeats,
+            max_total_observation_chars=max_total_observation_chars,
+            initial_tool_calls=planned_initial_calls,
+        ))
 
     if wants_trace_tool(state):
         # A trace request is a test/debug intent, so force the real read-only
