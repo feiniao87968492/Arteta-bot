@@ -2549,3 +2549,56 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase B Cleanup: Move Runtime Service Wiring Out Of Planner
+
+### Scope
+
+- Added `plugins/arteta_agent/runtime/service.py`.
+- Moved Runtime wiring out of `planner.py`:
+  - `AgentState` construction;
+  - `AgentRuntimeRunner` construction;
+  - planner-to-runtime model-call adapter;
+  - Runtime finalizer binding for mood emoji;
+  - Runtime tool-result artifact observer;
+  - loop-guard stop-message mapping for Runtime timeout/max-rounds results.
+- `planner.py` now delegates to:
+  - `run_runtime_loop_from_state(...)`;
+  - `run_loop_from_state(...)`.
+
+### Design Decision
+
+- Runtime owns execution-loop wiring, budgets, state construction, finalizer binding, and tool-result observation.
+- Planner keeps compatibility orchestration only: trace setup, explicit confirmation short-circuit, disabled-tool filtering, route/plan creation, and final response composition.
+- `planner.call_llm_with_tools` remains the injected model-call dependency for the Runtime service. This preserves existing tests and external monkeypatch behavior while moving the Runtime implementation boundary out of planner.
+
+### Compatibility and Safety
+
+- `run_agent_loop(...)` signature and behavior are unchanged.
+- Existing `planner.call_llm_with_tools` compatibility wrapper is still used by Runtime, so current provider behavior, OpenAI-compatible behavior, and test monkeypatches remain intact.
+- Tool execution still flows through `execute_tool_call_result(...)`.
+- Mood emoji sending still uses the existing response finalizer logic and policy checks.
+- Artifact collection still only reads structured `ToolResult.artifacts`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_runtime.py::test_runtime_service_owns_planner_runtime_wiring -q`
+  - RED before implementation: failed because `plugins.arteta_agent.runtime.service` did not exist.
+  - Result after implementation: `1 passed`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\runtime\\service.py tests\\test_arteta_agent_runtime.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_runtime.py -q`
+  - Result: `11 passed`.
+- `python -m pytest tests/test_arteta_agent_runtime.py::test_runtime_runner_executes_initial_and_model_tool_calls_through_same_executor tests/test_arteta_agent_registry.py::test_agent_loop_hides_bulky_tool_categories_for_plain_chat tests/test_arteta_agent_routing.py::test_planning_execution_module_owns_planned_tool_call_conversion -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `530 passed`.
+
+### Remaining
+
+- `planner.py` still owns compatibility orchestration around trace setup, policy TTL finalization, route/plan invocation, and final response composition.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.

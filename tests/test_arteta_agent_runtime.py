@@ -484,3 +484,20 @@ def test_runtime_confirmation_module_owns_explicit_pending_confirmation_helpers(
     assert "def _execute_explicit_pending_action_confirmation" not in source
     assert "record_pending_confirmation_failure" not in source
     assert "store_from_context" not in source
+
+
+def test_runtime_service_owns_planner_runtime_wiring():
+    from pathlib import Path
+
+    from plugins.arteta_agent.runtime import service
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert hasattr(service, "run_runtime_loop_from_state")
+    assert "def _run_runtime_loop_from_state" not in source
+    assert "def _run_loop_from_state" not in source
+    assert "def _build_runtime_state" not in source
+    assert "def _runtime_model_call" not in source
+    assert "def _runtime_finalizer" not in source
+    assert "def _observe_runtime_tool_result" not in source
+    assert "AgentRuntimeRunner(" not in source
