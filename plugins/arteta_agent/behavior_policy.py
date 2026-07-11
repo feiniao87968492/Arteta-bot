@@ -476,6 +476,7 @@ def set_phrase_style(group_id: str, phrase: str, value: Dict[str, Any], reason: 
     if _use_sqlite_store():
         conn = _with_sqlite()
         try:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 """
                 SELECT value_json FROM behavior_phrase_styles
@@ -496,7 +497,6 @@ def set_phrase_style(group_id: str, phrase: str, value: Dict[str, Any], reason: 
             rule.update(dict(value or {}))
             if reason:
                 rule["reason"] = str(reason)
-            conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 """
                 INSERT OR REPLACE INTO behavior_phrase_styles

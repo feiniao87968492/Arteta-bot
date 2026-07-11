@@ -623,3 +623,41 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase F Slice: SQLite Behavior Policy Concurrency
+
+### Scope
+
+- Hardened SQLite behavior-policy updates that merge JSON phrase-style rules.
+- Added explicit concurrent update and concurrent TTL consume coverage for the SQLite path.
+
+### Changes
+
+- `set_phrase_style(...)` now starts `BEGIN IMMEDIATE` before reading the existing SQLite rule.
+- The phrase-style read, JSON merge, and write now happen in one transaction, preventing two writers from both reading the same stale value and overwriting each other's merged fields.
+- `consume_group_policy_turn(...)` was already transaction-protected; added a regression test to lock that TTL semantics down.
+
+### Compatibility
+
+- Public behavior-policy APIs are unchanged.
+- JSON fallback behavior is unchanged.
+- SQLite still remains opt-in via `ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_behavior_policy_store.py::test_behavior_policy_sqlite_phrase_style_updates_do_not_lose_concurrent_fields -q`
+  - RED before fix: failed because one concurrent field was missing from the final phrase style.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_behavior_policy_store.py -q`
+  - Result: `5 passed`.
+- `python -m pytest tests/test_arteta_agent_behavior_policy_store.py tests/test_arteta_agent_registry.py::test_behavior_policy_persists_tool_blocks_and_consumes_ttl tests/test_arteta_agent_registry.py::test_behavior_policy_tools_update_and_show_group_policy tests/test_arteta_agent_registry.py::test_behavior_policy_tools_accept_route_preferences tests/test_arteta_agent_registry.py::test_ui_preferences_are_backed_by_behavior_policy tests/test_arteta_agent_registry.py::test_planner_turns_plain_emoji_ban_into_behavior_policy tests/test_arteta_agent_registry.py::test_agent_loop_uses_behavior_policy_route_for_public_current_questions -q`
+  - Result: `11 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `181 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `479 passed` plus existing Windows asyncio/proactor warnings printed after completion.
+
+### Remaining
+
+- Enable the SQLite DB path on ECS and verify one-time import/backup behavior with the production supervisor environment.
+- Decide whether to keep JSON fallback only as read/import compatibility after the stabilization window.
