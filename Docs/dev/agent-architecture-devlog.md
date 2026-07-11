@@ -799,3 +799,20 @@ Verification after the fix:
   - Result: `184 passed, 2 warnings`.
 - `python -m pytest tests -q`
   - Result: `483 passed` plus existing Windows asyncio/proactor warnings printed after completion.
+
+### ECS Deployment
+
+- Commit deployed: `9d7c8c7 test: cover admin permission audit`.
+- Deployment archive: `/tmp/arteta_phase_g_admin_audit_test_9d7c8c7.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_g_admin_audit_test_20260711212800`.
+- Remote `py_compile` passed for `tests/test_arteta_agent_registry.py`.
+- `arteta_bot` and `arteta_dashboard` remained `RUNNING`; no restart was needed because this slice only changed tests/devlog.
+
+### ECS Smoke After Admin Audit Coverage Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
