@@ -255,3 +255,27 @@ Verification after the fix:
   - Result: `11 passed`.
 - `python -m pytest tests -q`
   - Result: `463 passed, 2 warnings`.
+
+### ECS Deployment
+
+- Commit deployed: `2071760 refactor: collect artifacts from tool results`.
+- Deployment archive: `/tmp/arteta_phase_d_artifacts_2071760.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_d_artifacts_20260711190950`.
+- Remote `py_compile` passed for the deployed planner, executor, result, and response artifact modules.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Artifact Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
+### Remaining
+
+- Continue the response split with a dedicated composer for confirmation, degradation, artifact appending, trace formatting, and mood emoji post-processing.
+- Keep the current legacy artifact adapter narrow until tools return native structured artifacts directly.
