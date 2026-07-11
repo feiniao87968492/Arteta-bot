@@ -267,6 +267,25 @@ Verification after the fix:
 - Migrate additional single-intent forced branches only after each has route-level RED/GREEN coverage.
 - Continue reducing duplicated route policy logic between planner fallback helpers and `plan_builder`.
 
+### ECS Deployment
+
+- Commit deployed: `1b21f5d refactor: route current facts through structured plan`.
+- Deployment archive: `/tmp/arteta_phase_c_single_current_fact_1b21f5d.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_single_current_fact_20260711232500`.
+- Remote `py_compile` passed for `planner.py`, routing/planning modules, and routing tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Single Current-Fact Route Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ## 2026-07-11 - Phase D Slice: Structured Artifact Marker Boundary
 
 ### Scope
