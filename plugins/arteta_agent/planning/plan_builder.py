@@ -99,6 +99,12 @@ def build_plan(decision: RouteDecision, ctx: ToolContext = None) -> AgentPlan:
         and decision.required_tools[0].name == "analyze_links"
     ):
         constraints["execute_single_required_tool"] = True
+    if (
+        any(intent.name == "document_read" for intent in decision.intents or [])
+        and len(decision.required_tools or []) == 1
+        and decision.required_tools[0].name == "read_document"
+    ):
+        constraints["execute_single_required_tool"] = True
     return AgentPlan(
         required_tools=_rewrite_public_current_fact_tools(decision, ctx),
         excluded_tools=set(decision.excluded_tools or set()),

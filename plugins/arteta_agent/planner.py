@@ -414,29 +414,6 @@ def detect_forced_science_tool(messages) -> str:
     return _science_route_for_text(text)
 
 
-DOCUMENT_INTENT_MARKERS = (
-    "文档",
-    "pdf",
-    "docx",
-    "文件",
-    "读取",
-    "总结",
-    "分析",
-    "看看",
-    "提取",
-    "讲了什么",
-)
-
-DETECTED_URL_DOCUMENT_INTENT_MARKERS = (
-    "文档",
-    "pdf",
-    "docx",
-    "文件",
-    "读取",
-    "附件",
-    "报告",
-)
-
 def _has_any_marker(text: str, markers) -> bool:
     lowered = str(text or "").lower()
     return any(marker in lowered for marker in markers)
@@ -470,28 +447,6 @@ def _forced_tool_call_history_message(tool_call: dict) -> dict:
         "content": "",
         "tool_calls": [tool_call],
     }
-
-
-def should_force_document_tool(messages, ctx: ToolContext) -> bool:
-    extra = getattr(ctx, "extra", {}) or {}
-    if extra.get("document_urls"):
-        text = _latest_user_content(messages).strip()
-        return not text or _has_any_marker(text, DOCUMENT_INTENT_MARKERS)
-    if not extra.get("detected_urls"):
-        return False
-    text = _latest_user_content(messages).strip()
-    return _has_any_marker(text, DETECTED_URL_DOCUMENT_INTENT_MARKERS)
-
-
-def forced_document_tool_args(ctx: ToolContext) -> dict:
-    extra = getattr(ctx, "extra", {}) or {}
-    documents = list(extra.get("document_urls") or [])
-    if documents:
-        return {}
-    urls = list(extra.get("detected_urls") or [])
-    if urls:
-        return {"url": str(urls[0])}
-    return {}
 
 
 def detect_forced_web_verification_args(messages) -> dict:
@@ -1173,35 +1128,6 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
         if initial_plan.constraints.get("direct_trace_response"):
             return finish(compose_trace_response(trace))
         return finish(initial_result)
-
-    if should_force_document_tool(state, ctx) and get_tool("read_document") and "read_document" not in disabled_tools:
-        tool_call = {
-            "id": "forced-read-document-1",
-            "type": "function",
-            "function": {
-                "name": "read_document",
-                "arguments": json.dumps(forced_document_tool_args(ctx), ensure_ascii=False),
-            },
-        }
-        return finish(await _answer_from_forced_tool_result(
-            state,
-            ctx,
-            tool_call,
-            model,
-            api_key,
-            api_url,
-            allowed,
-            disabled_tools,
-            schema_excluded_tools,
-            max_rounds,
-            trace,
-            temperature,
-            tool_artifact_markers,
-            request_timeout,
-            max_tool_calls=max_tool_calls,
-            max_same_tool_call_repeats=max_same_tool_call_repeats,
-            max_total_observation_chars=max_total_observation_chars,
-        ))
 
     forced_web_args = detect_forced_web_verification_args(state)
     planned_web_call = build_public_current_fact_planned_call(

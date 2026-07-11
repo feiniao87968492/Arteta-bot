@@ -11,6 +11,27 @@ LOCAL_MEMORY_MARKERS = ("之前", "刚才", "上次", "昨天", "你之前", "�
 CURRENT_FACT_MARKERS = ("最新", "最近", "现在", "结果", "赛果", "比分", "伤病", "转会")
 FOOTBALL_MARKERS = ("阿森纳", "arsenal", "比赛", "英超", "欧冠", "球队")
 DOCUMENT_MARKERS = ("pdf", "PDF", "文档", "文件", "附件", "报告")
+DOCUMENT_INTENT_MARKERS = (
+    "文档",
+    "pdf",
+    "docx",
+    "文件",
+    "读取",
+    "总结",
+    "分析",
+    "看看",
+    "提取",
+    "讲了什么",
+)
+DETECTED_URL_DOCUMENT_INTENT_MARKERS = (
+    "文档",
+    "pdf",
+    "docx",
+    "文件",
+    "读取",
+    "附件",
+    "报告",
+)
 LINK_INTENT_MARKERS = (
     "链接",
     "网址",
@@ -87,13 +108,22 @@ def _looks_like_math(text: str) -> bool:
     return False
 
 
+def _document_tool_args(text: str, extra: dict):
+    if extra.get("document_urls") and (not text or _has_any(text, DOCUMENT_INTENT_MARKERS)):
+        return {}
+    if extra.get("detected_urls") and _has_any(text, DETECTED_URL_DOCUMENT_INTENT_MARKERS):
+        urls = list(extra.get("detected_urls") or [])
+        if urls:
+            return {"url": str(urls[0])}
+    return None
+
+
 def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
     text = _latest_user_content(messages).strip()
     decision = RouteDecision()
-    if not text:
-        return decision
-
     extra = getattr(ctx, "extra", {}) or {} if ctx is not None else {}
+    if not text and not extra.get("document_urls") and not extra.get("detected_urls"):
+        return decision
 
     ui_args = detect_ui_preference_args(messages)
     if ui_args:
@@ -127,17 +157,18 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
             forced=True,
         ))
 
-    if extra.get("document_urls") or _has_any(text, DOCUMENT_MARKERS):
-        if extra.get("document_urls"):
-            decision.intents.append(Intent("document_read", 0.95, "document context present"))
-            _append_tool_once(decision.required_tools, PlannedToolCall(
-                name="read_document",
-                arguments={},
-                reason="document context present",
-                forced=True,
-            ))
+    document_args = _document_tool_args(text, extra)
+    if document_args is not None:
+        decision.intents.append(Intent("document_read", 0.95, "document context present"))
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="read_document",
+            arguments=document_args,
+            reason="document context present",
+            forced=True,
+        ))
 
-    if extra.get("detected_urls") and (not text or _has_any(text, LINK_INTENT_MARKERS)):
+    has_document_read = any(intent.name == "document_read" for intent in decision.intents)
+    if not has_document_read and extra.get("detected_urls") and (not text or _has_any(text, LINK_INTENT_MARKERS)):
         decision.intents.append(Intent("link_analysis", 0.9, "link context present with analysis intent"))
         _append_tool_once(decision.required_tools, PlannedToolCall(
             name="analyze_links",

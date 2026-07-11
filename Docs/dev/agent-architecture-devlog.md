@@ -1796,3 +1796,48 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Slice: Document Read Plan Route
+
+### Scope
+
+- Migrated the deterministic `read_document` forced branch out of `planner.py` and into the structured Routing + Planning path.
+- Preserved both legacy document argument modes:
+  - current-message document attachments call `read_document` with `{}`;
+  - detected document/download URLs call `read_document` with `{"url": first_detected_url}`.
+
+### Changes
+
+- Moved document intent markers into `routing/heuristic_router.py`.
+- Added `_document_tool_args(...)` in the router to produce structured `read_document` arguments from `ctx.extra.document_urls` or `ctx.extra.detected_urls`.
+- `route_message(...)` now keeps processing structured document/link context even when the latest user text is empty.
+- Document routing now takes precedence over link analysis for detected URL turns with explicit PDF/document intent.
+- `build_plan(...)` marks a single `read_document` required tool as `execute_single_required_tool` without `direct_tool_response`.
+- Removed `DOCUMENT_INTENT_MARKERS`, `DETECTED_URL_DOCUMENT_INTENT_MARKERS`, `should_force_document_tool(...)`, `forced_document_tool_args(...)`, and the `forced-read-document` branch from `planner.py`.
+
+### Compatibility and Safety
+
+- No tool schema, permission, or handler behavior changed.
+- Document tool observations still enter the unified Runtime as tool messages, then the model summarizes them.
+- The prompt-injection regression for document/tool text staying out of system messages still passes.
+- Plain link intent still routes to `analyze_links`, not `read_document`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_routes_document_attachment_as_required_tool_for_empty_text tests/test_arteta_agent_routing.py::test_plan_builder_routes_detected_document_url_with_url_argument tests/test_arteta_agent_routing.py::test_routing_prefers_link_analysis_over_document_for_plain_link_intent tests/test_arteta_agent_routing.py::test_planner_no_longer_has_forced_document_branch -q`
+  - RED before fix: failed because empty text with document context returned no route, detected PDF URL routed to `analyze_links`, and planner still had the forced document branch.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_routes_document_attachment_as_required_tool_for_empty_text tests/test_arteta_agent_routing.py::test_plan_builder_routes_detected_document_url_with_url_argument tests/test_arteta_agent_routing.py::test_routing_prefers_link_analysis_over_document_for_plain_link_intent tests/test_arteta_agent_routing.py::test_planner_no_longer_has_forced_document_branch tests/test_arteta_agent_registry.py::test_agent_loop_forces_document_tool_when_document_is_present tests/test_arteta_agent_registry.py::test_agent_loop_keeps_forced_tool_result_out_of_system_messages tests/test_arteta_agent_registry.py::test_agent_loop_continues_when_forced_tool_followup_requests_another_tool tests/test_arteta_agent_registry.py::test_agent_loop_forces_document_tool_for_pdf_intent_with_plain_download_url tests/test_arteta_agent_registry.py::test_agent_loop_prefers_link_analysis_for_plain_link_intent_when_document_tool_exists -q`
+  - GREEN after fix: `9 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `25 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `517 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still contains legacy forced branches for public web verification and science tools.
+- Science tools intentionally return direct user-facing text today; migrate only after adding tests that preserve that direct-response behavior.

@@ -489,3 +489,54 @@ def test_planner_no_longer_has_forced_link_analysis_branch():
     assert "def should_force_link_analysis_tool" not in source
     assert "forced-analyze-links" not in source
     assert "if should_force_link_analysis_tool" not in source
+
+
+def test_plan_builder_routes_document_attachment_as_required_tool_for_empty_text():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    ctx = make_context(extra={"document_urls": [{"url": "https://files.example/a.pdf", "name": "a.pdf"}]})
+    decision = route_message([{"role": "user", "content": ""}], ctx)
+    plan = build_plan(decision, ctx)
+
+    assert any(intent.name == "document_read" for intent in decision.intents)
+    assert tool_names(plan) == ["read_document"]
+    assert plan.required_tools[0].arguments == {}
+    assert plan.constraints.get("execute_single_required_tool") is True
+    assert plan.constraints.get("direct_tool_response") is not True
+
+
+def test_plan_builder_routes_detected_document_url_with_url_argument():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    ctx = make_context(extra={"detected_urls": ["https://njc-download.ftn.qq.com/ftn_handler/token123"]})
+    decision = route_message([{"role": "user", "content": "分析这个 pdf"}], ctx)
+    plan = build_plan(decision, ctx)
+
+    assert tool_names(plan) == ["read_document"]
+    assert plan.required_tools[0].arguments == {
+        "url": "https://njc-download.ftn.qq.com/ftn_handler/token123",
+    }
+    assert plan.constraints.get("execute_single_required_tool") is True
+
+
+def test_routing_prefers_link_analysis_over_document_for_plain_link_intent():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    ctx = make_context(extra={"detected_urls": ["https://example.com/pricing"]})
+    decision = route_message([{"role": "user", "content": "分析这个链接"}], ctx)
+    plan = build_plan(decision, ctx)
+
+    assert tool_names(plan) == ["analyze_links"]
+
+
+def test_planner_no_longer_has_forced_document_branch():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "def should_force_document_tool" not in source
+    assert "def forced_document_tool_args" not in source
+    assert "forced-read-document" not in source
