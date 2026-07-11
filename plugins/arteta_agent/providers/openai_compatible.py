@@ -63,12 +63,15 @@ class OpenAICompatibleProvider:
         tools: Optional[List[dict]] = None,
         temperature: float = 0.9,
         timeout: float = 80.0,
+        extra_payload: Optional[dict] = None,
     ) -> dict:
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
         }
+        if extra_payload:
+            payload.update(dict(extra_payload))
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"

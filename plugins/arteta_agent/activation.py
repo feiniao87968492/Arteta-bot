@@ -3,7 +3,8 @@ import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable, List, Optional
 
-import httpx
+from .providers.http_client import get_shared_async_client
+from .providers.openai_compatible import OpenAICompatibleProvider
 
 
 ActivationLLMCall = Callable[[List[dict], str, str, float], Awaitable[str]]
@@ -100,20 +101,22 @@ def build_activation_messages(raw_text: str, has_image: bool, group_id: str) -> 
 
 
 async def call_activation_llm(messages: List[dict], model: str, api_key: str, timeout: float, api_url: str = DEFAULT_CHAT_API_URL) -> str:
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            api_url or DEFAULT_CHAT_API_URL,
-            headers={"Authorization": "Bearer {0}".format(api_key)},
-            json={
-                "model": model,
-                "messages": messages,
-                "temperature": 0,
-                "max_tokens": 80,
-                "response_format": {"type": "json_object"},
-            },
-        )
-        resp.raise_for_status()
-        return str(resp.json()["choices"][0]["message"].get("content") or "")
+    provider = OpenAICompatibleProvider(
+        client=get_shared_async_client(),
+        api_url=api_url or DEFAULT_CHAT_API_URL,
+    )
+    message = await provider.chat(
+        messages=messages,
+        model=model,
+        api_key=api_key,
+        temperature=0,
+        timeout=timeout,
+        extra_payload={
+            "max_tokens": 80,
+            "response_format": {"type": "json_object"},
+        },
+    )
+    return str(message.get("content") or "")
 
 
 def _parse_decision(content: str) -> ActivationDecision:

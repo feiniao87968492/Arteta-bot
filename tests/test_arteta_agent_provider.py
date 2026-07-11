@@ -99,6 +99,30 @@ def test_openai_compatible_provider_preserves_tool_calls_and_reasoning_content()
     assert calls[0][3] == 80.0
 
 
+def test_openai_compatible_provider_merges_extra_payload_fields():
+    calls = []
+    client = FakeClient(calls, {"role": "assistant", "content": "{\"should_reply\": true}"})
+    provider = OpenAICompatibleProvider(client=client, api_url="https://provider.example/v1/chat/completions")
+
+    result = asyncio.run(provider.chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="model",
+        api_key="key",
+        temperature=0,
+        timeout=4.0,
+        extra_payload={
+            "max_tokens": 80,
+            "response_format": {"type": "json_object"},
+        },
+    ))
+
+    assert result["content"] == "{\"should_reply\": true}"
+    assert calls[0][2]["temperature"] == 0
+    assert calls[0][2]["max_tokens"] == 80
+    assert calls[0][2]["response_format"] == {"type": "json_object"}
+    assert calls[0][3] == 4.0
+
+
 def test_planner_call_llm_with_tools_reuses_shared_client():
     from plugins.arteta_agent import planner
 
@@ -126,6 +150,35 @@ def test_planner_call_llm_with_tools_reuses_shared_client():
         assert second == {"role": "assistant", "content": "ok"}
         assert len(created) == 1
         assert len(created[0].calls) == 2
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)
+
+
+def test_activation_llm_uses_shared_provider_client():
+    from plugins.arteta_agent.activation import call_activation_llm
+
+    calls = []
+    client = FakeClient(
+        calls,
+        {"role": "assistant", "content": "{\"should_reply\": true, \"reason\": \"task\"}"},
+    )
+    set_shared_async_client_factory(lambda: client)
+    try:
+        result = asyncio.run(call_activation_llm(
+            [{"role": "user", "content": "hi"}],
+            "model",
+            "key",
+            timeout=4.0,
+            api_url="https://provider.example/v1/chat/completions",
+        ))
+
+        assert result == "{\"should_reply\": true, \"reason\": \"task\"}"
+        assert calls[0][0] == "https://provider.example/v1/chat/completions"
+        assert calls[0][2]["temperature"] == 0
+        assert calls[0][2]["max_tokens"] == 80
+        assert calls[0][2]["response_format"] == {"type": "json_object"}
+        assert calls[0][3] == 4.0
     finally:
         asyncio.run(close_shared_async_client())
         set_shared_async_client_factory(None)

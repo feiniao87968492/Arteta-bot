@@ -483,3 +483,51 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase E Slice: Activation Uses Provider Client
+
+### Scope
+
+- Reused the provider adapter and shared AsyncClient for activation LLM calls.
+- Preserved the activation public APIs and fail-closed behavior.
+- Kept the existing activation prompt/message builder unchanged.
+
+### Changes
+
+- `plugins/arteta_agent/activation.py` no longer creates its own `httpx.AsyncClient`.
+- `call_activation_llm(...)` now uses `OpenAICompatibleProvider(client=get_shared_async_client(), ...)`.
+- `OpenAICompatibleProvider.chat(...)` now accepts `extra_payload` so activation can pass:
+  - `max_tokens=80`;
+  - `response_format={"type": "json_object"}`.
+- Added provider tests for extra payload merging and activation using the shared client.
+
+### Compatibility
+
+- `decide_activation_with_agent(...)` signature and `llm_call` injection remain unchanged.
+- Activation still returns false on missing API key, invalid JSON, and provider errors.
+- The request payload keeps `temperature=0`, `max_tokens=80`, and JSON response format.
+
+### Risk Notes
+
+- This slice does not change activation routing heuristics or fail-open/fail-closed policy.
+- Shared provider shutdown is still a pending lifecycle integration task.
+- Other modules outside activation and planner still have independent HTTP clients.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_provider.py -q`
+  - Result: `5 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_activation_judge_parses_json_decision tests/test_arteta_agent_registry.py::test_activation_judge_fails_closed_on_invalid_or_error -q`
+  - Result: `2 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
+  - Result: `186 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `474 passed, 2 warnings`.
+
+### Remaining
+
+- Add application shutdown integration for the shared provider client.
+- Continue migrating web tools and other LLM HTTP call sites where safe.
+- Add retry/backoff policy in the provider adapter.
