@@ -919,6 +919,23 @@ Verification after the fix:
 - `python -m pytest tests -q`
   - Result: `505 passed, 2 warnings`.
 
+### ECS Deployment
+
+- Commit deployed: `85258fd refactor: extract ui preference detector`.
+- Deployment archive: `/tmp/arteta_phase_c_ui_detector_85258fd.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_ui_detector_20260712011900`.
+- Remote `py_compile` passed for `plugins/arteta_agent/planner.py`, `plugins/arteta_agent/routing/contextual_tools.py`, and `tests/test_arteta_agent_routing.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+
+### ECS Smoke After UI Detector Extract Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ### Remaining
 
 - The planner still owns the forced execution branch for `update_ui_preference`; the next routing slice can convert this detector output into a structured plan call.
