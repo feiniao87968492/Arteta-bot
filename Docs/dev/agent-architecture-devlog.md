@@ -655,6 +655,37 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase E Slice: Provider Tool-History Capability Encoding
+
+### Scope
+
+- Made `ProviderCapabilities.supports_tool_history` enforce an actual message encoding branch in the provider adapter.
+- Kept Runtime and planner on standard assistant `tool_calls` plus `tool` message history; provider compatibility is handled at the adapter boundary.
+
+### Changes
+
+- Added provider-side `_encode_messages(...)`.
+- Providers with `supports_tool_history=True` keep the existing OpenAI-compatible message payload unchanged.
+- Providers with `supports_tool_history=False` convert `tool` role messages into `user` data messages labeled `UNTRUSTED_TOOL_RESULT`.
+- Synthetic assistant `tool_calls` messages are converted to assistant text summaries containing tool call IDs, tool names, and argument keys only.
+- Dynamic tool result content is never moved into `system` during fallback encoding.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_provider.py::test_openai_compatible_provider_encodes_tool_history_for_limited_providers_without_system_leak -q`
+  - RED before fix: failed because `role="tool"` was still sent to limited providers.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_provider.py -q`
+  - Result: `11 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `493 passed` plus existing Windows asyncio/proactor warnings printed after completion.
+
+### Remaining
+
+- Planner thinning and broader RouteDecision rollout remain open; Provider Phase E is now closer to the task-book requirements but business-layer legacy HTTP clients still need a separate audit/refactor decision.
 - `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
   - Result: `186 passed, 2 warnings`.
 - `python -m pytest tests -q`

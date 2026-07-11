@@ -10,6 +10,16 @@ class ProviderResponseError(Exception):
     """Raised when an LLM provider response cannot be interpreted safely."""
 
 
+def _json_object_keys(raw_arguments) -> set:
+    try:
+        value = json.loads(raw_arguments or "{}")
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(value, dict):
+        return set()
+    return set(str(key) for key in value.keys())
+
+
 @dataclass(frozen=True)
 class ProviderCapabilities:
     supports_tool_history: bool = True
@@ -71,6 +81,45 @@ class OpenAICompatibleProvider:
             return int(status_code) in self.retry_status_codes
         return isinstance(exc, (TimeoutError, httpx.TimeoutException, httpx.TransportError))
 
+    def _encode_messages(self, messages: List[dict]) -> List[dict]:
+        if self.capabilities.supports_tool_history:
+            return list(messages or [])
+
+        encoded = []
+        for message in messages or []:
+            role = message.get("role")
+            if role == "tool":
+                encoded.append({
+                    "role": "user",
+                    "content": (
+                        "UNTRUSTED_TOOL_RESULT:\n"
+                        "tool_call_id={0}\n"
+                        "{1}"
+                    ).format(
+                        str(message.get("tool_call_id") or ""),
+                        str(message.get("content") or ""),
+                    ),
+                })
+                continue
+            if message.get("tool_calls"):
+                call_summaries = []
+                for tool_call in message.get("tool_calls") or []:
+                    function = tool_call.get("function") or {}
+                    call_summaries.append({
+                        "id": tool_call.get("id", ""),
+                        "name": function.get("name", ""),
+                        "arg_keys": sorted(list(_json_object_keys(function.get("arguments")))),
+                    })
+                encoded.append({
+                    "role": "assistant",
+                    "content": "Requested tool calls: {0}".format(
+                        json.dumps(call_summaries, ensure_ascii=False)
+                    ),
+                })
+                continue
+            encoded.append(dict(message))
+        return encoded
+
     async def _sleep_before_retry(self, attempt_index: int) -> None:
         if self.retry_backoff_seconds <= 0:
             return
@@ -88,7 +137,7 @@ class OpenAICompatibleProvider:
     ) -> dict:
         payload = {
             "model": model,
-            "messages": messages,
+            "messages": self._encode_messages(messages),
             "temperature": temperature,
         }
         if extra_payload:
