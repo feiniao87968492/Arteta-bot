@@ -2773,3 +2773,51 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Planner Cleanup: Delegate Agent Loop Orchestration To Service
+
+### Scope
+
+- Moved route/plan/runtime orchestration from `planner.py` into `plugins/arteta_agent/service.py`.
+- Added `run_legacy_agent_loop(...)` as the service-layer implementation behind the legacy public entrypoint.
+- `planner.py` now keeps:
+  - `_parse_chat_response(...)` compatibility wrapper;
+  - `_latest_user_content(...)` compatibility wrapper;
+  - `call_llm_with_tools(...)` compatibility wrapper;
+  - `run_agent_loop(...)` compatibility entrypoint that delegates to `run_legacy_agent_loop(...)`.
+- `planner.py` is now 55 lines and no longer imports routing, planning, Runtime runner service, registry, contextual tool filtering, response composer, or policy helpers directly.
+
+### Design Decision
+
+- `run_agent_loop(...)` remains the public compatibility entrypoint for existing callers.
+- The planner still injects `planner.call_llm_with_tools` into the service. This preserves existing tests and downstream monkeypatch behavior while removing orchestration from planner.
+- `run_legacy_agent_loop(...)` intentionally lives in the service layer first, rather than introducing a larger request object in the same commit. This keeps the final planner-thinning step reviewable and reversible.
+
+### Compatibility and Safety
+
+- Public function signatures are unchanged.
+- Existing `planner.call_llm_with_tools` monkeypatch behavior is preserved.
+- Explicit pending confirmation, disabled tool filtering, contextual exclusions, multi-intent planning, Runtime execution, structured artifact finalization, trace response, and mood emoji policy still execute in the same order.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_runtime.py::test_planner_delegates_agent_loop_orchestration_to_service -q`
+  - RED before implementation: failed because `service.run_legacy_agent_loop` did not exist.
+  - Result after implementation: `1 passed`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\service.py tests\\test_arteta_agent_runtime.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_runtime.py tests/test_arteta_agent_routing.py -q`
+  - Result: `48 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_hides_bulky_tool_categories_for_plain_chat tests/test_arteta_agent_registry.py::test_planner_records_temporary_tool_block_and_does_not_force_emoji tests/test_arteta_agent_registry.py::test_agent_loop_records_rounds_and_tool_trace tests/test_arteta_agent_registry.py::test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `533 passed, 2 warnings`.
+
+### Remaining
+
+- The service layer still uses a legacy parameter list matching `run_agent_loop(...)`; a future low-risk cleanup can introduce an `AgentRequest` object.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.

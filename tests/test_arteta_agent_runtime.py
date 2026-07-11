@@ -516,3 +516,21 @@ def test_agent_service_owns_trace_and_final_response_wiring():
     assert "trace.setdefault(\"group_id\"" not in source
     assert "compose_final_response(" not in source
     assert "consume_policy_turn_if_needed(" not in source
+
+
+def test_planner_delegates_agent_loop_orchestration_to_service():
+    from pathlib import Path
+
+    from plugins.arteta_agent import service
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert hasattr(service, "run_legacy_agent_loop")
+    assert "from .planning." not in source
+    assert "from .routing." not in source
+    assert "run_runtime_loop_from_state" not in source
+    assert "route_message(" not in source
+    assert "build_plan(" not in source
+    assert "initial_tool_calls_from_plan(" not in source
+    assert "detect_contextual_tool_exclusions(" not in source
+    assert "return await run_legacy_agent_loop(" in source
