@@ -692,6 +692,23 @@ Verification after the fix:
 - `python -m pytest tests -q`
   - Result: `499 passed, 2 warnings`.
 
+### ECS Deployment
+
+- Commit deployed: `009851f refactor: remove planner trace marker wrappers`.
+- Deployment archive: `/tmp/arteta_phase_d_trace_marker_cleanup_009851f.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_d_trace_marker_cleanup_20260712002727`.
+- Remote `py_compile` passed for `plugins/arteta_agent/planner.py` and `tests/test_arteta_agent_response.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+
+### ECS Smoke After Planner Trace Marker Cleanup Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ### Remaining
 
 - Planner still directly handles trace-request forced routing and calls `format_trace_block(...)`; moving that behind a response/runtime boundary remains a later planner-thinning step.
