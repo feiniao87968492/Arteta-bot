@@ -94,15 +94,14 @@ def assert_tool_observation_without_system_leak(messages, expected_text):
     assert expected_text in str(messages[-1].get("content") or "")
 
 
-def test_forced_tool_followup_system_instruction_is_static():
-    from plugins.arteta_agent import planner
+def test_planner_no_longer_defines_legacy_forced_tool_followup_helpers():
+    from pathlib import Path
 
-    message = planner._forced_tool_followup_instruction("read_document")
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
 
-    assert message["role"] == "system"
-    assert "read_document" not in message["content"]
-    assert "{0}" not in message["content"]
-    assert "untrusted data" in message["content"]
+    assert "def _answer_from_forced_tool_result" not in source
+    assert "def _forced_tool_followup_instruction" not in source
+    assert "def _forced_followup_disabled_tools" not in source
 
 
 def test_registry_registers_and_exports_openai_tools():

@@ -2011,3 +2011,42 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Cleanup: Remove Legacy Forced Tool Followup Helper
+
+### Scope
+
+- Removed the unused `_answer_from_forced_tool_result(...)` helper after document, link, public-current-fact, and technical forced routes had all moved into structured plan execution.
+- Removed its private support helpers:
+  - `_forced_tool_followup_instruction(...)`;
+  - `_forced_tool_call_history_message(...)`;
+  - `_forced_followup_disabled_tools(...)`.
+- Kept `_run_forced_tool_direct(...)` unchanged because behavior-policy and tool-policy instructions still use that direct structured Runtime path.
+
+### Compatibility and Safety
+
+- No tool names, schemas, permissions, provider behavior, or handler behavior changed.
+- Existing forced initial tool calls still execute through `_run_runtime_loop_from_state(...)`.
+- The prompt-injection safety behavior is now covered by Runtime tests that assert untrusted tool output appears in `tool` messages and not in dynamic `system` messages.
+- This cleanup removes a stale static system helper instead of replacing it with another system-message path.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_registry.py::test_planner_no_longer_defines_legacy_forced_tool_followup_helpers -q`
+  - RED before cleanup: failed because `_answer_from_forced_tool_result(...)` was still defined.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_planner_no_longer_defines_legacy_forced_tool_followup_helpers tests/test_arteta_agent_registry.py::test_agent_loop_keeps_forced_tool_result_out_of_system_messages tests/test_arteta_agent_registry.py::test_agent_loop_continues_when_forced_tool_followup_requests_another_tool -q`
+  - GREEN after cleanup: `3 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `30 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `522 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still owns contextual tool exposure marker logic.
+- Behavior/tool-policy direct update branches still use `_run_forced_tool_direct(...)` and need to be planned separately before removal.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.
