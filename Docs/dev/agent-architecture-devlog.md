@@ -1841,3 +1841,26 @@ Verification after the fix:
 
 - `planner.py` still contains legacy forced branches for public web verification and science tools.
 - Science tools intentionally return direct user-facing text today; migrate only after adding tests that preserve that direct-response behavior.
+
+### ECS Deployment
+
+- Commit deployed: `25cf29e refactor: route document reads through agent plan`.
+- Deployment archive: `/tmp/arteta_phase_c_document_plan_25cf29e.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_document_plan_20260712020247`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/planning/plan_builder.py`;
+  - `plugins/arteta_agent/routing/heuristic_router.py`;
+  - `tests/test_arteta_agent_routing.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Document Read Plan Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
