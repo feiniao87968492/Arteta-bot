@@ -515,6 +515,25 @@ Verification after the fix:
 - Move more response-oriented helper wrappers out of planner only after source and behavior tests cover their public compatibility.
 - `arteta_chat.py` still has legacy artifact marker parsing for outer QQ message rendering; that is outside the Agent planner boundary and should be audited separately.
 
+### ECS Deployment
+
+- Commit deployed: `cea36ff refactor: remove planner artifact marker parsing`.
+- Deployment archive: `/tmp/arteta_phase_d_planner_artifact_cleanup_cea36ff.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_d_planner_artifact_cleanup_20260711235400`.
+- Remote `py_compile` passed for `planner.py` and response tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Planner Artifact Cleanup Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ## 2026-07-11 - Phase D Slice: Mood Emoji Response Finalizer
 
 ### Scope
