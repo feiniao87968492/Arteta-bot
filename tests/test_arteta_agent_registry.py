@@ -1082,6 +1082,51 @@ def test_executor_audits_pending_action_creation_without_raw_values(tmp_path):
     assert "raw-secret-message" not in records[0]["detail"]
 
 
+def test_executor_audits_admin_permission_denial_without_raw_values(tmp_path):
+    from plugins.arteta_agent.audit import AuditStore
+
+    clear_registry()
+    calls = []
+
+    async def handler(ctx: ToolContext, message: str):
+        calls.append(message)
+        return "should not run"
+
+    register_tool(ToolSpec(
+        "admin_denied_secret",
+        "admin denied secret",
+        {"type": "object", "properties": {"message": {"type": "string"}}},
+        handler,
+        permission="admin_action",
+    ))
+    pending_path = tmp_path / "pending.db"
+    audit_path = tmp_path / "audit.db"
+
+    denied = asyncio.run(execute_tool_call({
+        "id": "call-admin-denied-audit",
+        "function": {
+            "name": "admin_denied_secret",
+            "arguments": json.dumps({"message": "raw-admin-secret"}),
+        },
+    }, make_context(is_admin=False, request_id="req-admin-denied-audit", extra={
+        "pending_action_db_path": str(pending_path),
+        "audit_db_path": str(audit_path),
+    })))
+
+    assert denied.startswith("[PermissionRequired]")
+    assert calls == []
+    records = AuditStore(str(audit_path)).list_records()
+    assert len(records) == 1
+    assert records[0]["tool_name"] == "admin_denied_secret"
+    assert records[0]["status"] == "permission_required"
+    detail = json.loads(records[0]["detail"])
+    assert detail["event"] == "permission_denied"
+    assert detail["permission"] == "admin_action"
+    assert detail["arg_keys"] == ["message"]
+    assert detail["request_id"] == "req-admin-denied-audit"
+    assert not pending_path.exists() or "raw-admin-secret" not in records[0]["detail"]
+
+
 def test_executor_audits_confirmed_action_success_without_raw_values(tmp_path):
     from plugins.arteta_agent.audit import AuditStore
     from plugins.arteta_agent.pending import PendingActionStore

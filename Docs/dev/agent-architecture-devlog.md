@@ -777,3 +777,25 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase G Slice: Admin Permission Denial Audit Coverage
+
+### Scope
+
+- Added explicit regression coverage for persistent audit records when a non-admin user requests an `admin_action` tool.
+
+### Changes
+
+- Added `test_executor_audits_admin_permission_denial_without_raw_values`.
+- Confirmed the existing executor `permission_denied` audit path stores only structured metadata and does not create a PendingAction for non-admin users.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_registry.py::test_executor_audits_admin_permission_denial_without_raw_values -q`
+  - Result: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_executor_audits_invalid_arguments_without_raw_values tests/test_arteta_agent_registry.py::test_executor_audits_pending_action_creation_without_raw_values tests/test_arteta_agent_registry.py::test_executor_audits_admin_permission_denial_without_raw_values tests/test_arteta_agent_registry.py::test_executor_audits_confirmed_action_success_without_raw_values tests/test_arteta_agent_registry.py::test_executor_audits_failed_confirmation_without_raw_values tests/test_arteta_agent_registry.py::test_agent_loop_audits_explicit_missing_pending_confirmation tests/test_arteta_agent_registry.py::test_executor_audits_tool_error_code_without_raw_error_text tests/test_arteta_agent_registry.py::test_executor_audits_tool_timeout_without_raw_values -q`
+  - Result: `8 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `483 passed` plus existing Windows asyncio/proactor warnings printed after completion.
