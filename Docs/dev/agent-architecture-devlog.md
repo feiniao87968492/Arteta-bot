@@ -464,3 +464,22 @@ Verification after the fix:
 - Add application shutdown integration for `close_shared_async_client()`.
 - Add retry/backoff and capability-based message encoding tests.
 - Continue removing direct provider HTTP code from planner and other business modules.
+
+### ECS Deployment
+
+- Commit deployed: `6f3de84 refactor: add openai compatible provider adapter`.
+- Deployment archive: `/tmp/arteta_phase_e_provider_6f3de84.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_e_provider_20260711202500`.
+- Remote `py_compile` passed for planner, provider modules, and provider tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Provider Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
