@@ -2144,3 +2144,45 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Cleanup: Remove Unreachable Inline Runtime Loop
+
+### Scope
+
+- Removed unreachable legacy loop code from `_run_loop_from_state(...)` after its Runtime delegation return.
+- Removed private planner helpers that only served that unreachable loop:
+  - `_state_has_tool_call(...)`;
+  - `_trace_has_tool(...)`;
+  - `_trace_has_any_tool(...)`;
+  - `_should_allow_forced_mood_emoji(...)`;
+  - `detect_forced_mood_emoji_args(...)`;
+  - `_tool_call_signature(...)`.
+
+### Compatibility and Safety
+
+- Runtime behavior is unchanged because `_run_loop_from_state(...)` already returned from `_run_runtime_loop_from_state(...)` before reaching the deleted code.
+- Mood emoji behavior remains owned by `response/mood.py` and invoked through `_runtime_finalizer(...)`.
+- Loop guard signature, permission-required stop, observation budget, and finalizer handling remain in Runtime.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_mood_response.py::test_planner_no_longer_keeps_unreachable_inline_mood_loop -q`
+  - RED before cleanup: failed because planner still defined the mood wrapper and unreachable loop text.
+- `python -m py_compile plugins\\arteta_agent\\planner.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_mood_response.py::test_planner_no_longer_keeps_unreachable_inline_mood_loop tests/test_arteta_agent_mood_response.py::test_mood_finalizer_sends_negative_emoji_when_reply_skips_tool tests/test_arteta_agent_mood_response.py::test_mood_finalizer_respects_disabled_or_existing_emoji_call -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_mood_response.py -q`
+  - Result: `4 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `523 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still owns behavior/tool-policy direct update branches.
+- `_answer_after_unavailable_web_result(...)` remains as a compatibility helper and should be revisited separately.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.

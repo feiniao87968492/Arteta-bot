@@ -16,13 +16,10 @@ from .providers.openai_compatible import (
 from .registry import build_openai_tools, get_tool
 from .response.composer import compose_final_response, compose_trace_response
 from .response.mood import (
-    detect_forced_mood_emoji_args as response_detect_forced_mood_emoji_args,
     maybe_send_mood_emoji,
-    should_allow_forced_mood_emoji as response_should_allow_forced_mood_emoji,
 )
-from .result import TOOL_STATUS_PERMISSION_REQUIRED
 from .runtime.config import AgentRunConfig
-from .runtime.loop_guard import loop_guard_message, tool_call_signature
+from .runtime.loop_guard import loop_guard_message
 from .runtime.runner import AgentRuntimeRunner
 from .runtime.state import AgentState, FinalizedResponse
 from .routing.contextual_tools import detect_contextual_tool_exclusions
@@ -48,15 +45,6 @@ def _latest_user_content(messages) -> str:
         if msg.get("role") == "user":
             return str(msg.get("content") or "")
     return ""
-
-
-def _state_has_tool_call(messages, tool_name: str) -> bool:
-    for msg in messages or []:
-        for tool_call in msg.get("tool_calls") or []:
-            function = tool_call.get("function") or {}
-            if function.get("name") == tool_name:
-                return True
-    return False
 
 
 def detect_pending_action_confirmation_id(messages) -> str:
@@ -93,23 +81,6 @@ async def _execute_explicit_pending_action_confirmation(action_id: str, ctx: Too
     ctx.extra["confirmed_action_id"] = action_id
     record_round(trace, 1)
     return await execute_tool_call(tool_call, ctx)
-
-
-def _trace_has_tool(trace, tool_name: str) -> bool:
-    if not trace:
-        return False
-    return any(item.get("name") == tool_name for item in trace.get("tools") or [])
-
-
-def _trace_has_any_tool(trace, tool_names) -> bool:
-    if not trace:
-        return False
-    names = set(tool_names or [])
-    return any(item.get("name") in names for item in trace.get("tools") or [])
-
-
-def _should_allow_forced_mood_emoji(messages, trace) -> bool:
-    return response_should_allow_forced_mood_emoji(messages, trace)
 
 
 def _has_expiring_behavior_policies(group_id: str) -> bool:
@@ -165,10 +136,6 @@ async def _answer_after_unavailable_web_result(state, web_result: str, model: st
     return (response.get("content") or "").strip()
 
 
-def detect_forced_mood_emoji_args(messages, assistant_content: str = "") -> dict:
-    return response_detect_forced_mood_emoji_args(messages, assistant_content)
-
-
 async def call_llm_with_tools(messages, model: str, api_key: str, api_url: str = DEFAULT_CHAT_API_URL, allowed_permissions=None, disabled_tools=None, temperature: float = 0.9, request_timeout: float = 80.0):
     # The planner exposes registered tool schemas to the model, but all actual
     # execution still flows through execute_tool_call below.
@@ -204,10 +171,6 @@ def _remember_artifact_markers(markers: list, tool_result) -> None:
     for marker in list(getattr(tool_result, "artifacts", None) or []):
         if marker not in markers:
             markers.append(marker)
-
-
-def _tool_call_signature(tool_call: dict) -> str:
-    return tool_call_signature(tool_call)
 
 
 def _loop_guard_message(reason: str) -> str:
@@ -410,76 +373,6 @@ async def _run_loop_from_state(
         max_same_tool_call_repeats=max_same_tool_call_repeats,
         max_total_observation_chars=max_total_observation_chars,
     )
-    tool_call_count = 0
-    total_observation_chars = 0
-    call_signatures = {}
-    for _ in range(max_rounds):
-        assistant_msg = await _call_llm_with_policy(
-            state,
-            model,
-            api_key,
-            api_url,
-            allowed_permissions,
-            disabled_tools,
-            temperature,
-            request_timeout,
-        )
-        state.append(assistant_msg)
-
-        tool_calls = assistant_msg.get("tool_calls") or []
-        if not tool_calls:
-            content = (assistant_msg.get("content") or "").strip()
-            forced_emoji_args = detect_forced_mood_emoji_args(state, content)
-            if (
-                forced_emoji_args
-                and get_tool("send_mood_emoji")
-                and _should_allow_forced_mood_emoji(state, trace)
-                and _mood_emoji_enabled(ctx.group_id)
-                and "send_mood_emoji" not in set(policy_disabled_tools or set())
-                and not _state_has_tool_call(state, "send_mood_emoji")
-                and not _trace_has_tool(trace, "send_mood_emoji")
-            ):
-                record_round(trace, 1)
-                emoji_call = {
-                    "id": "forced-send-mood-emoji-1",
-                    "type": "function",
-                    "function": {
-                        "name": "send_mood_emoji",
-                        "arguments": json.dumps(forced_emoji_args, ensure_ascii=False),
-                    },
-                }
-                await execute_tool_call(emoji_call, ctx)
-            else:
-                record_round(trace, 0)
-            return content or "我需要更多信息才能完成这个任务。"
-
-        record_round(trace, len(tool_calls))
-        for tc in tool_calls:
-            if max_tool_calls > 0 and tool_call_count >= max_tool_calls:
-                return _loop_guard_message("tool call budget exhausted")
-            signature = _tool_call_signature(tc)
-            seen_count = int(call_signatures.get(signature) or 0)
-            if max_same_tool_call_repeats > 0 and seen_count >= max_same_tool_call_repeats:
-                return _loop_guard_message("repeated identical tool call")
-            call_signatures[signature] = seen_count + 1
-            # Tool results are appended back into the conversation so the model
-            # can finish with a user-facing answer after one or more rounds.
-            tool_result = await execute_tool_call_result(tc, ctx)
-            result = tool_result.content
-            tool_call_count += 1
-            _remember_artifact_markers(tool_artifact_markers, result)
-            if tool_result.status == TOOL_STATUS_PERMISSION_REQUIRED:
-                return result
-            total_observation_chars += len(str(result or ""))
-            if max_total_observation_chars > 0 and total_observation_chars > max_total_observation_chars:
-                return _loop_guard_message("observation budget exceeded")
-            state.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": result,
-            })
-
-    return "我已经尝试了多轮工具调用，但任务还没有稳定完成。请把目标再说具体一点。"
 
 
 async def _run_forced_tool_direct(
