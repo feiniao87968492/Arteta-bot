@@ -850,3 +850,22 @@ Verification after the fix:
 ### Remaining
 
 - Add a planner-level multi-read test if later routing/planning work emits multiple independent safe-read calls in one model turn.
+
+### ECS Deployment
+
+- Commit deployed: `a71b958 feat: run parallel-safe read tools concurrently`.
+- Deployment archive: `/tmp/arteta_phase_h_parallel_reads_a71b958.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_h_parallel_reads_20260711214000`.
+- Remote `py_compile` passed for `plugins/arteta_agent/runtime/config.py`, `plugins/arteta_agent/runtime/runner.py`, and `tests/test_arteta_agent_runtime.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Parallel Runtime Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
