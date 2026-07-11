@@ -2484,3 +2484,46 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Cleanup: Move Planned Tool Call Execution Helpers
+
+### Scope
+
+- Added `plugins/arteta_agent/planning/execution.py`.
+- Moved planned-tool-call conversion and initial-plan execution decision helpers out of `planner.py`.
+- `planner.py` now delegates to:
+  - `initial_tool_calls_from_plan(...)`;
+  - `should_execute_initial_plan(...)`.
+
+### Design Decision
+
+- Planning owns the conversion from `AgentPlan.required_tools` into OpenAI-compatible tool-call dictionaries.
+- Planner should not know the details of planned call IDs or how unavailable/disabled required tools are filtered.
+- Runtime execution remains unchanged; this slice only moves planning helper logic behind a clearer module boundary.
+
+### Compatibility and Safety
+
+- Required tools are still skipped when disabled by policy or missing from the registry.
+- Multi-intent plans still execute when more than one required tool is available.
+- Single required tools still execute only when plan constraints request direct execution.
+- Planned call IDs remain stable: `planned-<tool-name>-<index>`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_planning_execution_module_owns_planned_tool_call_conversion -q`
+  - RED before implementation: failed because planner still defined the helper functions.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\planning\\execution.py tests\\test_arteta_agent_routing.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `35 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `529 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still owns the compatibility orchestration flow: trace setup, policy TTL finalization, route/plan invocation, Runtime invocation, and final response composition.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.

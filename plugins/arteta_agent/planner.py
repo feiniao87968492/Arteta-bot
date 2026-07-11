@@ -3,6 +3,10 @@ import json
 from . import behavior_policy
 from .context import ToolContext
 from .executor import execute_tool_call, execute_tool_call_result
+from .planning.execution import (
+    initial_tool_calls_from_plan,
+    should_execute_initial_plan,
+)
 from .planning.plan_builder import build_plan
 from .providers.chat_completion import (
     DEFAULT_CHAT_API_URL,
@@ -211,47 +215,6 @@ def _build_runtime_state(
     )
 
 
-def _tool_call_from_planned(index: int, planned) -> dict:
-    return {
-        "id": "planned-{0}-{1}".format(str(planned.name).replace("_", "-"), index),
-        "type": "function",
-        "function": {
-            "name": planned.name,
-            "arguments": json.dumps(planned.arguments or {}, ensure_ascii=False),
-        },
-    }
-
-
-def _available_planned_calls(plan, disabled_tools) -> list:
-    available = []
-    for planned in plan.required_tools:
-        if planned.name in set(disabled_tools or set()):
-            continue
-        if not get_tool(planned.name):
-            continue
-        available.append(planned)
-    return available
-
-
-def _initial_tool_calls_from_plan(plan, disabled_tools) -> list:
-    calls = []
-    for planned in _available_planned_calls(plan, disabled_tools):
-        calls.append(_tool_call_from_planned(len(calls) + 1, planned))
-    return calls
-
-
-def _should_execute_initial_plan(plan, disabled_tools) -> bool:
-    available_required = _available_planned_calls(plan, disabled_tools)
-    if len(available_required) > 1:
-        return True
-    if len(available_required) == 1:
-        return bool(
-            plan.constraints.get("direct_trace_response")
-            or plan.constraints.get("execute_single_required_tool")
-        )
-    return False
-
-
 async def _run_loop_from_state(
     state,
     ctx: ToolContext,
@@ -320,14 +283,15 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
         return compose_final_response(value, artifacts=tool_artifact_markers, trace=trace)
 
     route_decision = route_message(state, ctx)
+    is_tool_available = lambda name: get_tool(name) is not None
     initial_plan = build_plan(
         route_decision,
         ctx,
         disabled_tools=disabled_tools,
-        is_tool_available=lambda name: get_tool(name) is not None,
+        is_tool_available=is_tool_available,
     )
-    planned_initial_calls = _initial_tool_calls_from_plan(initial_plan, disabled_tools)
-    if planned_initial_calls and _should_execute_initial_plan(initial_plan, disabled_tools):
+    planned_initial_calls = initial_tool_calls_from_plan(initial_plan, disabled_tools, is_tool_available)
+    if planned_initial_calls and should_execute_initial_plan(initial_plan, disabled_tools, is_tool_available):
         initial_result = await _run_runtime_loop_from_state(
             state,
             ctx,

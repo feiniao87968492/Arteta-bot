@@ -663,3 +663,14 @@ def test_planner_no_longer_has_direct_behavior_or_tool_policy_update_branches():
     assert "parse_tool_block_instruction(" not in source
     assert "set_group_tool_block(" not in source
     assert "def _run_forced_tool_direct" not in source
+
+
+def test_planning_execution_module_owns_planned_tool_call_conversion():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "def _tool_call_from_planned" not in source
+    assert "def _available_planned_calls" not in source
+    assert "def _initial_tool_calls_from_plan" not in source
+    assert "def _should_execute_initial_plan" not in source
