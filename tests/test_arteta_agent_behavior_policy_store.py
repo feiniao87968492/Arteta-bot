@@ -4,6 +4,23 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 
+def test_policy_service_owns_planner_policy_ttl_and_emoji_helpers():
+    from pathlib import Path
+
+    from plugins.arteta_agent.policy import service
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert hasattr(service, "should_consume_policy_turn")
+    assert hasattr(service, "consume_policy_turn_if_needed")
+    assert hasattr(service, "mood_emoji_enabled")
+    assert "from . import behavior_policy" not in source
+    assert "consume_group_policy_turn" not in source
+    assert "def _has_expiring_behavior_policies" not in source
+    assert "def _mood_emoji_enabled" not in source
+    assert "emoji.enabled" not in source
+
+
 def test_behavior_policy_migrates_legacy_json_to_sqlite_and_keeps_backup(tmp_path, monkeypatch):
     from plugins.arteta_agent import behavior_policy
 

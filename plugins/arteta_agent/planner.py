@@ -1,10 +1,14 @@
-from . import behavior_policy
 from .context import ToolContext
 from .planning.execution import (
     initial_tool_calls_from_plan,
     should_execute_initial_plan,
 )
 from .planning.plan_builder import build_plan
+from .policy.service import (
+    consume_policy_turn_if_needed,
+    mood_emoji_enabled,
+    should_consume_policy_turn,
+)
 from .providers.chat_completion import (
     DEFAULT_CHAT_API_URL,
     call_llm_with_tools as provider_call_llm_with_tools,
@@ -24,7 +28,6 @@ from .runtime.service import run_loop_from_state, run_runtime_loop_from_state
 from .routing.contextual_tools import detect_contextual_tool_exclusions
 from .routing.heuristic_router import route_message
 from .tool_policy import (
-    consume_group_policy_turn,
     get_disabled_tools,
 )
 
@@ -35,20 +38,6 @@ def _parse_chat_response(resp, api_url: str):
 
 def _latest_user_content(messages) -> str:
     return latest_user_content(messages)
-
-
-def _has_expiring_behavior_policies(group_id: str) -> bool:
-    return any(
-        "ttl_turns" in item
-        for item in behavior_policy.list_group_policies(group_id).values()
-    )
-
-
-def _mood_emoji_enabled(group_id: str) -> bool:
-    policy = behavior_policy.get_group_policy(group_id, "emoji.enabled")
-    if not policy:
-        return True
-    return policy.get("value") is not False
 
 
 async def call_llm_with_tools(messages, model: str, api_key: str, api_url: str = DEFAULT_CHAT_API_URL, allowed_permissions=None, disabled_tools=None, temperature: float = 0.9, request_timeout: float = 80.0):
@@ -85,12 +74,11 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
 
     disabled_tools = get_disabled_tools(ctx.group_id)
     schema_excluded_tools = set(disabled_tools) | detect_contextual_tool_exclusions(state, ctx)
-    should_consume_policy_turn = bool(disabled_tools) or _has_expiring_behavior_policies(ctx.group_id)
+    consume_policy_turn = should_consume_policy_turn(ctx.group_id, disabled_tools)
     tool_artifact_markers = []
 
     def finish(value: str) -> str:
-        if should_consume_policy_turn:
-            consume_group_policy_turn(ctx.group_id)
+        consume_policy_turn_if_needed(ctx.group_id, consume_policy_turn)
         return compose_final_response(value, artifacts=tool_artifact_markers, trace=trace)
 
     route_decision = route_message(state, ctx)
@@ -126,7 +114,7 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
                 or initial_plan.constraints.get("direct_tool_response")
             ),
             chat_model_call=call_llm_with_tools,
-            emoji_enabled=_mood_emoji_enabled,
+            emoji_enabled=mood_emoji_enabled,
         )
         if initial_plan.constraints.get("direct_trace_response"):
             return finish(compose_trace_response(trace))
@@ -150,5 +138,5 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
         max_same_tool_call_repeats=max_same_tool_call_repeats,
         max_total_observation_chars=max_total_observation_chars,
         chat_model_call=call_llm_with_tools,
-        emoji_enabled=_mood_emoji_enabled,
+        emoji_enabled=mood_emoji_enabled,
     ))

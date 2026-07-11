@@ -2624,3 +2624,50 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase F Cleanup: Move Policy Turn And Emoji Helpers Out Of Planner
+
+### Scope
+
+- Added `plugins/arteta_agent/policy/service.py`.
+- Added `plugins/arteta_agent/policy/__init__.py`.
+- Moved planner-owned policy helpers into the policy layer:
+  - `has_expiring_behavior_policies(...)`;
+  - `should_consume_policy_turn(...)`;
+  - `consume_policy_turn_if_needed(...)`;
+  - `mood_emoji_enabled(...)`.
+- `planner.py` no longer imports `behavior_policy` or `consume_group_policy_turn(...)` directly.
+
+### Design Decision
+
+- Planner should not know how behavior-policy TTLs are stored or counted down.
+- The policy service owns request-level TTL consumption decisions and exposes the simple boolean/operation boundary needed by planner.
+- Emoji enablement is a behavior policy concern, so Runtime still receives a callable dependency but planner no longer reads the policy key directly.
+
+### Compatibility and Safety
+
+- TTL semantics are unchanged: a handled main-agent request consumes one policy turn when the group has disabled tools or expiring behavior policies.
+- Permanent policies still do not decrement.
+- `emoji.enabled=false` still blocks automatic mood emoji.
+- Policy update tools still execute through the plan and unified Runtime path.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_behavior_policy_store.py::test_policy_service_owns_planner_policy_ttl_and_emoji_helpers -q`
+  - RED before implementation: failed because `plugins.arteta_agent.policy` did not exist.
+  - Result after implementation: `1 passed`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\policy\\service.py tests\\test_arteta_agent_behavior_policy_store.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_behavior_policy_store.py tests/test_arteta_agent_mood_response.py tests/test_arteta_agent_registry.py::test_planner_records_temporary_tool_block_and_does_not_force_emoji tests/test_arteta_agent_registry.py::test_planner_turns_plain_emoji_ban_into_behavior_policy -q`
+  - Result: `12 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `531 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still owns compatibility orchestration around trace setup, route/plan invocation, and final response composition.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.
