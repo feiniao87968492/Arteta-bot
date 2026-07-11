@@ -10,6 +10,7 @@ from .executor import execute_tool_call, execute_tool_call_result
 from .pending import store_from_context
 from .planning.plan_builder import build_plan
 from .registry import build_openai_tools, get_tool, list_enabled_tools
+from .response.artifacts import ARTIFACT_MARKER_RE, extract_artifact_markers
 from .result import TOOL_STATUS_PERMISSION_REQUIRED
 from .runtime.config import AgentRunConfig
 from .runtime.loop_guard import loop_guard_message, tool_call_signature
@@ -25,7 +26,7 @@ from .tool_policy import (
 from .trace import format_trace_block, record_round
 
 
-AGENT_IMAGE_ARTIFACT_RE = re.compile(r"\[(?:RenderedImage|GeneratedImage|LinkSnapshotImage):\s*[^\]]+\]")
+AGENT_IMAGE_ARTIFACT_RE = ARTIFACT_MARKER_RE
 PENDING_ACTION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12,}$")
 
 
@@ -506,14 +507,7 @@ def _looks_like_recent_public_match_question(text: str) -> bool:
 
 
 def _extract_artifact_markers(text: str) -> list:
-    markers = []
-    seen = set()
-    for match in AGENT_IMAGE_ARTIFACT_RE.finditer(str(text or "")):
-        marker = match.group(0)
-        if marker not in seen:
-            markers.append(marker)
-            seen.add(marker)
-    return markers
+    return extract_artifact_markers(text)
 
 
 def _append_missing_artifact_markers(answer: str, tool_result: str) -> str:
@@ -1005,8 +999,8 @@ async def _call_llm_with_policy(state, model: str, api_key: str, api_url: str, a
     return await call_llm_with_tools(state, model, api_key, allowed_permissions, **kwargs)
 
 
-def _remember_artifact_markers(markers: list, tool_result: str) -> None:
-    for marker in _extract_artifact_markers(tool_result):
+def _remember_artifact_markers(markers: list, tool_result) -> None:
+    for marker in list(getattr(tool_result, "artifacts", None) or []):
         if marker not in markers:
             markers.append(marker)
 
@@ -1127,7 +1121,7 @@ async def _runtime_finalizer(content: str, runtime_state: AgentState) -> Finaliz
 
 def _observe_runtime_tool_result(tool_artifact_markers: list):
     def _observer(tool_result, runtime_state: AgentState) -> None:
-        _remember_artifact_markers(tool_artifact_markers, tool_result.content)
+        _remember_artifact_markers(tool_artifact_markers, tool_result)
     return _observer
 
 

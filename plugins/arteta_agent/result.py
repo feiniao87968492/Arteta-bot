@@ -20,6 +20,7 @@ class ToolResult:
     args: Dict[str, object] = field(default_factory=dict)
     pending_action_id: str = ""
     markers: List[str] = field(default_factory=list)
+    artifacts: List[str] = field(default_factory=list)
     duration_ms: int = 0
     error_code: str = ""
 

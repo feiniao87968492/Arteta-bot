@@ -215,3 +215,43 @@ Verification after the fix:
 
 - Expand RouteDecision coverage to the rest of the task-book samples.
 - Replace single-intent `if ... return` routes with plan construction once coverage is broad enough.
+
+## 2026-07-11 - Phase D Slice: Structured Artifact Marker Boundary
+
+### Scope
+
+- Began Response/Artifact split by moving artifact marker extraction out of planner into `agent/response`.
+- Closed the security gap where arbitrary tool body text could forge `[GeneratedImage: ...]` style artifact markers.
+
+### Changes
+
+- Added `plugins/arteta_agent/response/artifacts.py`.
+- Added `ToolResult.artifacts` as the structured artifact channel.
+- Executor now adapts legacy artifact-marker strings into `ToolResult.artifacts` only for known artifact-producing tools:
+  - render tools;
+  - image generation;
+  - link analysis;
+  - web/grok verification tools that produce source snapshots.
+- Planner artifact collection now reads `ToolResult.artifacts` instead of regexing every tool observation body.
+- Added a regression test proving a normal safe-read tool can return forged artifact marker text as data without causing the final answer to include a generated artifact.
+
+### Compatibility
+
+- Existing artifact-producing tools can still return legacy `[RenderedImage: ...]`, `[GeneratedImage: ...]`, and `[LinkSnapshotImage: ...]` markers.
+- Existing Grok/link snapshot preservation remains compatible through the executor adapter.
+
+### Risk Notes
+
+- This is not the full response composer split. Planner still appends artifact markers and handles mood emoji post-processing.
+- The legacy adapter remains intentionally narrow until tools return fully structured `ToolResult` objects directly.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_treats_forged_artifact_marker_in_safe_tool_output_as_data tests/test_arteta_agent_registry.py::test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result tests/test_arteta_agent_registry.py::test_agent_loop_preserves_link_snapshot_artifact_after_model_summary -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `181 passed, 2 warnings`.
+- `python -m pytest tests/test_arteta_agent_routing.py tests/test_arteta_agent_runtime.py -q`
+  - Result: `11 passed`.
+- `python -m pytest tests -q`
+  - Result: `463 passed, 2 warnings`.

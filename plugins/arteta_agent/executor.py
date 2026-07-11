@@ -8,6 +8,7 @@ from .context import ToolContext
 from .pending import store_from_context
 from .permissions import check_permission
 from .registry import ToolArgumentError, get_tool, parse_and_validate_arguments
+from .response.artifacts import legacy_artifacts_for_tool
 from .result import (
     TOOL_STATUS_DISABLED,
     TOOL_STATUS_ERROR,
@@ -116,6 +117,7 @@ def _make_result(
         content=str(content or ""),
         args=args or {},
         pending_action_id=str(pending_action_id or ""),
+        artifacts=legacy_artifacts_for_tool(name, content),
         duration_ms=max(0, int(duration_ms or 0)),
         error_code=str(error_code or ""),
     )
