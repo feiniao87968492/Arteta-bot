@@ -475,6 +475,46 @@ Verification after the fix:
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
 
+## 2026-07-11 - Phase D Slice: Planner Artifact Regex Cleanup
+
+### Scope
+
+- Removed remaining planner ownership of artifact marker regex/extraction.
+- Kept artifact trust on structured `ToolResult.artifacts` and response composer inputs.
+
+### Changes
+
+- Added a source regression proving `planner.py` no longer imports or defines artifact marker regex helpers.
+- Removed `ARTIFACT_MARKER_RE` / `extract_artifact_markers` imports from planner.
+- Deleted unreachable forced-tool fallback code that still tried to append artifact markers from plain tool result text.
+- Kept `_remember_artifact_markers(...)` because it only collects structured `ToolResult.artifacts`.
+
+### Compatibility
+
+- Existing artifact-producing tools still work through executor legacy adapters and structured `ToolResult.artifacts`.
+- Forged artifact markers in arbitrary safe-read tool bodies remain normal text data and are not appended as artifacts.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_response.py::test_planner_no_longer_owns_artifact_marker_extraction_protocol -q`
+  - RED before fix: failed because planner still contained `ARTIFACT_MARKER_RE`.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_response.py -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_treats_forged_artifact_marker_in_safe_tool_output_as_data tests/test_arteta_agent_registry.py::test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result tests/test_arteta_agent_registry.py::test_agent_loop_preserves_link_snapshot_artifact_after_model_summary tests/test_arteta_agent_registry.py::test_agent_loop_forces_document_tool_when_document_is_present -q`
+  - Result: `4 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `497 passed, 2 warnings`.
+
+### Remaining
+
+- Move more response-oriented helper wrappers out of planner only after source and behavior tests cover their public compatibility.
+- `arteta_chat.py` still has legacy artifact marker parsing for outer QQ message rendering; that is outside the Agent planner boundary and should be audited separately.
+
 ## 2026-07-11 - Phase D Slice: Mood Emoji Response Finalizer
 
 ### Scope

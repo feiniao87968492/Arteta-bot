@@ -32,3 +32,14 @@ def test_response_composer_prefixes_grok_marker_from_trace():
     result = compose_final_response("answer", trace=trace)
 
     assert result == "[grok]\nanswer"
+
+
+def test_planner_no_longer_owns_artifact_marker_extraction_protocol():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "ARTIFACT_MARKER_RE" not in source
+    assert "extract_artifact_markers" not in source
+    assert "_append_missing_artifact_markers" not in source
+    assert "_extract_artifact_markers" not in source

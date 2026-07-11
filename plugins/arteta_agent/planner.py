@@ -14,7 +14,6 @@ from .providers.openai_compatible import (
     parse_chat_response,
 )
 from .registry import build_openai_tools, get_tool, list_enabled_tools
-from .response.artifacts import ARTIFACT_MARKER_RE, extract_artifact_markers
 from .response.composer import compose_final_response, prefix_trace_markers, trace_has_marker
 from .response.mood import (
     detect_forced_mood_emoji_args as response_detect_forced_mood_emoji_args,
@@ -36,7 +35,6 @@ from .tool_policy import (
 from .trace import format_trace_block, record_round
 
 
-AGENT_IMAGE_ARTIFACT_RE = ARTIFACT_MARKER_RE
 PENDING_ACTION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12,}$")
 
 
@@ -484,18 +482,6 @@ def _looks_like_recent_public_match_question(text: str) -> bool:
         and any(marker in lowered for marker in MATCH_CONTEXT_MARKERS)
         and any(marker in lowered for marker in TEAM_PAIR_MARKERS)
     )
-
-
-def _extract_artifact_markers(text: str) -> list:
-    return extract_artifact_markers(text)
-
-
-def _append_missing_artifact_markers(answer: str, tool_result: str) -> str:
-    output = str(answer or "").strip()
-    for marker in _extract_artifact_markers(tool_result):
-        if marker not in output:
-            output = "{0}\n{1}".format(output, marker).strip()
-    return output
 
 
 def _forced_tool_followup_instruction(tool_name: str) -> dict:
@@ -1263,47 +1249,6 @@ async def _answer_from_forced_tool_result(
         max_total_observation_chars=max_total_observation_chars,
         initial_tool_calls=[tool_call],
     )
-    forced_result = await execute_tool_call_result(tool_call, ctx)
-    tool_result = forced_result.content
-    _remember_artifact_markers(tool_artifact_markers, tool_result)
-    if forced_result.status == TOOL_STATUS_PERMISSION_REQUIRED:
-        return tool_result
-    answer_state = list(state)
-    answer_state.append(_forced_tool_followup_instruction(tool_name))
-    answer_state.append(_forced_tool_call_history_message(tool_call))
-    answer_state.append({
-        "role": "tool",
-        "tool_call_id": tool_call["id"],
-        "content": tool_result,
-    })
-    answer_disabled_tools = _forced_followup_disabled_tools(
-        disabled_tools,
-        schema_excluded_tools,
-        tool_name,
-    )
-    content = await _run_loop_from_state(
-        answer_state,
-        ctx,
-        model,
-        api_key,
-        api_url,
-        allowed_permissions,
-        answer_disabled_tools,
-        disabled_tools,
-        max_rounds,
-        trace,
-        temperature,
-        request_timeout,
-        tool_artifact_markers,
-        max_tool_calls=max_tool_calls,
-        max_same_tool_call_repeats=max_same_tool_call_repeats,
-        max_total_observation_chars=max_total_observation_chars,
-    )
-    if not content:
-        content = str(tool_result or "").strip()
-    return _append_missing_artifact_markers(content, tool_result)
-
-
 async def _run_forced_tool_direct(
     state,
     ctx: ToolContext,
