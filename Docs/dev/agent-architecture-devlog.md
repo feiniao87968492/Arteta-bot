@@ -117,5 +117,24 @@ Verification after the fix:
 
 ### Remaining
 
-- Deploy this Phase B slice to ECS and run smoke checks.
 - Continue Phase C by replacing mutually-exclusive forced routing with structured `RouteDecision` / multi-intent plans.
+
+### ECS Deployment
+
+- Commit deployed: `d5b2dae refactor: introduce agent runtime state`.
+- Deployment archive: `/tmp/arteta_phase_b_runtime_d5b2dae.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_b_runtime_20260711184516`.
+- Remote `py_compile` passed for `planner.py` and `plugins/arteta_agent/runtime/*.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python -m pytest tests/test_arteta_agent_runtime.py -q`
+  - Result: not run on ECS because the production venv does not include `pytest` (`No module named pytest`).
+- Remote `py_compile` covered the deployed runtime files; local pytest remains the authoritative unit-test run for this slice.
