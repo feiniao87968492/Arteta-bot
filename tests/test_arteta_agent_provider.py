@@ -1,0 +1,131 @@
+import asyncio
+
+from plugins.arteta_agent.providers.http_client import (
+    close_shared_async_client,
+    get_shared_async_client,
+    set_shared_async_client_factory,
+)
+from plugins.arteta_agent.providers.openai_compatible import OpenAICompatibleProvider
+
+
+class FakeResponse:
+    status_code = 200
+    text = ""
+    headers = {"content-type": "application/json"}
+
+    def __init__(self, message):
+        self.message = message
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {"choices": [{"message": self.message}]}
+
+
+class FakeClient:
+    def __init__(self, calls, message):
+        self.calls = calls
+        self.message = message
+        self.closed = False
+
+    async def post(self, url, headers=None, json=None, timeout=None):
+        self.calls.append((url, headers or {}, json or {}, timeout))
+        return FakeResponse(self.message)
+
+    async def aclose(self):
+        self.closed = True
+
+
+def test_shared_async_client_is_reused_and_closed():
+    created = []
+
+    def factory():
+        client = FakeClient([], {"role": "assistant", "content": "ok"})
+        created.append(client)
+        return client
+
+    set_shared_async_client_factory(factory)
+    try:
+        first = get_shared_async_client()
+        second = get_shared_async_client()
+
+        assert first is second
+        assert len(created) == 1
+
+        asyncio.run(close_shared_async_client())
+
+        assert first.closed is True
+        third = get_shared_async_client()
+        assert third is not first
+        assert len(created) == 2
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)
+
+
+def test_openai_compatible_provider_preserves_tool_calls_and_reasoning_content():
+    calls = []
+    client = FakeClient(
+        calls,
+        {
+            "role": "assistant",
+            "content": "answer",
+            "reasoning_content": "thinking",
+            "tool_calls": [{
+                "id": "call-1",
+                "function": {"name": "sample", "arguments": "{}"},
+            }],
+        },
+    )
+    provider = OpenAICompatibleProvider(client=client, api_url="https://provider.example/v1/chat/completions")
+
+    result = asyncio.run(provider.chat(
+        messages=[{"role": "user", "content": "hi"}],
+        model="model",
+        api_key="key",
+        tools=[{"type": "function", "function": {"name": "sample", "parameters": {"type": "object"}}}],
+        temperature=0.2,
+    ))
+
+    assert result["role"] == "assistant"
+    assert result["content"] == "answer"
+    assert result["reasoning_content"] == "thinking"
+    assert result["tool_calls"][0]["function"]["name"] == "sample"
+    assert calls[0][0] == "https://provider.example/v1/chat/completions"
+    assert calls[0][1]["Authorization"] == "Bearer key"
+    assert calls[0][2]["temperature"] == 0.2
+    assert calls[0][2]["tool_choice"] == "auto"
+    assert calls[0][3] == 80.0
+
+
+def test_planner_call_llm_with_tools_reuses_shared_client():
+    from plugins.arteta_agent import planner
+
+    created = []
+
+    def factory():
+        client = FakeClient([], {"role": "assistant", "content": "ok"})
+        created.append(client)
+        return client
+
+    set_shared_async_client_factory(factory)
+    try:
+        first = asyncio.run(planner.call_llm_with_tools(
+            [{"role": "user", "content": "one"}],
+            "model",
+            "key",
+        ))
+        second = asyncio.run(planner.call_llm_with_tools(
+            [{"role": "user", "content": "two"}],
+            "model",
+            "key",
+        ))
+
+        assert first == {"role": "assistant", "content": "ok"}
+        assert second == {"role": "assistant", "content": "ok"}
+        assert len(created) == 1
+        assert len(created[0].calls) == 2
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)

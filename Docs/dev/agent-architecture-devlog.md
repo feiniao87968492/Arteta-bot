@@ -412,3 +412,55 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase E Slice: OpenAI-Compatible Provider Adapter
+
+### Scope
+
+- Began the Provider split by moving planner's direct OpenAI-compatible HTTP request/response handling behind provider modules.
+- Added a shared AsyncClient lifecycle boundary for the main agent provider path.
+- Preserved the public `call_llm_with_tools(...)` function because tests, verifier smoke, and existing monkeypatch fixtures still use it as the compatibility seam.
+
+### Changes
+
+- Added `plugins/arteta_agent/providers/http_client.py`.
+- Added `plugins/arteta_agent/providers/openai_compatible.py`.
+- Added `OpenAICompatibleProvider`, `ProviderCapabilities`, `ProviderResponseError`, and `parse_chat_response(...)`.
+- Planner now uses `OpenAICompatibleProvider(client=get_shared_async_client(), ...)` instead of creating `httpx.AsyncClient` inside `call_llm_with_tools`.
+- Per-request timeout is passed to provider `.chat(...)`; the shared client itself is no longer recreated per request.
+- Existing provider response parsing behavior remains:
+  - content and role are returned;
+  - `tool_calls` are preserved;
+  - `reasoning_content` is preserved for DeepSeek/OpenAI-compatible thinking-mode compatibility;
+  - non-JSON and malformed responses raise `ProviderResponseError`.
+
+### Compatibility
+
+- Existing `run_agent_loop` and `call_llm_with_tools` signatures are unchanged.
+- Existing tool schema exposure and `tool_choice=auto` behavior are unchanged.
+- The old `planner.ProviderResponseError` import path remains valid by re-exporting the provider error class.
+- Tests that previously monkeypatched `planner.httpx.AsyncClient` now inject through the shared client factory, matching the new provider boundary.
+
+### Risk Notes
+
+- This is only the first Provider slice. Activation, web tools, image/vision, daily/weekly, and dashboard algorithm calls still create their own HTTP clients.
+- Retry/backoff, provider capability branching beyond the current flags, and application shutdown hook integration remain for later slices.
+- The shared client default currently uses `httpx.AsyncClient()` and per-request timeout on `.post(...)`, which preserves request behavior while enabling reuse.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_provider.py -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_planner_uses_chat_temperature tests/test_arteta_agent_registry.py::test_agent_planner_uses_configurable_llm_timeout tests/test_arteta_agent_registry.py::test_agent_planner_omits_tool_fields_when_no_tools_are_visible tests/test_arteta_agent_registry.py::test_agent_planner_reports_non_json_provider_response -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `472 passed, 2 warnings`.
+
+### Remaining
+
+- Wire activation to the same provider/client infrastructure.
+- Add application shutdown integration for `close_shared_async_client()`.
+- Add retry/backoff and capability-based message encoding tests.
+- Continue removing direct provider HTTP code from planner and other business modules.

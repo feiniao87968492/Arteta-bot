@@ -2,13 +2,17 @@ import json
 import inspect
 import re
 
-import httpx
-
 from . import behavior_policy
 from .context import ToolContext
 from .executor import execute_tool_call, execute_tool_call_result
 from .pending import store_from_context
 from .planning.plan_builder import build_plan
+from .providers.http_client import get_shared_async_client
+from .providers.openai_compatible import (
+    OpenAICompatibleProvider,
+    ProviderResponseError,
+    parse_chat_response,
+)
 from .registry import build_openai_tools, get_tool, list_enabled_tools
 from .response.artifacts import ARTIFACT_MARKER_RE, extract_artifact_markers
 from .response.composer import compose_final_response, prefix_trace_markers, trace_has_marker
@@ -36,38 +40,8 @@ AGENT_IMAGE_ARTIFACT_RE = ARTIFACT_MARKER_RE
 PENDING_ACTION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12,}$")
 
 
-class ProviderResponseError(Exception):
-    """Raised when an LLM provider response cannot be interpreted safely."""
-
-
 def _parse_chat_response(resp, api_url: str):
-    try:
-        data = resp.json()
-    except json.JSONDecodeError as exc:
-        content_type = resp.headers.get("content-type", "unknown")
-        snippet = (getattr(resp, "text", "") or "").strip().replace("\n", " ")
-        if len(snippet) > 160:
-            snippet = snippet[:157] + "..."
-        if not snippet:
-            snippet = "<empty>"
-        raise ProviderResponseError(
-            "LLM provider returned non-JSON response from {0} (HTTP {1}, content-type={2}, body={3})".format(
-                api_url,
-                getattr(resp, "status_code", "unknown"),
-                content_type,
-                snippet,
-            )
-        ) from exc
-
-    try:
-        return data["choices"][0]["message"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ProviderResponseError(
-            "LLM provider returned malformed JSON from {0} (HTTP {1})".format(
-                api_url,
-                getattr(resp, "status_code", "unknown"),
-            )
-        ) from exc
+    return parse_chat_response(resp, api_url)
 
 
 TRACE_REQUEST_MARKERS = (
@@ -959,28 +933,18 @@ async def call_llm_with_tools(messages, model: str, api_key: str, api_url: str =
     # The planner exposes registered tool schemas to the model, but all actual
     # execution still flows through execute_tool_call below.
     tools = build_openai_tools(include_permissions=allowed_permissions, exclude_names=set(disabled_tools or []))
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-    }
-    if tools:
-        payload["tools"] = tools
-        payload["tool_choice"] = "auto"
-    async with httpx.AsyncClient(timeout=float(request_timeout or 80.0)) as client:
-        resp = await client.post(
-            api_url or DEFAULT_CHAT_API_URL,
-            headers={"Authorization": "Bearer {0}".format(api_key)},
-            json=payload,
-        )
-        resp.raise_for_status()
-        msg = _parse_chat_response(resp, api_url or DEFAULT_CHAT_API_URL)
-        out = {"role": msg["role"], "content": msg.get("content", "")}
-        if msg.get("tool_calls"):
-            out["tool_calls"] = msg["tool_calls"]
-        if msg.get("reasoning_content"):
-            out["reasoning_content"] = msg["reasoning_content"]
-        return out
+    provider = OpenAICompatibleProvider(
+        client=get_shared_async_client(),
+        api_url=api_url or DEFAULT_CHAT_API_URL,
+    )
+    return await provider.chat(
+        messages=messages,
+        model=model,
+        api_key=api_key,
+        tools=tools,
+        temperature=temperature,
+        timeout=float(request_timeout or 80.0),
+    )
 
 
 async def _call_llm_with_policy(state, model: str, api_key: str, api_url: str, allowed_permissions, disabled_tools, temperature: float, request_timeout: float = 80.0):

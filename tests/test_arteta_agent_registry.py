@@ -159,6 +159,7 @@ def test_agent_package_structure_matches_plan():
 
 def test_agent_planner_uses_chat_temperature(monkeypatch):
     from plugins.arteta_agent import planner
+    from plugins.arteta_agent.providers.http_client import close_shared_async_client, set_shared_async_client_factory
 
     captured = {}
 
@@ -170,27 +171,22 @@ def test_agent_planner_uses_chat_temperature(monkeypatch):
             return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
     class FakeAsyncClient:
-        def __init__(self, timeout):
-            self.timeout = timeout
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-        async def post(self, url, headers, json):
+        async def post(self, url, headers, json, timeout=None):
             captured["json"] = json
             return FakeResponse()
 
-    monkeypatch.setattr(planner.httpx, "AsyncClient", FakeAsyncClient)
+    set_shared_async_client_factory(lambda: FakeAsyncClient())
 
-    result = asyncio.run(planner.call_llm_with_tools(
-        [{"role": "user", "content": "hi"}],
-        "model",
-        "key",
-        temperature=0.9,
-    ))
+    try:
+        result = asyncio.run(planner.call_llm_with_tools(
+            [{"role": "user", "content": "hi"}],
+            "model",
+            "key",
+            temperature=0.9,
+        ))
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)
 
     assert result == {"role": "assistant", "content": "ok"}
     assert captured["json"]["temperature"] == 0.9
@@ -198,6 +194,7 @@ def test_agent_planner_uses_chat_temperature(monkeypatch):
 
 def test_agent_planner_uses_configurable_llm_timeout(monkeypatch):
     from plugins.arteta_agent import planner
+    from plugins.arteta_agent.providers.http_client import close_shared_async_client, set_shared_async_client_factory
 
     captured = {}
 
@@ -209,26 +206,22 @@ def test_agent_planner_uses_configurable_llm_timeout(monkeypatch):
             return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
     class FakeAsyncClient:
-        def __init__(self, timeout):
+        async def post(self, url, headers, json, timeout=None):
             captured["timeout"] = timeout
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-        async def post(self, url, headers, json):
             return FakeResponse()
 
-    monkeypatch.setattr(planner.httpx, "AsyncClient", FakeAsyncClient)
+    set_shared_async_client_factory(lambda: FakeAsyncClient())
 
-    result = asyncio.run(planner.call_llm_with_tools(
-        [{"role": "user", "content": "hi"}],
-        "model",
-        "key",
-        request_timeout=170.0,
-    ))
+    try:
+        result = asyncio.run(planner.call_llm_with_tools(
+            [{"role": "user", "content": "hi"}],
+            "model",
+            "key",
+            request_timeout=170.0,
+        ))
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)
 
     assert result == {"role": "assistant", "content": "ok"}
     assert captured["timeout"] == 170.0
@@ -236,6 +229,7 @@ def test_agent_planner_uses_configurable_llm_timeout(monkeypatch):
 
 def test_agent_planner_omits_tool_fields_when_no_tools_are_visible(monkeypatch):
     from plugins.arteta_agent import planner
+    from plugins.arteta_agent.providers.http_client import close_shared_async_client, set_shared_async_client_factory
 
     clear_registry()
     captured = {}
@@ -248,26 +242,21 @@ def test_agent_planner_omits_tool_fields_when_no_tools_are_visible(monkeypatch):
             return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
     class FakeAsyncClient:
-        def __init__(self, timeout):
-            self.timeout = timeout
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-        async def post(self, url, headers, json):
+        async def post(self, url, headers, json, timeout=None):
             captured["json"] = json
             return FakeResponse()
 
-    monkeypatch.setattr(planner.httpx, "AsyncClient", FakeAsyncClient)
+    set_shared_async_client_factory(lambda: FakeAsyncClient())
 
-    result = asyncio.run(planner.call_llm_with_tools(
-        [{"role": "user", "content": "hi"}],
-        "model",
-        "key",
-    ))
+    try:
+        result = asyncio.run(planner.call_llm_with_tools(
+            [{"role": "user", "content": "hi"}],
+            "model",
+            "key",
+        ))
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)
 
     assert result == {"role": "assistant", "content": "ok"}
     assert "tools" not in captured["json"]
@@ -276,6 +265,7 @@ def test_agent_planner_omits_tool_fields_when_no_tools_are_visible(monkeypatch):
 
 def test_agent_planner_reports_non_json_provider_response(monkeypatch):
     from plugins.arteta_agent import planner
+    from plugins.arteta_agent.providers.http_client import close_shared_async_client, set_shared_async_client_factory
 
     class FakeResponse:
         status_code = 200
@@ -289,27 +279,22 @@ def test_agent_planner_reports_non_json_provider_response(monkeypatch):
             raise json.JSONDecodeError("Expecting value", "", 0)
 
     class FakeAsyncClient:
-        def __init__(self, timeout):
-            self.timeout = timeout
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-        async def post(self, url, headers, json):
+        async def post(self, url, headers, json, timeout=None):
             return FakeResponse()
 
-    monkeypatch.setattr(planner.httpx, "AsyncClient", FakeAsyncClient)
+    set_shared_async_client_factory(lambda: FakeAsyncClient())
 
-    with pytest.raises(planner.ProviderResponseError) as exc_info:
-        asyncio.run(planner.call_llm_with_tools(
-            [{"role": "user", "content": "hi"}],
-            "model",
-            "key",
-            api_url="https://provider.example/v1/chat/completions",
-        ))
+    try:
+        with pytest.raises(planner.ProviderResponseError) as exc_info:
+            asyncio.run(planner.call_llm_with_tools(
+                [{"role": "user", "content": "hi"}],
+                "model",
+                "key",
+                api_url="https://provider.example/v1/chat/completions",
+            ))
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)
 
     message = str(exc_info.value)
     assert "non-JSON" in message
