@@ -869,3 +869,31 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase E Slice: Provider Client Shutdown Hook
+
+### Scope
+
+- Connected the shared OpenAI-compatible provider HTTP client to the NoneBot application shutdown lifecycle.
+
+### Changes
+
+- `bot.py` imports `close_shared_async_client`.
+- The NoneBot driver now registers `driver.on_shutdown(close_shared_async_client)` after initialization.
+
+### Compatibility
+
+- `run_agent_loop` and provider APIs are unchanged.
+- The hook only closes the shared client on application shutdown; tests still use `set_shared_async_client_factory(...)` injection.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_provider.py::test_bot_entry_registers_provider_client_shutdown_hook -q`
+  - RED before fix: failed because `bot.py` did not reference `close_shared_async_client`.
+  - GREEN after fix: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_provider.py -q`
+  - Result: `6 passed`.
+- `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
+  - Result: `190 passed, 2 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.

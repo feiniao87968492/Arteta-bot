@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from plugins.arteta_agent.providers.http_client import (
     close_shared_async_client,
@@ -182,3 +183,10 @@ def test_activation_llm_uses_shared_provider_client():
     finally:
         asyncio.run(close_shared_async_client())
         set_shared_async_client_factory(None)
+
+
+def test_bot_entry_registers_provider_client_shutdown_hook():
+    source = Path("bot.py").read_text(encoding="utf-8")
+
+    assert "close_shared_async_client" in source
+    assert "driver.on_shutdown(close_shared_async_client)" in source
