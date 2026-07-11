@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, Set
 
@@ -81,6 +82,151 @@ def _save_policy(data: Dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def _sqlite_path() -> Path:
+    configured = os.environ.get("ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH")
+    if configured:
+        return Path(configured)
+    return Path("")
+
+
+def _use_sqlite_store() -> bool:
+    return bool(os.environ.get("ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH"))
+
+
+def _connect_sqlite():
+    path = _sqlite_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=30.0, isolation_level=None)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS behavior_policies (
+            group_id TEXT NOT NULL,
+            policy_key TEXT NOT NULL,
+            value_json TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            source TEXT NOT NULL,
+            remaining_turns INTEGER NULL,
+            PRIMARY KEY (group_id, policy_key)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS behavior_phrase_styles (
+            group_id TEXT NOT NULL,
+            phrase TEXT NOT NULL,
+            value_json TEXT NOT NULL,
+            PRIMARY KEY (group_id, phrase)
+        )
+        """
+    )
+    return conn
+
+
+def _sqlite_has_data(conn) -> bool:
+    policy_count = conn.execute("SELECT COUNT(*) FROM behavior_policies").fetchone()[0]
+    phrase_count = conn.execute("SELECT COUNT(*) FROM behavior_phrase_styles").fetchone()[0]
+    return bool(policy_count or phrase_count)
+
+
+def _backup_legacy_policy_file(path: Path) -> None:
+    backup = path.with_name(path.name + ".bak")
+    if not backup.exists():
+        backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def _migrate_json_to_sqlite_if_needed(conn) -> None:
+    path = _policy_path()
+    if not path.exists() or _sqlite_has_data(conn):
+        return
+    data = _load_policy()
+    groups = data.get("groups", {})
+    if not isinstance(groups, dict):
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if _sqlite_has_data(conn):
+            conn.execute("COMMIT")
+            return
+        for group_id, group in groups.items():
+            if not isinstance(group, dict):
+                continue
+            policies = group.get("policies", {})
+            if isinstance(policies, dict):
+                for key, item in policies.items():
+                    if not isinstance(item, dict):
+                        continue
+                    value_json = json.dumps(item.get("value"), ensure_ascii=False, sort_keys=True)
+                    remaining = item.get("ttl_turns")
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO behavior_policies
+                        (group_id, policy_key, value_json, mode, reason, source, remaining_turns)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            _group_id(group_id),
+                            str(key),
+                            value_json,
+                            str(item.get("mode") or "soft"),
+                            str(item.get("reason") or ""),
+                            str(item.get("source") or "agent"),
+                            int(remaining) if remaining is not None else None,
+                        ),
+                    )
+            phrase_styles = group.get("phrase_styles", [])
+            if isinstance(phrase_styles, list):
+                for rule in phrase_styles:
+                    if not isinstance(rule, dict) or not rule.get("phrase"):
+                        continue
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO behavior_phrase_styles
+                        (group_id, phrase, value_json)
+                        VALUES (?, ?, ?)
+                        """,
+                        (
+                            _group_id(group_id),
+                            str(rule.get("phrase")),
+                            json.dumps(rule, ensure_ascii=False, sort_keys=True),
+                        ),
+                    )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    _backup_legacy_policy_file(path)
+
+
+def _with_sqlite():
+    conn = _connect_sqlite()
+    _migrate_json_to_sqlite_if_needed(conn)
+    return conn
+
+
+def _policy_item_from_sqlite_row(row) -> Dict[str, Any]:
+    if not row:
+        return {}
+    key, value_json, mode, reason, source, remaining_turns = row
+    try:
+        value = json.loads(value_json)
+    except Exception:
+        value = None
+    item = {
+        "key": str(key),
+        "value": value,
+        "mode": str(mode or "soft"),
+        "reason": str(reason or ""),
+        "source": str(source or "agent"),
+    }
+    if remaining_turns is not None:
+        item["ttl_turns"] = int(remaining_turns)
+    return item
+
+
 def _group_id(group_id: str) -> str:
     return str(group_id or "global")
 
@@ -133,6 +279,34 @@ def set_group_policy(
     if ttl:
         item["ttl_turns"] = ttl
 
+    if _use_sqlite_store():
+        conn = _with_sqlite()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO behavior_policies
+                (group_id, policy_key, value_json, mode, reason, source, remaining_turns)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _group_id(group_id),
+                    safe_key,
+                    json.dumps(value, ensure_ascii=False, sort_keys=True),
+                    item["mode"],
+                    item["reason"],
+                    item["source"],
+                    ttl if ttl else None,
+                ),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+        return dict(item)
+
     data = _load_policy()
     group = data.setdefault("groups", {}).setdefault(_group_id(group_id), {})
     group.setdefault("policies", {})[safe_key] = item
@@ -141,6 +315,21 @@ def set_group_policy(
 
 
 def get_group_policy(group_id: str, key: str) -> Dict[str, Any]:
+    if _use_sqlite_store():
+        conn = _with_sqlite()
+        try:
+            row = conn.execute(
+                """
+                SELECT policy_key, value_json, mode, reason, source, remaining_turns
+                FROM behavior_policies
+                WHERE group_id=? AND policy_key=? AND (remaining_turns IS NULL OR remaining_turns > 0)
+                """,
+                (_group_id(group_id), str(key or "")),
+            ).fetchone()
+            return _policy_item_from_sqlite_row(row)
+        finally:
+            conn.close()
+
     data = _load_policy()
     item = (
         data.get("groups", {})
@@ -156,6 +345,27 @@ def get_group_policy(group_id: str, key: str) -> Dict[str, Any]:
 
 
 def list_group_policies(group_id: str) -> Dict[str, Dict[str, Any]]:
+    if _use_sqlite_store():
+        conn = _with_sqlite()
+        try:
+            rows = conn.execute(
+                """
+                SELECT policy_key, value_json, mode, reason, source, remaining_turns
+                FROM behavior_policies
+                WHERE group_id=? AND (remaining_turns IS NULL OR remaining_turns > 0)
+                ORDER BY policy_key
+                """,
+                (_group_id(group_id),),
+            ).fetchall()
+            result = {}
+            for row in rows:
+                item = _policy_item_from_sqlite_row(row)
+                if item:
+                    result[item["key"]] = item
+            return result
+        finally:
+            conn.close()
+
     data = _load_policy()
     policies = data.get("groups", {}).get(_group_id(group_id), {}).get("policies", {})
     if not isinstance(policies, dict):
@@ -168,6 +378,22 @@ def list_group_policies(group_id: str) -> Dict[str, Dict[str, Any]]:
 
 
 def delete_group_policy(group_id: str, key: str) -> bool:
+    if _use_sqlite_store():
+        conn = _with_sqlite()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.execute(
+                "DELETE FROM behavior_policies WHERE group_id=? AND policy_key=?",
+                (_group_id(group_id), str(key or "")),
+            )
+            conn.execute("COMMIT")
+            return bool(cur.rowcount)
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+
     data = _load_policy()
     group = data.get("groups", {}).get(_group_id(group_id), {})
     policies = group.get("policies", {})
@@ -179,6 +405,33 @@ def delete_group_policy(group_id: str, key: str) -> bool:
 
 
 def consume_group_policy_turn(group_id: str) -> None:
+    if _use_sqlite_store():
+        conn = _with_sqlite()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                DELETE FROM behavior_policies
+                WHERE group_id=? AND remaining_turns IS NOT NULL AND remaining_turns <= 1
+                """,
+                (_group_id(group_id),),
+            )
+            conn.execute(
+                """
+                UPDATE behavior_policies
+                SET remaining_turns = remaining_turns - 1
+                WHERE group_id=? AND remaining_turns IS NOT NULL AND remaining_turns > 1
+                """,
+                (_group_id(group_id),),
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+        return
+
     data = _load_policy()
     group = data.get("groups", {}).get(_group_id(group_id), {})
     policies = group.get("policies", {})
@@ -220,6 +473,53 @@ def set_phrase_style(group_id: str, phrase: str, value: Dict[str, Any], reason: 
     phrase = str(phrase or "").strip()
     if not phrase:
         raise ValueError("empty behavior policy phrase")
+    if _use_sqlite_store():
+        conn = _with_sqlite()
+        try:
+            row = conn.execute(
+                """
+                SELECT value_json FROM behavior_phrase_styles
+                WHERE group_id=? AND phrase=?
+                """,
+                (_group_id(group_id), phrase),
+            ).fetchone()
+            if row:
+                try:
+                    rule = json.loads(row[0])
+                except Exception:
+                    rule = {}
+            else:
+                rule = {}
+            if not isinstance(rule, dict):
+                rule = {}
+            rule["phrase"] = phrase
+            rule.update(dict(value or {}))
+            if reason:
+                rule["reason"] = str(reason)
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO behavior_phrase_styles
+                (group_id, phrase, value_json)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    _group_id(group_id),
+                    phrase,
+                    json.dumps(rule, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            conn.execute("COMMIT")
+            return dict(rule)
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+
     data = _load_policy()
     group = data.setdefault("groups", {}).setdefault(_group_id(group_id), {})
     rules = group.setdefault("phrase_styles", [])
@@ -238,6 +538,29 @@ def set_phrase_style(group_id: str, phrase: str, value: Dict[str, Any], reason: 
 
 
 def get_phrase_styles(group_id: str):
+    if _use_sqlite_store():
+        conn = _with_sqlite()
+        try:
+            rows = conn.execute(
+                """
+                SELECT value_json FROM behavior_phrase_styles
+                WHERE group_id=?
+                ORDER BY phrase
+                """,
+                (_group_id(group_id),),
+            ).fetchall()
+            result = []
+            for row in rows:
+                try:
+                    value = json.loads(row[0])
+                except Exception:
+                    value = {}
+                if isinstance(value, dict):
+                    result.append(value)
+            return result
+        finally:
+            conn.close()
+
     data = _load_policy()
     rules = data.get("groups", {}).get(_group_id(group_id), {}).get("phrase_styles", [])
     return list(rules) if isinstance(rules, list) else []

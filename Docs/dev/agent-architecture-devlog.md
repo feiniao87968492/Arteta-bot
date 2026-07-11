@@ -550,3 +550,57 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-11 - Phase F Slice: SQLite Behavior Policy Store
+
+### Scope
+
+- Added a SQLite-backed behavior policy store path while preserving the existing behavior-policy function API.
+- Kept JSON storage as fallback when `ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH` is not set, reducing deployment risk for the first slice.
+- Implemented one-time legacy JSON import into SQLite when the SQLite database is empty.
+
+### Changes
+
+- `plugins/arteta_agent/behavior_policy.py` now supports `ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH`.
+- SQLite tables:
+  - `behavior_policies`;
+  - `behavior_phrase_styles`.
+- SQLite policy writes use `BEGIN IMMEDIATE` transactions.
+- TTL semantics:
+  - `remaining_turns IS NULL` represents a permanent policy;
+  - `consume_group_policy_turn(...)` decrements only finite TTL policies;
+  - policies with one remaining turn are removed on consume;
+  - permanent route/render/emoji policies are not decremented.
+- Legacy JSON migration:
+  - imports policies and phrase styles only when SQLite tables are empty;
+  - writes a `.bak` copy of the JSON file after successful import;
+  - does not re-import once SQLite has data.
+
+### Compatibility
+
+- Existing `set_group_policy`, `get_group_policy`, `list_group_policies`, `delete_group_policy`, `consume_group_policy_turn`, render preference, phrase style, and tool disabled APIs are unchanged.
+- Existing tests that set only `ARTETA_AGENT_BEHAVIOR_POLICY_PATH`, `ARTETA_AGENT_UI_PREFS_PATH`, or `ARTETA_AGENT_TOOL_POLICY_PATH` still use JSON fallback.
+- SQLite can be enabled independently by setting `ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH`.
+
+### Risk Notes
+
+- This is not yet the final production migration: ECS has not been switched to SQLite by environment variable in this slice.
+- Concurrency is improved for SQLite paths through transactions and WAL, but a dedicated concurrent update stress test is still pending.
+- Long-term dual write is not implemented; JSON is fallback/import source only.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_behavior_policy_store.py -q`
+  - Result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_behavior_policy_store.py tests/test_arteta_agent_registry.py::test_behavior_policy_persists_tool_blocks_and_consumes_ttl tests/test_arteta_agent_registry.py::test_behavior_policy_tools_update_and_show_group_policy tests/test_arteta_agent_registry.py::test_behavior_policy_tools_accept_route_preferences tests/test_arteta_agent_registry.py::test_ui_preferences_are_backed_by_behavior_policy tests/test_arteta_agent_registry.py::test_planner_turns_plain_emoji_ban_into_behavior_policy tests/test_arteta_agent_registry.py::test_agent_loop_uses_behavior_policy_route_for_public_current_questions -q`
+  - Result: `9 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `181 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `477 passed` plus existing Windows asyncio/proactor unclosed transport warnings printed after completion.
+
+### Remaining
+
+- Add explicit concurrent update/consume tests.
+- Enable SQLite behavior policy path in ECS deployment once migration backup behavior is accepted.
+- Remove JSON fallback after a stabilization period, or keep it read-only as an import path only.
