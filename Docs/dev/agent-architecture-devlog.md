@@ -1708,3 +1708,27 @@ Verification after the fix:
 
 - `planner.py` still contains legacy forced branches for document/link/web/science flows; migrate them one slice at a time after adding equivalent plan tests.
 - Continue reducing planner constants and helper logic only when a structured routing/planning/response owner exists.
+
+### ECS Deployment
+
+- Commit deployed: `5f56620 refactor: route memory preferences through agent plan`.
+- Deployment archive: `/tmp/arteta_phase_c_memory_plan_5f56620.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_memory_plan_20260712014408`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/planning/plan_builder.py`;
+  - `plugins/arteta_agent/routing/contextual_tools.py`;
+  - `plugins/arteta_agent/routing/heuristic_router.py`;
+  - `tests/test_arteta_agent_routing.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Memory Preference Plan Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
