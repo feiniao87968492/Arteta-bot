@@ -1918,3 +1918,27 @@ Verification after the fix:
 
 - `planner.py` still contains the direct science-tool forced branch.
 - Continue reducing planner-owned marker constants after science routing and contextual exposure are separated cleanly.
+
+### ECS Deployment
+
+- Commit deployed: `cafa288 refactor: route public current facts through agent plan`.
+- Deployment archive: `/tmp/arteta_phase_c_public_fact_plan_cafa288.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_public_fact_plan_20260712021555`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/planning/plan_builder.py`;
+  - `plugins/arteta_agent/routing/heuristic_router.py`;
+  - `tests/test_arteta_agent_registry.py`;
+  - `tests/test_arteta_agent_routing.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Public Current Fact Plan Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
