@@ -1773,3 +1773,26 @@ Verification after the fix:
 
 - `planner.py` still contains legacy forced branches for document, web verification, and science tools.
 - The document branch should be migrated separately because it has two argument modes: current-message document attachments and detected document URLs.
+
+### ECS Deployment
+
+- Commit deployed: `c78922a refactor: route link analysis through agent plan`.
+- Deployment archive: `/tmp/arteta_phase_c_link_plan_c78922a.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_link_plan_20260712015327`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/planner.py`;
+  - `plugins/arteta_agent/planning/plan_builder.py`;
+  - `plugins/arteta_agent/routing/heuristic_router.py`;
+  - `tests/test_arteta_agent_routing.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Link Analysis Plan Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
