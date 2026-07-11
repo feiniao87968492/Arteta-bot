@@ -2207,3 +2207,41 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Cleanup: Remove Unavailable Web Fallback Helper
+
+### Scope
+
+- Removed unused `_answer_after_unavailable_web_result(...)` from `planner.py`.
+- Removed unused `_web_verification_unavailable(...)` from `planner.py`.
+- Replaced the direct helper regression with a structure regression proving the planner no longer defines the unavailable-web fallback helper or its dynamic-data marker.
+
+### Compatibility and Safety
+
+- Production unavailable-web handling continues through the unified Runtime tool observation path.
+- There is no longer a special fallback helper that can construct a follow-up `system` message around failed web verification results.
+- Dynamic web/tool result content remains outside `system` messages in this path; unavailable web observations are handled as tool observations and final Runtime responses.
+- Existing X post unavailable degradation remains covered by `fetch_x_post` behavior and trace/runtime tests.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_registry.py::test_planner_no_longer_defines_unavailable_web_fallback_helper -q`
+  - RED before cleanup: failed because planner still defined the helper.
+- `python -m py_compile plugins\\arteta_agent\\planner.py tests\\test_arteta_agent_registry.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_planner_no_longer_defines_unavailable_web_fallback_helper tests/test_arteta_agent_registry.py::test_agent_loop_continues_answering_when_forced_web_verification_is_unavailable tests/test_arteta_agent_registry.py::test_trace_marks_x_post_unavailable_as_unavailable -q`
+  - Result: `3 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `31 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python -m pytest tests -q`
+  - Result: `522 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still owns behavior/tool-policy direct update branches that call `_run_forced_tool_direct(...)`.
+- `planner.py` still exposes provider compatibility entry points and provider call wrappers for legacy tests and callers.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this cleanup.
