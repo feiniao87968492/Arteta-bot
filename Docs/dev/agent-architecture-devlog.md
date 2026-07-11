@@ -531,3 +531,22 @@ Verification after the fix:
 - Add application shutdown integration for the shared provider client.
 - Continue migrating web tools and other LLM HTTP call sites where safe.
 - Add retry/backoff policy in the provider adapter.
+
+### ECS Deployment
+
+- Commit deployed: `a71aabf refactor: reuse provider client for activation`.
+- Deployment archive: `/tmp/arteta_phase_e_activation_a71aabf.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_e_activation_20260711203000`.
+- Remote `py_compile` passed for activation, provider adapter, and provider tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Activation Provider Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
