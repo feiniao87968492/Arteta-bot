@@ -637,6 +637,23 @@ Verification after the fix:
 - `python -m pytest tests -q`
   - Result: `498 passed, 2 warnings`.
 
+### ECS Deployment
+
+- Commit deployed: `0629235 refactor: remove planner mood wrapper dead code`.
+- Deployment archive: `/tmp/arteta_phase_d_mood_wrapper_cleanup_0629235.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_d_mood_wrapper_cleanup_20260712000927`.
+- Remote `py_compile` passed for `plugins/arteta_agent/planner.py` and `tests/test_arteta_agent_mood_response.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+
+### ECS Smoke After Planner Mood Wrapper Cleanup Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ### Remaining
 
 - Later planner-thinning passes can remove compatibility wrappers once no tests or external code import them directly.
