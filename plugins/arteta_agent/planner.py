@@ -6,7 +6,7 @@ from .audit import record_pending_confirmation_failure
 from .context import ToolContext
 from .executor import execute_tool_call, execute_tool_call_result
 from .pending import store_from_context
-from .planning.plan_builder import build_plan, build_public_current_fact_planned_call
+from .planning.plan_builder import build_plan
 from .providers.http_client import get_shared_async_client
 from .providers.openai_compatible import (
     OpenAICompatibleProvider,
@@ -446,37 +446,6 @@ def _forced_tool_call_history_message(tool_call: dict) -> dict:
         "role": "assistant",
         "content": "",
         "tool_calls": [tool_call],
-    }
-
-
-def detect_forced_web_verification_args(messages) -> dict:
-    text = _latest_user_content(messages).strip()
-    if not text:
-        return {}
-    lowered = text.lower()
-    if any(marker in lowered for marker in LOCAL_MEMORY_CONTEXT_MARKERS):
-        return {}
-    has_current_fact_marker = any(marker in lowered for marker in PUBLIC_CURRENT_FACT_MARKERS)
-    is_recent_match_question = _looks_like_recent_public_match_question(text)
-    if not has_current_fact_marker and not is_recent_match_question:
-        return {}
-    if not (
-        any(marker in lowered for marker in FOOTBALL_INTENT_MARKERS)
-        or any(marker in lowered for marker in WEB_INTENT_MARKERS)
-        or any(marker in lowered for marker in ("fifa", "uefa", "club", "team"))
-        or is_recent_match_question
-    ):
-        return {}
-
-    query = text
-    if "\u963f\u68ee\u7eb3" in text and "arsenal" not in lowered:
-        query = "{0} Arsenal".format(query)
-    if "\u8f6c\u4f1a" in text and "transfer" not in lowered:
-        query = "{0} transfer news".format(query)
-    return {
-        "query": query,
-        "freshness": "recent",
-        "max_results": 5,
     }
 
 
@@ -1099,7 +1068,12 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
         return compose_final_response(value, artifacts=tool_artifact_markers, trace=trace)
 
     route_decision = route_message(state, ctx)
-    initial_plan = build_plan(route_decision, ctx)
+    initial_plan = build_plan(
+        route_decision,
+        ctx,
+        disabled_tools=disabled_tools,
+        is_tool_available=lambda name: get_tool(name) is not None,
+    )
     planned_initial_calls = _initial_tool_calls_from_plan(initial_plan, disabled_tools)
     if planned_initial_calls and _should_execute_initial_plan(initial_plan, disabled_tools):
         initial_result = await _run_runtime_loop_from_state(
@@ -1128,42 +1102,6 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
         if initial_plan.constraints.get("direct_trace_response"):
             return finish(compose_trace_response(trace))
         return finish(initial_result)
-
-    forced_web_args = detect_forced_web_verification_args(state)
-    planned_web_call = build_public_current_fact_planned_call(
-        ctx,
-        forced_web_args,
-        disabled_tools=disabled_tools,
-        is_tool_available=lambda name: get_tool(name) is not None,
-    ) if forced_web_args else None
-    if planned_web_call:
-        tool_call = {
-            "id": "forced-{0}-1".format(planned_web_call.name.replace("_", "-")),
-            "type": "function",
-            "function": {
-                "name": planned_web_call.name,
-                "arguments": json.dumps(planned_web_call.arguments, ensure_ascii=False),
-            },
-        }
-        return finish(await _answer_from_forced_tool_result(
-            state,
-            ctx,
-            tool_call,
-            model,
-            api_key,
-            api_url,
-            allowed,
-            disabled_tools,
-            schema_excluded_tools,
-            max_rounds,
-            trace,
-            temperature,
-            tool_artifact_markers,
-            request_timeout,
-            max_tool_calls=max_tool_calls,
-            max_same_tool_call_repeats=max_same_tool_call_repeats,
-            max_total_observation_chars=max_total_observation_chars,
-        ))
 
     forced_science_tool = detect_forced_science_tool(state)
     if forced_science_tool and get_tool(forced_science_tool) and forced_science_tool not in disabled_tools:

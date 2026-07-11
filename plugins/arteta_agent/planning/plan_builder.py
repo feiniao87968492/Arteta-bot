@@ -68,7 +68,12 @@ def build_public_current_fact_planned_call(
     return None
 
 
-def _rewrite_public_current_fact_tools(decision: RouteDecision, ctx: ToolContext = None) -> list:
+def _rewrite_public_current_fact_tools(
+    decision: RouteDecision,
+    ctx: ToolContext = None,
+    disabled_tools=None,
+    is_tool_available=None,
+) -> list:
     has_current_fact = any(intent.name == "public_current_fact" for intent in decision.intents or [])
     if not has_current_fact:
         return list(decision.required_tools or [])
@@ -76,13 +81,23 @@ def _rewrite_public_current_fact_tools(decision: RouteDecision, ctx: ToolContext
     rewritten = []
     for planned in decision.required_tools or []:
         if planned.name in PUBLIC_CURRENT_FACT_TOOLS:
-            rewritten.append(build_public_current_fact_planned_call(ctx, planned.arguments) or planned)
+            rewritten.append(build_public_current_fact_planned_call(
+                ctx,
+                planned.arguments,
+                disabled_tools=disabled_tools,
+                is_tool_available=is_tool_available,
+            ) or planned)
         else:
             rewritten.append(planned)
     return rewritten
 
 
-def build_plan(decision: RouteDecision, ctx: ToolContext = None) -> AgentPlan:
+def build_plan(
+    decision: RouteDecision,
+    ctx: ToolContext = None,
+    disabled_tools=None,
+    is_tool_available=None,
+) -> AgentPlan:
     constraints = dict(decision.constraints or {})
     if any(intent.name == "public_current_fact" for intent in decision.intents or []):
         constraints["execute_single_required_tool"] = True
@@ -106,7 +121,12 @@ def build_plan(decision: RouteDecision, ctx: ToolContext = None) -> AgentPlan:
     ):
         constraints["execute_single_required_tool"] = True
     return AgentPlan(
-        required_tools=_rewrite_public_current_fact_tools(decision, ctx),
+        required_tools=_rewrite_public_current_fact_tools(
+            decision,
+            ctx,
+            disabled_tools=disabled_tools,
+            is_tool_available=is_tool_available,
+        ),
         excluded_tools=set(decision.excluded_tools or set()),
         constraints=constraints,
     )

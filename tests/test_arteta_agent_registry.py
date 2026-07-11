@@ -3106,13 +3106,13 @@ def test_agent_loop_falls_back_to_grok_when_route_policy_tool_is_unavailable(tmp
 
 
 def test_agent_loop_does_not_force_web_for_group_local_recent_context(monkeypatch):
-    from plugins.arteta_agent import planner
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
 
-    args = planner.detect_forced_web_verification_args([
-        {"role": "user", "content": "今天群里聊了什么"},
-    ])
+    decision = route_message([{"role": "user", "content": "今天群里聊了什么"}], make_context())
+    plan = build_plan(decision, make_context())
 
-    assert args == {}
+    assert all(call.name not in ("grok_search", "verify_recent_claim", "web_search") for call in plan.required_tools)
 
 
 def test_agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score(monkeypatch):
@@ -3180,7 +3180,8 @@ def test_agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score(monkey
 
 
 def test_agent_loop_does_not_force_web_for_casual_future_or_current_words():
-    from plugins.arteta_agent import planner
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
 
     for text in [
         "明天起床看梅西回家",
@@ -3188,9 +3189,9 @@ def test_agent_loop_does_not_force_web_for_casual_future_or_current_words():
         "今天心情不错，随便聊两句",
         "2026 这个数字放在标题里好看吗",
     ]:
-        assert planner.detect_forced_web_verification_args([
-            {"role": "user", "content": text},
-        ]) == {}
+        decision = route_message([{"role": "user", "content": text}], make_context())
+        plan = build_plan(decision, make_context())
+        assert all(call.name not in ("grok_search", "verify_recent_claim", "web_search") for call in plan.required_tools)
 
 
 def test_agent_loop_continues_answering_when_forced_web_verification_is_unavailable(monkeypatch):

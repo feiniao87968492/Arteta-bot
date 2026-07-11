@@ -81,6 +81,63 @@ FOOTBALL_ASCII_MARKERS = (
     "game",
 )
 
+RECENT_MATCH_MARKERS = (
+    "recent match",
+    "latest match",
+    "last match",
+    "previous match",
+    "最近一场",
+    "最近的一场",
+    "上一场",
+    "上场",
+    "近期",
+)
+MATCH_CONTEXT_MARKERS = (
+    "match",
+    "game",
+    "fixture",
+    "比赛",
+    "对阵",
+    "交手",
+    "踢",
+)
+TEAM_PAIR_MARKERS = (
+    " vs ",
+    " v ",
+    " versus ",
+    " against ",
+    "和",
+    "与",
+    "跟",
+    "对",
+    "对阵",
+)
+LOCAL_CURRENT_VERIFICATION_MARKERS = (
+    "现在查",
+    "查最新",
+    "最新",
+    "最近",
+    "新闻",
+    "消息",
+    "动态",
+    "官宣",
+    "官方",
+    "来源",
+    "核实",
+    "查证",
+    "转会",
+    "伤病",
+    "赛程",
+    "赛果",
+    "结果",
+    "search",
+    "verify",
+    "source",
+    "news",
+    "latest",
+    "recent",
+)
+
 
 def _latest_user_content(messages) -> str:
     for msg in reversed(messages or []):
@@ -106,6 +163,31 @@ def _looks_like_math(text: str) -> bool:
     if _has_any(text, MATH_INTENT_MARKERS) and any(token in compact for token in ("=", "^", "+", "*", "/", "x", "X")):
         return True
     return False
+
+
+def _looks_like_recent_public_match_question(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return (
+        any(marker in lowered for marker in RECENT_MATCH_MARKERS)
+        and any(marker in lowered for marker in MATCH_CONTEXT_MARKERS)
+        and any(marker in lowered for marker in TEAM_PAIR_MARKERS)
+    )
+
+
+def _public_current_fact_query(text: str) -> str:
+    lowered = text.lower()
+    query = text
+    if "阿森纳" in text and "arsenal" not in lowered:
+        query = "{0} Arsenal".format(query)
+    if "转会" in text and "transfer" not in lowered:
+        query = "{0} transfer news".format(query)
+    return query
+
+
+def _allows_public_fact_with_local_memory(text: str) -> bool:
+    if not _has_any(text, LOCAL_MEMORY_MARKERS):
+        return True
+    return _has_any(text, LOCAL_CURRENT_VERIFICATION_MARKERS)
 
 
 def _document_tool_args(text: str, extra: dict):
@@ -186,14 +268,25 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
             forced=True,
         ))
 
+    is_recent_match_question = _looks_like_recent_public_match_question(text)
     if (
-        (_has_any(text, CURRENT_FACT_MARKERS) or _has_any(text, CURRENT_FACT_ASCII_MARKERS))
-        and (_has_any(text, FOOTBALL_MARKERS) or _has_any(text, FOOTBALL_ASCII_MARKERS))
+        _allows_public_fact_with_local_memory(text)
+        and
+        (
+            _has_any(text, CURRENT_FACT_MARKERS)
+            or _has_any(text, CURRENT_FACT_ASCII_MARKERS)
+            or is_recent_match_question
+        )
+        and (
+            _has_any(text, FOOTBALL_MARKERS)
+            or _has_any(text, FOOTBALL_ASCII_MARKERS)
+            or is_recent_match_question
+        )
     ):
         decision.intents.append(Intent("public_current_fact", 0.85, "current football fact"))
         _append_tool_once(decision.required_tools, PlannedToolCall(
             name="grok_search",
-            arguments={"query": text, "freshness": "recent", "max_results": 5},
+            arguments={"query": _public_current_fact_query(text), "freshness": "recent", "max_results": 5},
             reason="verify current public football fact",
             forced=True,
         ))

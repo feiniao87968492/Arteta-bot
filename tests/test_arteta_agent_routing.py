@@ -56,6 +56,18 @@ def test_plan_builder_combines_group_memory_and_latest_web_verification():
     assert any(name in tool_names(plan) for name in ("grok_search", "verify_recent_claim", "web_search"))
 
 
+def test_plan_builder_keeps_memory_score_recall_out_of_forced_web():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    messages = [{"role": "user", "content": "塔子你还记得你昨天预测的这场比赛的比分吗"}]
+    decision = route_message(messages, make_context())
+    plan = build_plan(decision, make_context())
+
+    assert "query_group_memory" in tool_names(plan)
+    assert all(name not in tool_names(plan) for name in ("grok_search", "verify_recent_claim", "web_search"))
+
+
 def test_routing_does_not_force_math_for_broad_numeric_phrases():
     from plugins.arteta_agent.routing.heuristic_router import route_message
 
@@ -220,6 +232,24 @@ def test_plan_builder_applies_public_current_fact_route_policy(tmp_path, monkeyp
     }
 
 
+def test_plan_builder_routes_recent_team_match_questions_to_grok_search():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    messages = [{"role": "user", "content": "塔子你了解西班牙和比利时最近的一场比赛吗"}]
+    decision = route_message(messages, make_context())
+    plan = build_plan(decision, make_context())
+
+    assert any(intent.name == "public_current_fact" for intent in decision.intents)
+    assert tool_names(plan) == ["grok_search"]
+    assert plan.required_tools[0].arguments == {
+        "query": "塔子你了解西班牙和比利时最近的一场比赛吗",
+        "freshness": "recent",
+        "max_results": 5,
+    }
+    assert plan.constraints.get("execute_single_required_tool") is True
+
+
 def test_agent_loop_executes_single_current_fact_plan_before_legacy_forced_web(monkeypatch, tmp_path):
     from plugins.arteta_agent import behavior_policy, planner
     from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
@@ -277,15 +307,11 @@ def test_agent_loop_executes_single_current_fact_plan_before_legacy_forced_web(m
         permission="safe_read",
     ))
 
-    def fail_legacy_forced_web(messages):
-        raise AssertionError("single current fact should run through RouteDecision plan first")
-
     async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         assert messages[-1]["role"] == "tool"
         assert "verified current fact" in messages[-1]["content"]
         return {"role": "assistant", "content": "verified answer"}
 
-    monkeypatch.setattr(planner, "detect_forced_web_verification_args", fail_legacy_forced_web)
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
 
     result = __import__("asyncio").run(planner.run_agent_loop(
@@ -540,3 +566,13 @@ def test_planner_no_longer_has_forced_document_branch():
     assert "def should_force_document_tool" not in source
     assert "def forced_document_tool_args" not in source
     assert "forced-read-document" not in source
+
+
+def test_planner_no_longer_has_forced_web_verification_branch():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "def detect_forced_web_verification_args" not in source
+    assert "forced_web_args" not in source
+    assert "planned_web_call = build_public_current_fact_planned_call" not in source

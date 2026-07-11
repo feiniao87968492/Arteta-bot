@@ -1864,3 +1864,57 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Slice: Public Current Fact Plan Route
+
+### Scope
+
+- Migrated the public-current-fact web verification forced branch out of `planner.py` and into the structured Routing + Planning path.
+- Preserved route policy behavior for preferred tools and registry-aware fallback.
+- Kept current fact + local memory multi-intent behavior, while preventing pure memory recall from being forced into web verification.
+
+### Changes
+
+- `routing/heuristic_router.py` now detects recent public match questions such as "西班牙和比利时最近的一场比赛" and emits a `public_current_fact` intent with required `grok_search`.
+- The router now preserves the previous query enrichment for Chinese Arsenal transfer questions:
+  - add `Arsenal` when the text contains `阿森纳`;
+  - add `transfer news` when the text contains `转会`.
+- Added a local-memory guard: turns with memory markers such as `昨天/之前/还记得` only add web verification when they also include explicit current verification intent such as `现在查/查最新/最新/新闻/来源/核实/结果/转会/伤病`.
+- `build_plan(...)` now accepts `disabled_tools` and `is_tool_available` so public-current-fact rewrite can select the configured preferred tool and still fall back when that tool is unavailable.
+- `planner.run_agent_loop(...)` passes disabled tools and registry availability into `build_plan(...)`.
+- Removed `detect_forced_web_verification_args(...)` and the forced web verification execution branch from `planner.py`.
+
+### Debugging Note
+
+- Initial migration caused `tools\\verify_features.py --suite agent_loop` to fail `lets_llm_choose_memory_for_yesterday_prediction_score`.
+- Root cause: the router interpreted "昨天预测的这场比赛的比分" as both local memory and current fact because `比分/比赛` matched public fact markers.
+- Fix: keep local memory and current fact composable, but require an explicit current-verification marker before adding web verification to local-memory turns.
+
+### Compatibility and Safety
+
+- No tool schemas, names, permissions, or handlers changed.
+- Route policy still supports `route.public_current_fact.preferred_tool`.
+- If the preferred public-current-fact tool is unavailable, planner-time plan construction falls back to an available web verifier/search tool.
+- Unavailable web verification results still remain out of system messages and enter the Runtime as tool/user context.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_routes_recent_team_match_questions_to_grok_search tests/test_arteta_agent_routing.py::test_planner_no_longer_has_forced_web_verification_branch tests/test_arteta_agent_registry.py::test_agent_loop_does_not_force_web_for_group_local_recent_context tests/test_arteta_agent_registry.py::test_agent_loop_does_not_force_web_for_casual_future_or_current_words -q`
+  - RED before fix: failed because planner still defined the forced web detector/branch.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_keeps_memory_score_recall_out_of_forced_web -q`
+  - RED before guard fix: failed because the plan included both `query_group_memory` and a web verification tool for a pure memory recall.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_keeps_memory_score_recall_out_of_forced_web tests/test_arteta_agent_routing.py::test_plan_builder_combines_group_memory_and_latest_web_verification tests/test_arteta_agent_routing.py::test_plan_builder_routes_recent_team_match_questions_to_grok_search tests/test_arteta_agent_routing.py::test_planner_no_longer_has_forced_web_verification_branch tests/test_arteta_agent_registry.py::test_agent_loop_falls_back_to_grok_when_route_policy_tool_is_unavailable tests/test_arteta_agent_registry.py::test_agent_loop_continues_answering_when_forced_web_verification_is_unavailable tests/test_arteta_agent_registry.py::test_agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score -q`
+  - GREEN after fix: `7 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `28 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `520 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still contains the direct science-tool forced branch.
+- Continue reducing planner-owned marker constants after science routing and contextual exposure are separated cleanly.
