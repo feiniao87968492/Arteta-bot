@@ -521,6 +521,27 @@ Verification after the fix:
   - Result: `2 passed`.
 - `python tools\\verify_features.py --suite agent_loop`
   - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `488 passed` plus existing Windows asyncio/proactor warnings printed after completion.
+
+### ECS Deployment
+
+- Commit deployed: `397fbc9 refactor: close provider client on shutdown`.
+- Deployment archive: `/tmp/arteta_phase_e_provider_shutdown_397fbc9.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_e_provider_shutdown_20260711215200`.
+- Remote `py_compile` passed for `bot.py` and `tests/test_arteta_agent_provider.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Provider Shutdown Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
 - `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
   - Result: `186 passed, 2 warnings`.
 - `python -m pytest tests -q`
