@@ -325,3 +325,22 @@ Verification after the fix:
 
 - Move confirmation prompts, stable degradation text, trace block formatting entrypoints, and mood emoji post-processing behind response/runtime adapters.
 - Continue keeping artifact trust boundaries structural rather than regexing arbitrary tool text.
+
+### ECS Deployment
+
+- Commit deployed: `023cbaa refactor: extract response composer boundary`.
+- Deployment archive: `/tmp/arteta_phase_d_composer_023cbaa.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_d_composer_20260711193000`.
+- Remote `py_compile` passed for planner, response composer, and response tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Composer Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
