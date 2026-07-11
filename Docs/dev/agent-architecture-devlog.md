@@ -813,6 +813,23 @@ Verification after the fix:
 - `python -m pytest tests -q`
   - Result: `503 passed, 2 warnings`.
 
+### ECS Deployment
+
+- Commit deployed: `ce2332d refactor: route trace requests through agent plan`.
+- Deployment archive: `/tmp/arteta_phase_c_trace_plan_ce2332d.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_c_trace_plan_20260712010048`.
+- Remote `py_compile` passed for planner, planning models/builder, routing heuristic, and routing tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+
+### ECS Smoke After Structured Trace Route Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
+
 ### Remaining
 
 - `wants_trace_tool(...)` and `TRACE_REQUEST_MARKERS` are now compatibility/dead planner symbols; a later cleanup can remove them after checking direct imports.
