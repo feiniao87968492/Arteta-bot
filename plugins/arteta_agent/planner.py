@@ -7,13 +7,15 @@ from .context import ToolContext
 from .executor import execute_tool_call, execute_tool_call_result
 from .pending import store_from_context
 from .planning.plan_builder import build_plan
-from .providers.http_client import get_shared_async_client
+from .providers.chat_completion import (
+    DEFAULT_CHAT_API_URL,
+    call_llm_with_tools as provider_call_llm_with_tools,
+)
 from .providers.openai_compatible import (
-    OpenAICompatibleProvider,
     ProviderResponseError,
     parse_chat_response,
 )
-from .registry import build_openai_tools, get_tool
+from .registry import get_tool
 from .response.composer import compose_final_response, compose_trace_response
 from .response.mood import (
     maybe_send_mood_emoji,
@@ -95,24 +97,16 @@ def _mood_emoji_enabled(group_id: str) -> bool:
     return policy.get("value") is not False
 
 
-DEFAULT_CHAT_API_URL = "https://www.boxying.com/v1/chat/completions"
-
-
 async def call_llm_with_tools(messages, model: str, api_key: str, api_url: str = DEFAULT_CHAT_API_URL, allowed_permissions=None, disabled_tools=None, temperature: float = 0.9, request_timeout: float = 80.0):
-    # The planner exposes registered tool schemas to the model, but all actual
-    # execution still flows through execute_tool_call below.
-    tools = build_openai_tools(include_permissions=allowed_permissions, exclude_names=set(disabled_tools or []))
-    provider = OpenAICompatibleProvider(
-        client=get_shared_async_client(),
-        api_url=api_url or DEFAULT_CHAT_API_URL,
-    )
-    return await provider.chat(
+    return await provider_call_llm_with_tools(
         messages=messages,
         model=model,
         api_key=api_key,
-        tools=tools,
+        api_url=api_url,
+        allowed_permissions=allowed_permissions,
+        disabled_tools=disabled_tools,
         temperature=temperature,
-        timeout=float(request_timeout or 80.0),
+        request_timeout=request_timeout,
     )
 
 

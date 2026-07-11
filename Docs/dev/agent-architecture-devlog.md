@@ -2340,3 +2340,55 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase E Cleanup: Move Provider Chat Wrapper Out Of Planner
+
+### Scope
+
+- Added `plugins/arteta_agent/providers/chat_completion.py`.
+- Moved the concrete provider chat-completion wrapper out of `planner.py`.
+- Kept `planner.call_llm_with_tools(...)` as a compatibility wrapper for existing callers and tests.
+- `planner.py` no longer directly imports or constructs:
+  - `OpenAICompatibleProvider`;
+  - `get_shared_async_client`;
+  - `build_openai_tools`.
+
+### Design Decision
+
+- Provider-layer code now owns tool schema construction for model requests, shared client access, provider adapter construction, and request timeout/temperature forwarding.
+- Planner keeps only the legacy function name so Runtime tests and monkeypatch-based callers can continue to replace `planner.call_llm_with_tools(...)`.
+- The provider wrapper uses the existing shared HTTP client and OpenAI-compatible adapter, so retry, response parsing, reasoning content, and capability behavior stay centralized.
+
+### Compatibility and Safety
+
+- `run_agent_loop(...)` signature and behavior are unchanged.
+- `planner.ProviderResponseError` and `_parse_chat_response(...)` compatibility remain available.
+- Provider payload behavior remains unchanged:
+  - visible tools are still built from the registry;
+  - hidden/disabled tools remain excluded;
+  - no `tools` field is sent when no tools are visible;
+  - timeout and temperature are still forwarded.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_provider.py::test_provider_chat_completion_wrapper_builds_tool_schema_and_reuses_client tests/test_arteta_agent_provider.py::test_planner_provider_entrypoint_is_compatibility_wrapper_only -q`
+  - RED before implementation: failed because `providers.chat_completion` did not exist and planner still imported provider/client/schema helpers.
+  - Result after implementation: `2 passed`.
+- `python -m py_compile plugins\\arteta_agent\\planner.py plugins\\arteta_agent\\providers\\chat_completion.py tests\\test_arteta_agent_provider.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_provider.py -q`
+  - Result: `13 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `34 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `527 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still performs compatibility orchestration around pending confirmation, route, plan, Runtime, and final response composition.
+- Activation already uses the provider adapter/shared client but still has its own activation-specific wrapper.
+- Existing Windows asyncio/proactor resource warnings remain unrelated to this extraction.

@@ -303,6 +303,54 @@ def test_planner_call_llm_with_tools_reuses_shared_client():
         set_shared_async_client_factory(None)
 
 
+def test_provider_chat_completion_wrapper_builds_tool_schema_and_reuses_client():
+    from plugins.arteta_agent.providers.chat_completion import call_llm_with_tools
+    from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
+
+    async def sample_handler(ctx, value: str = ""):
+        return value
+
+    clear_registry()
+    register_tool(ToolSpec(
+        "sample_tool",
+        "sample",
+        {"type": "object", "properties": {"value": {"type": "string"}}},
+        sample_handler,
+        permission="safe_read",
+    ))
+    calls = []
+    client = FakeClient(calls, {"role": "assistant", "content": "ok"})
+    set_shared_async_client_factory(lambda: client)
+    try:
+        result = asyncio.run(call_llm_with_tools(
+            [{"role": "user", "content": "hi"}],
+            "model",
+            "key",
+            api_url="https://provider.example/v1/chat/completions",
+            allowed_permissions={"safe_read"},
+            disabled_tools=set(),
+            temperature=0.1,
+            request_timeout=12.0,
+        ))
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)
+
+    assert result == {"role": "assistant", "content": "ok"}
+    assert calls[0][0] == "https://provider.example/v1/chat/completions"
+    assert calls[0][2]["temperature"] == 0.1
+    assert calls[0][2]["tools"][0]["function"]["name"] == "sample_tool"
+    assert calls[0][3] == 12.0
+
+
+def test_planner_provider_entrypoint_is_compatibility_wrapper_only():
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "OpenAICompatibleProvider" not in source
+    assert "get_shared_async_client" not in source
+    assert "build_openai_tools" not in source
+
+
 def test_activation_llm_uses_shared_provider_client():
     from plugins.arteta_agent.activation import call_activation_llm
 
