@@ -86,6 +86,19 @@ def test_routing_forces_math_for_explicit_equation():
     assert json.loads(json.dumps(required["solve_math_question"].arguments, ensure_ascii=False))["question"] == "求解 x^2-1=0"
 
 
+def test_plan_builder_routes_math_questions_as_direct_required_tool():
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    decision = route_message([{"role": "user", "content": "求解 x^2-1=0"}], make_context())
+    plan = build_plan(decision, make_context())
+
+    assert tool_names(plan) == ["solve_math_question"]
+    assert plan.required_tools[0].arguments == {"question": "求解 x^2-1=0"}
+    assert plan.constraints.get("execute_single_required_tool") is True
+    assert plan.constraints.get("direct_tool_response") is True
+
+
 def test_agent_loop_executes_multi_intent_memory_and_document_plan(monkeypatch):
     from plugins.arteta_agent import planner
     from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
@@ -576,3 +589,13 @@ def test_planner_no_longer_has_forced_web_verification_branch():
     assert "def detect_forced_web_verification_args" not in source
     assert "forced_web_args" not in source
     assert "planned_web_call = build_public_current_fact_planned_call" not in source
+
+
+def test_planner_no_longer_has_forced_science_branch():
+    from pathlib import Path
+
+    source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
+
+    assert "forced_science_tool = detect_forced_science_tool" not in source
+    assert "if forced_science_tool and get_tool" not in source
+    assert "forced-{0}-1\".format(forced_science_tool)" not in source

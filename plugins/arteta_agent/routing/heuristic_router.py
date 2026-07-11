@@ -46,6 +46,50 @@ LINK_INTENT_MARKERS = (
     "讲了什么",
 )
 MATH_INTENT_MARKERS = ("求解", "计算", "解方程", "证明")
+ALGORITHM_MARKERS = (
+    "leetcode",
+    "算法",
+    "数据结构",
+    "复杂度",
+    "动态规划",
+    "二分",
+    "两数之和",
+)
+CODE_MARKERS = (
+    "```",
+    "python",
+    "javascript",
+    "typescript",
+    "java ",
+    "c++",
+    "代码",
+    "报错",
+    "实现一个函数",
+    "写个函数",
+)
+SCIENCE_MARKERS = (
+    "物理",
+    "力学",
+    "电路",
+    "加速度",
+    "动量",
+    "电压",
+)
+MATH_MARKERS = (
+    "数学",
+    "求解",
+    "证明",
+    "方程",
+    "求导",
+    "导数",
+    "极限",
+    "概率",
+    "矩阵",
+    "不等式",
+    "几何",
+    "三角",
+    "微积分",
+)
 
 TRACE_MARKERS = (
     "trace",
@@ -163,6 +207,21 @@ def _looks_like_math(text: str) -> bool:
     if _has_any(text, MATH_INTENT_MARKERS) and any(token in compact for token in ("=", "^", "+", "*", "/", "x", "X")):
         return True
     return False
+
+
+def _science_tool_for_text(text: str) -> str:
+    if not text:
+        return ""
+    lower = text.lower()
+    if any(marker in lower for marker in ALGORITHM_MARKERS):
+        return "solve_algorithm_problem"
+    if any(marker in lower for marker in CODE_MARKERS):
+        return "solve_code_question"
+    if any(marker in text for marker in SCIENCE_MARKERS):
+        return "solve_science_question"
+    if any(marker in text for marker in MATH_MARKERS) or _looks_like_math(text):
+        return "solve_math_question"
+    return ""
 
 
 def _looks_like_recent_public_match_question(text: str) -> bool:
@@ -291,12 +350,13 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
             forced=True,
         ))
 
-    if _looks_like_math(text):
-        decision.intents.append(Intent("math", 0.95, "explicit math notation and solve intent"))
+    science_tool = _science_tool_for_text(text)
+    if science_tool:
+        decision.intents.append(Intent("science", 0.95, "explicit technical solve intent"))
         _append_tool_once(decision.required_tools, PlannedToolCall(
-            name="solve_math_question",
+            name=science_tool,
             arguments={"question": text},
-            reason="explicit math solve intent",
+            reason="explicit technical solve intent",
             forced=True,
         ))
 

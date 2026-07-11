@@ -1103,25 +1103,6 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
             return finish(compose_trace_response(trace))
         return finish(initial_result)
 
-    forced_science_tool = detect_forced_science_tool(state)
-    if forced_science_tool and get_tool(forced_science_tool) and forced_science_tool not in disabled_tools:
-        # Technical-answer tools already return user-facing text. Returning the
-        # tool result directly avoids DeepSeek thinking-mode 400s from synthetic
-        # assistant tool-call history while keeping trace truthful.
-        tool_call = {
-            "id": "forced-{0}-1".format(forced_science_tool),
-            "type": "function",
-            "function": {
-                "name": forced_science_tool,
-                "arguments": json.dumps({"question": _latest_user_content(state)}, ensure_ascii=False),
-            },
-        }
-        return finish(await _run_forced_tool_direct(
-            state, ctx, tool_call, model, api_key, api_url, allowed, disabled_tools,
-            max_rounds, trace, temperature, tool_artifact_markers, request_timeout,
-            max_tool_calls, max_same_tool_call_repeats, max_total_observation_chars,
-        ))
-
     return finish(await _run_loop_from_state(
         state,
         ctx,

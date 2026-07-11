@@ -6,6 +6,12 @@ from .models import AgentPlan
 
 
 PUBLIC_CURRENT_FACT_TOOLS = ("grok_search", "verify_recent_claim", "web_search")
+DIRECT_TECHNICAL_TOOLS = {
+    "solve_science_question",
+    "solve_algorithm_problem",
+    "solve_code_question",
+    "solve_math_question",
+}
 
 
 def _preferred_public_current_fact_tool(ctx: ToolContext = None) -> str:
@@ -120,6 +126,13 @@ def build_plan(
         and decision.required_tools[0].name == "read_document"
     ):
         constraints["execute_single_required_tool"] = True
+    if (
+        any(intent.name == "science" for intent in decision.intents or [])
+        and len(decision.required_tools or []) == 1
+        and decision.required_tools[0].name in DIRECT_TECHNICAL_TOOLS
+    ):
+        constraints["execute_single_required_tool"] = True
+        constraints["direct_tool_response"] = True
     return AgentPlan(
         required_tools=_rewrite_public_current_fact_tools(
             decision,

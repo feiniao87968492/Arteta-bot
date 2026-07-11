@@ -1942,3 +1942,49 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Phase C Slice: Direct Technical Tool Plan Route
+
+### Scope
+
+- Migrated the direct-response science/math/code/algorithm forced branch out of `planner.py` and into the structured Routing + Planning path.
+- Preserved the legacy direct-response behavior: technical solver tools return their tool result directly and do not require a follow-up model summary.
+
+### Changes
+
+- `routing/heuristic_router.py` now maps explicit technical solve requests to:
+  - `solve_algorithm_problem`;
+  - `solve_code_question`;
+  - `solve_science_question`;
+  - `solve_math_question`.
+- `build_plan(...)` now marks single direct technical tools as both `execute_single_required_tool` and `direct_tool_response`.
+- Removed the `forced_science_tool` execution branch from `planner.py`.
+- Kept planner's science marker/helper code for contextual tool exposure for now; that will be moved separately because it controls tool schema visibility, not forced execution.
+
+### Compatibility and Safety
+
+- No tool schema, permission, or handler behavior changed.
+- Obvious math questions still execute `solve_math_question` and return the tool result directly.
+- Scoreline-like chat still hides `solve_math_question` from model exposure and does not force a math tool.
+- The Runtime remains the single path for the planned direct technical tool execution.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_routes_math_questions_as_direct_required_tool tests/test_arteta_agent_routing.py::test_planner_no_longer_has_forced_science_branch -q`
+  - RED before fix: failed because the math plan lacked direct-tool constraints and planner still contained the forced science branch.
+- `python -m pytest tests/test_arteta_agent_routing.py::test_plan_builder_routes_math_questions_as_direct_required_tool tests/test_arteta_agent_routing.py::test_planner_no_longer_has_forced_science_branch tests/test_arteta_agent_registry.py::test_agent_loop_forces_math_tool_for_obvious_math_question tests/test_arteta_agent_registry.py::test_agent_loop_does_not_expose_math_tool_for_scoreline_chat -q`
+  - GREEN after fix: `4 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_routing.py -q`
+  - Result: `30 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `184 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `522 passed, 2 warnings`.
+
+### Remaining
+
+- `planner.py` still has forced helper functions for behavior/tool policy updates and mood emoji post-processing.
+- `_answer_from_forced_tool_result(...)` may now be dead after document/link/web migration; verify before removal.
+- Move contextual exposure marker logic out of planner in a separate low-risk slice.
