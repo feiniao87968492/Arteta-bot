@@ -661,3 +661,22 @@ Verification after the fix:
 
 - Enable the SQLite DB path on ECS and verify one-time import/backup behavior with the production supervisor environment.
 - Decide whether to keep JSON fallback only as read/import compatibility after the stabilization window.
+
+### ECS Deployment
+
+- Commit deployed: `4fb0c27 fix: harden sqlite behavior policy concurrency`.
+- Deployment archive: `/tmp/arteta_phase_f_policy_concurrency_4fb0c27.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_f_policy_concurrency_20260711205500`.
+- Remote `py_compile` passed for `plugins/arteta_agent/behavior_policy.py` and `tests/test_arteta_agent_behavior_policy_store.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Policy Concurrency Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
