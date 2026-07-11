@@ -583,6 +583,25 @@ Verification after the fix:
 
 - Provider retry/backoff and capability-based message encoding still need a later focused provider slice.
 - `planner.py` still contains substantial routing/response compatibility code and remains a later Phase I thinning target.
+
+### ECS Deployment
+
+- Commit deployed: `9251418 refactor: use fixed provider adapter protocol`.
+- Deployment archive: `/tmp/arteta_phase_e_fixed_provider_9251418.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_phase_e_fixed_provider_20260711222000`.
+- Remote `py_compile` passed for `planner.py`, provider/routing registry tests, and `tools/verify_features.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Fixed Provider Protocol Deploy
+
+- `python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
 - `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
   - Result: `186 passed, 2 warnings`.
 - `python -m pytest tests -q`
