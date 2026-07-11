@@ -72,3 +72,50 @@ Verification after the fix:
   - Result: `180 passed, 2 warnings`.
 - `python -m pytest tests -q`
   - Result: `450 passed, 2 warnings`.
+
+## 2026-07-11 - Phase B Slice: Runtime State and Loop Guard Extraction
+
+### Scope
+
+- Introduced the first real Agent Runtime boundary without changing the public `run_agent_loop` entrypoint.
+- Kept routing, provider HTTP, behavior-policy storage, response composition, and parallel execution out of this slice.
+- Migrated planner tool execution paths to Runtime where the execution semantics are already stable.
+
+### Changes
+
+- Added `plugins/arteta_agent/runtime/` with:
+  - `AgentRunConfig` for round, tool-call, repeat-call, observation, timeout, and initial-tool-stop budgets.
+  - `AgentState` / `AgentRunResult` for structured runtime state and stop reasons.
+  - `LoopGuard` and canonical `tool_call_signature()` using sorted JSON arguments.
+  - `AgentRuntimeRunner` for model calls, tool execution, tool observations, budget checks, timeout handling, and `PermissionRequired` stopping.
+- Kept planner compatibility helpers, but routed normal model tool calls and forced tool follow-up through `AgentRuntimeRunner`.
+- Routed forced direct tools such as behavior-policy updates, UI preference writes, memory preference writes, science/math tools, and trace display through Runtime initial tool calls.
+- Preserved explicit PendingAction confirmation as a direct consume path because it is not a model-planned tool call and must use the stored action ID/args.
+- Preserved mood emoji post-processing in planner for now; response splitting is planned for the Response phase.
+
+### Compatibility
+
+- `run_agent_loop` signature is unchanged.
+- Existing tool names, schemas, permissions, trace output, artifact marker compatibility, and OpenAI-compatible model-call monkeypatch behavior are unchanged.
+- Provider HTTP implementation remains in planner for a later provider-adapter phase.
+- The old planner loop body remains as unreachable compatibility code behind an early Runtime return; it will be removed when `planner.py` is reduced in Phase I.
+
+### Risk Notes
+
+- This slice intentionally does not solve multi-intent routing, provider client reuse, SQLite policy migration, persistent audit completion, or parallel-safe tool execution.
+- The Runtime still uses planner adapters for model calls and final mood-emoji handling, so planner is not yet a thin compatibility entrypoint.
+- Windows full-suite runs still report the pre-existing asyncio/proactor unclosed transport warnings.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_runtime.py -q`
+  - Result: `5 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `180 passed, 2 warnings`.
+- `python -m pytest tests -q`
+  - Result: `455 passed, 2 warnings`.
+
+### Remaining
+
+- Deploy this Phase B slice to ECS and run smoke checks.
+- Continue Phase C by replacing mutually-exclusive forced routing with structured `RouteDecision` / multi-intent plans.
