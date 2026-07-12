@@ -501,8 +501,8 @@ def test_web_access_fetch_helpers_reuse_shared_client():
         assert len(created[0].calls) == 2
         assert created[0].calls[0][0] == "https://www.bing.com/search"
         assert created[0].calls[1][0] == "https://html.duckduckgo.com/html/"
-        assert created[0].calls[0][4] is True
-        assert created[0].calls[1][4] is True
+        assert created[0].calls[0][4] is False
+        assert created[0].calls[1][4] is False
     finally:
         asyncio.run(close_shared_async_client())
         set_shared_async_client_factory(None)

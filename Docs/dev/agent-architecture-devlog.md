@@ -3143,3 +3143,107 @@ Verification after the fix:
   - Result: passed on ECS.
 - `./venv/bin/python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 Web Access Round 1 Safety Slice
+
+### Scope
+
+- Revised `docs/tasks/rebulid_webaccess.md` from a broad one-shot rewrite into a three-round execution plan:
+  - Round 1: Web safety and safe-read side-effect cleanup.
+  - Round 2: ToolResult protocol and factual verification.
+  - Round 3: module split and search backend abstraction.
+- Kept Round 1 limited to `plugins/arteta_agent/tools/web_access.py` behavior and direct tests.
+- Did not introduce new `ToolResult.success()`, `ToolResult.error()`, `Artifact`, or `data` APIs.
+- Did not split `web_access.py` yet.
+
+### Changes
+
+- Added DNS-aware best-effort URL validation before `_fetch_url()` sends a request:
+  - rejects URL credentials;
+  - enforces URL length and default 80/443 ports;
+  - rejects localhost, private, loopback, link-local, reserved, multicast, unspecified, non-global, single-label, `.local`, `.internal`, and `.lan` targets;
+  - resolves A/AAAA via `socket.getaddrinfo()` and rejects if any resolved IP is non-global.
+- Changed `_fetch_url()` to disable automatic redirects and manually revalidate each redirect target before requesting the next hop.
+- Added direct text Content-Type allowlist and early `Content-Length` oversize rejection.
+- Kept existing streaming byte limit and added `truncated` metadata to `_fetch_url()` results.
+- Removed implicit Grok source snapshot creation from:
+  - `web_search`;
+  - `grok_search`;
+  - `verify_recent_claim`.
+- Disabled automatic redirect following for Web backend HTTP calls, including:
+  - Bing HTML search;
+  - DuckDuckGo HTML search;
+  - Jina search fetch;
+  - GrokSearch API calls;
+  - X Fetch Bridge;
+  - X syndication;
+  - X mirror fetches.
+- Kept legacy snapshot helper functions available for explicit link-analysis paths and existing direct tests.
+- Tightened Web tool schemas with explicit `additionalProperties: false`, string length bounds, numeric min/max, and URL length limits.
+- Added explicit concurrency metadata on Web safe-read tools:
+  - `parallel_safe=True`;
+  - `concurrency_group="web_http"`;
+  - `idempotent=True`.
+- Removed task-specific entity boosts from `_claim_result_score()` and changed `verify_recent_claim` wording to “candidate source” rather than implying a verdict.
+
+### Design Decisions
+
+- `_safe_url()` remains a lightweight synchronous syntax/local-address filter because it is used by parsing and formatting paths.
+- `_fetch_url()` is the actual network boundary and now performs DNS-aware validation immediately before each outbound request.
+- This is still application-layer best-effort SSRF protection; production ECS/container egress rules remain required for stronger guarantees.
+- Search tools no longer create screenshot artifacts implicitly because they are registered as `safe_read`.
+- `verify_recent_claim` remains a candidate-evidence collector in Round 1; support/refute/unclear belongs to Round 2.
+
+### RED Checks Before Implementation
+
+- `test_fetch_url_rejects_dns_resolving_to_private_ip_before_request` failed because `_fetch_url()` sent the HTTP request after only syntactic host checks.
+- `test_fetch_url_revalidates_each_redirect_before_request` failed because `_fetch_url()` used `follow_redirects=True`.
+- `test_web_search_does_not_append_grok_snapshot_marker` failed because `web_search()` called `_grok_source_snapshot_marker()`.
+- `test_web_tool_registration_has_schema_bounds_and_explicit_parallel_metadata` failed because Web schemas lacked bounds and Web tools lacked explicit parallel metadata.
+- `test_verify_recent_claim_does_not_claim_verdict_for_single_candidate` failed because the tool said “已找到可核查来源”.
+- `test_claim_ranking_has_no_task_specific_entity_hardcodes` failed because `_claim_result_score()` still contained old task entities.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_security.py -q`
+  - Result: `7 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+- `python -m pytest tests/test_arteta_agent_web_security.py tests/test_arteta_agent_registry.py -q`
+  - Result: `199 passed`.
+- `python -m pytest tests/test_arteta_agent_runtime.py tests/test_arteta_agent_routing.py tests/test_arteta_agent_provider.py -q`
+  - Result: `69 passed`.
+- `python -m pytest tests -q`
+  - Result: `566 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "follow_redirects=True|dict\[|list\[|set\[|tuple\[|\| None|None \|" plugins/arteta_agent/tools/web_access.py tests/test_arteta_agent_web_security.py docs/tasks/rebulid_webaccess.md`
+  - Result: no matches.
+
+### Python 3.8 Check
+
+- `python3.8 -m py_compile plugins/arteta_agent/tools/web_access.py`
+  - Result: could not run locally; `python3.8` is not installed.
+- `py -3.8 -m py_compile plugins/arteta_agent/tools/web_access.py`
+  - Result: could not run locally; Windows launcher reports only Python 3.10 and 3.13 installed.
+- Local mitigation: compileall passed under Python 3.10 and grep found no Python 3.9/3.10 generic/union syntax in touched Round 1 files.
+
+### Risk Notes
+
+- DNS-aware validation uses `socket.getaddrinfo()` before `httpx` connects; it reduces common SSRF paths but does not eliminate DNS rebinding.
+- `_fetch_url()` tests now need explicit DNS stubs when using fake public hostnames.
+- Existing direct snapshot helper tests remain because Round 1 only removes implicit search side effects; full artifact protocol cleanup remains Round 2.
+
+### Remaining
+
+- Round 1 still needs broader coverage for unsupported Content-Type, URL credentials, illegal ports, redirect count, and handler-before-schema rejection on actual Web specs.
+- Round 2 remains open:
+  - structured `ToolResult` protocol design;
+  - marker-forgery hardening;
+  - support/refute/unclear factual verification;
+  - remote fetch proxy policy and sensitive URL handling.
+- Round 3 remains open:
+  - module split;
+  - `SearchBackend` abstraction;
+  - X provenance cleanup;
+  - structured logging/observability cleanup.

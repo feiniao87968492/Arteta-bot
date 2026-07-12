@@ -3,6 +3,7 @@ import importlib
 import json
 import pathlib
 import re
+import socket
 import types
 import zipfile
 
@@ -4193,7 +4194,7 @@ def test_web_search_uses_groksearch_when_configured(monkeypatch):
     assert "Fresh result from GrokSearch" in result
 
 
-def test_web_search_appends_playwright_snapshot_for_first_grok_source(monkeypatch):
+def test_web_search_does_not_append_playwright_snapshot_for_grok_source(monkeypatch):
     from plugins.arteta_agent.tools import web_access
 
     async def fake_grok_search(query, max_results, freshness="recent"):
@@ -4206,8 +4207,7 @@ def test_web_search_appends_playwright_snapshot_for_first_grok_source(monkeypatc
         ]
 
     async def fake_snapshot(urls):
-        assert urls == ["https://www.arsenal.com/news/grok"]
-        return "[LinkSnapshotImage: artifacts/agent_tools/link_snapshots/grok.png]"
+        raise AssertionError("web_search must not create implicit snapshot artifacts")
 
     monkeypatch.setattr(web_access, "GROKSEARCH_API_URL", "https://grok.example")
     monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
@@ -4217,7 +4217,7 @@ def test_web_search_appends_playwright_snapshot_for_first_grok_source(monkeypatc
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
     assert result.startswith("[grok]")
-    assert "[LinkSnapshotImage: artifacts/agent_tools/link_snapshots/grok.png]" in result
+    assert "[LinkSnapshotImage:" not in result
 
 
 def test_grok_snapshot_tries_next_source_when_first_fails(monkeypatch):
@@ -5798,6 +5798,16 @@ def test_fetch_url_rechecks_final_redirect_url(monkeypatch):
         def stream(self, method, url, **kwargs):
             return FakeStream()
 
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        return [(
+            socket.AF_INET,
+            socket.SOCK_STREAM,
+            6,
+            "",
+            ("93.184.216.34", int(port or 443)),
+        )]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
     monkeypatch.setattr(web_access, "_http_client", lambda: FakeAsyncClient())
 
     try:
@@ -5846,6 +5856,16 @@ def test_fetch_url_stops_streaming_at_byte_limit(monkeypatch):
         def stream(self, method, url, **kwargs):
             return FakeStream()
 
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        return [(
+            socket.AF_INET,
+            socket.SOCK_STREAM,
+            6,
+            "",
+            ("93.184.216.34", int(port or 443)),
+        )]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
     monkeypatch.setattr(web_access, "_http_client", lambda: FakeAsyncClient())
 
     fetched = asyncio.run(web_access._fetch_url("https://public.example/large", max_bytes=5))
