@@ -17,6 +17,7 @@ Web 访问工具模块 —— ArtetaBot 的网络搜索、网页抓取与事实�
 import asyncio
 import base64
 import json
+import logging
 import os
 import re
 import time
@@ -36,7 +37,7 @@ from .fetch import (
     _parse_page,
     _read_limited_response,
 )
-from .search_backends import CallableSearchBackend, run_search_backends
+from .search_backends import CallableSearchBackend, TimeBudget, run_search_backends
 from .security import (
     ALLOWED_FETCH_PORTS,
     ALLOWED_TEXT_CONTENT_TYPES,
@@ -52,6 +53,9 @@ from .security import (
 )
 from .x_reader import (
     MetaExtractor,
+    X_PROVENANCE_CONFIGURED_BRIDGE,
+    X_PROVENANCE_GENERATED_EXTRACTION,
+    X_PROVENANCE_OFFICIAL_EMBED,
     _extract_x_author,
     _extract_x_text,
     _format_x_mirror_page,
@@ -113,6 +117,8 @@ GROKSEARCH_MODEL = os.environ.get("ARTETA_GROKSEARCH_MODEL", "").strip()
 X_FETCH_API_URL = os.environ.get("ARTETA_X_FETCH_API_URL", "").strip()
 X_FETCH_API_KEY = os.environ.get("ARTETA_X_FETCH_API_KEY", "").strip()
 
+LOGGER = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # DuckDuckGo（可选依赖，忽略重命名警告）
 # ---------------------------------------------------------------------------
@@ -161,6 +167,15 @@ def _web_tool_result(
 
 # 搜索结果数据结构工具
 # ---------------------------------------------------------------------------
+
+def _log_web_fallback(event: str, exc: Exception, source: str = "") -> None:
+    LOGGER.warning(
+        "web_access_fallback_failed event=%s source=%s error_code=%s",
+        str(event or ""),
+        str(source or ""),
+        exc.__class__.__name__,
+    )
+
 
 def _safe_int(value, default: int, low: int, high: int) -> int:
     try:
@@ -318,35 +333,35 @@ def _parse_duckduckgo_html(html_text: str, max_results: int) -> list:
 # 搜索请求发送（Bing / DuckDuckGo / Jina）
 # ---------------------------------------------------------------------------
 
-async def _fetch_duckduckgo_html(query: str, max_results: int) -> str:
+async def _fetch_duckduckgo_html(query: str, max_results: int, timeout_seconds: float = 12.0) -> str:
     """通过 DuckDuckGo HTML 版（无 JS）发送搜索请求并返回原始 HTML。"""
     headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
     response = await _http_client().get(
         "https://html.duckduckgo.com/html/",
         params={"q": query},
         headers=headers,
-        timeout=12.0,
+        timeout=timeout_seconds,
         follow_redirects=False,
     )
     response.raise_for_status()
     return response.text
 
 
-async def _fetch_bing_html(query: str, max_results: int) -> str:
+async def _fetch_bing_html(query: str, max_results: int, timeout_seconds: float = 10.0) -> str:
     """向 Bing 发送搜索请求并返回原始 HTML。"""
     headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
     response = await _http_client().get(
         "https://www.bing.com/search",
         params={"q": query},
         headers=headers,
-        timeout=10.0,
+        timeout=timeout_seconds,
         follow_redirects=False,
     )
     response.raise_for_status()
     return response.text
 
 
-async def _fetch_jina_duckduckgo_markdown(query: str, max_results: int) -> str:
+async def _fetch_jina_duckduckgo_markdown(query: str, max_results: int, timeout_seconds: float = 18.0) -> str:
     """
     通过 Jina AI Reader（r.jina.ai）抓取 DuckDuckGo 搜索结果并返回 Markdown。
 
@@ -357,7 +372,7 @@ async def _fetch_jina_duckduckgo_markdown(query: str, max_results: int) -> str:
         "https://r.jina.ai/http://duckduckgo.com/html/",
         params={"q": query},
         headers=headers,
-        timeout=18.0,
+        timeout=timeout_seconds,
         follow_redirects=False,
     )
     response.raise_for_status()
@@ -910,7 +925,7 @@ async def _fetch_url(
 # DuckDuckGo 搜索（多通道回退）
 # ---------------------------------------------------------------------------
 
-async def _duckduckgo_search(query: str, max_results: int = 5, timelimit=None) -> list:
+async def _duckduckgo_search(query: str, max_results: int = 5, timelimit=None, budget: Optional[TimeBudget] = None) -> list:
     """
     执行搜索，按优先级依次尝试以下通道：
 
@@ -923,32 +938,51 @@ async def _duckduckgo_search(query: str, max_results: int = 5, timelimit=None) -
     """
     limit = _safe_int(max_results, 5, 1, MAX_SEARCH_RESULTS)
 
+    def _remaining_timeout(default: float) -> float:
+        if budget is None:
+            return default
+        remaining = budget.remaining()
+        if remaining is not None and remaining <= 0:
+            raise asyncio.TimeoutError("web search budget exhausted")
+        if remaining is None:
+            return default
+        return max(0.01, min(default, remaining))
+
     # 通道 1：Bing HTML
     try:
-        bing_html = await _fetch_bing_html(query, limit)
+        bing_html = await asyncio.wait_for(
+            _fetch_bing_html(query, limit),
+            timeout=_remaining_timeout(10.0),
+        )
         results = _parse_bing_html(bing_html, limit)
         if results:
             return results
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_web_fallback("search_backend", exc, "bing_html")
 
     # 通道 2：DuckDuckGo HTML
     try:
-        html_text = await _fetch_duckduckgo_html(query, limit)
+        html_text = await asyncio.wait_for(
+            _fetch_duckduckgo_html(query, limit),
+            timeout=_remaining_timeout(12.0),
+        )
         results = _parse_duckduckgo_html(html_text, limit)
         if results:
             return results
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_web_fallback("search_backend", exc, "duckduckgo_html")
 
     # 通道 3：Jina AI + DuckDuckGo
     try:
-        markdown_text = await _fetch_jina_duckduckgo_markdown(query, limit)
+        markdown_text = await asyncio.wait_for(
+            _fetch_jina_duckduckgo_markdown(query, limit),
+            timeout=_remaining_timeout(18.0),
+        )
         results = _parse_markdown_search_results(markdown_text, limit)
         if results:
             return results
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_web_fallback("search_backend", exc, "jina_duckduckgo")
 
     # 通道 4：duckduckgo_search 库（需显式开启）
     if os.environ.get("ARTETA_WEB_SEARCH_USE_DDGS", "").lower() not in {"1", "true", "yes"}:
@@ -967,8 +1001,12 @@ async def _duckduckgo_search(query: str, max_results: int = 5, timelimit=None) -
                     return list(ddgs.text(query, max_results=limit))
 
     try:
-        return await asyncio.get_event_loop().run_in_executor(None, _search)
-    except Exception:
+        return await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, _search),
+            timeout=_remaining_timeout(12.0),
+        )
+    except Exception as exc:
+        _log_web_fallback("search_backend", exc, "ddgs")
         return []
 
 
@@ -993,6 +1031,7 @@ async def _search_web(query: str, max_results: int = 5, freshness: str = "recent
         query=query,
         max_results=limit,
         freshness=freshness,
+        total_timeout_seconds=_groksearch_timeout() + 2.0,
     )
     return [hit.to_legacy_dict() for hit in hits]
 
@@ -1001,7 +1040,7 @@ def _search_backends_for_request(freshness: str = "recent", timelimit=None) -> l
     backends = []
 
     if _groksearch_enabled():
-        async def _run_grok(query: str, max_results: int, freshness_arg: str):
+        async def _run_grok(query: str, max_results: int, freshness_arg: str, budget: Optional[TimeBudget]):
             return await _groksearch_search(query, max_results=max_results, freshness=freshness_arg)
 
         backends.append(CallableSearchBackend(
@@ -1011,8 +1050,13 @@ def _search_backends_for_request(freshness: str = "recent", timelimit=None) -> l
             result_backend="grok",
         ))
 
-    async def _run_legacy(query: str, max_results: int, freshness_arg: str):
-        return await _duckduckgo_search(query, max_results=max_results, timelimit=timelimit)
+    async def _run_legacy(query: str, max_results: int, freshness_arg: str, budget: Optional[TimeBudget]):
+        try:
+            return await _duckduckgo_search(query, max_results=max_results, timelimit=timelimit, budget=budget)
+        except TypeError as exc:
+            if "budget" not in str(exc):
+                raise
+            return await _duckduckgo_search(query, max_results=max_results, timelimit=timelimit)
 
     backends.append(CallableSearchBackend(
         name="legacy",
@@ -1122,23 +1166,26 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
     if _x_fetch_bridge_enabled() and not _has_sensitive_remote_query(safe_url):
         try:
             data = await asyncio.wait_for(_x_fetch_bridge_fetch(safe_url), timeout=40.0)
-            formatted = _format_x_post(data, safe_url)
+            backend = _clean_text(data.get("backend") or "")
+            formatted = _format_x_post(
+                data,
+                safe_url,
+                provenance=X_PROVENANCE_CONFIGURED_BRIDGE,
+                backend=backend,
+            )
             if formatted:
-                backend = _clean_text(data.get("backend") or "")
-                if backend:
-                    formatted = "{0}\n读取方式：{1}".format(formatted, backend)
                 return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, formatted, markers=["[x-post]"])
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_web_fallback("x_fetch", exc, "configured_bridge")
 
     # 通道 2：Twitter CDN syndication
     try:
         data = await asyncio.wait_for(_fetch_x_syndication(tweet_id), timeout=20.0)
-        formatted = _format_x_post(data, safe_url)
+        formatted = _format_x_post(data, safe_url, provenance=X_PROVENANCE_OFFICIAL_EMBED)
         if formatted:
             return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, formatted, markers=["[x-post]"])
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_web_fallback("x_fetch", exc, "official_embed")
 
     # 通道 3：fx/vx Twitter 镜像
     for mirror_url in _x_mirror_urls(safe_url):
@@ -1147,8 +1194,8 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
             formatted = _format_x_mirror_page(fetched, safe_url)
             if formatted:
                 return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, formatted, markers=["[x-post]"])
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_web_fallback("x_fetch", exc, "third_party_mirror")
 
     # 通道 4：GrokSearch 抓取
     if _groksearch_enabled() and not _has_sensitive_remote_query(safe_url):
@@ -1157,16 +1204,16 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
             if grok_text:
                 page = {
                     "url": safe_url,
-                    "author_name": "GrokSearch",
+                    "author_name": "",
                     "author_username": "",
                     "created_at": "",
                     "text": _clean_text(grok_text),
                 }
-                formatted = _format_x_post(page, safe_url)
+                formatted = _format_x_post(page, safe_url, provenance=X_PROVENANCE_GENERATED_EXTRACTION)
                 if formatted:
                     return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, "[grok]\n" + formatted, markers=["[grok]", "[x-post]"])
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_web_fallback("x_fetch", exc, "generated_extraction")
 
     # 全部失败
     content = (

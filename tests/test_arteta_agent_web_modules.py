@@ -1,4 +1,22 @@
 import asyncio
+import logging
+
+from plugins.arteta_agent.context import ToolContext
+
+
+def make_context(**overrides):
+    data = {
+        "bot": None,
+        "event": None,
+        "user_id": "u1",
+        "group_id": "g1",
+        "nickname": "Tester",
+        "raw_message": "",
+        "is_group": True,
+        "is_admin": False,
+    }
+    data.update(overrides)
+    return ToolContext(**data)
 
 
 def test_web_access_compatibility_module_delegates_to_web_handlers():
@@ -34,7 +52,7 @@ def test_search_web_uses_search_backend_abstraction(monkeypatch):
     class FakeBackend(object):
         name = "fake"
 
-        async def search(self, query, max_results, freshness):
+        async def search(self, query, max_results, freshness, budget):
             calls.append((query, max_results, freshness))
             return [SearchHit(
                 title="Backend source",
@@ -89,3 +107,131 @@ def test_fetch_helpers_are_extracted_with_compatible_fetch_wrapper():
     assert handlers._format_page_evidence is fetch._format_page_evidence
     assert handlers._read_limited_response is fetch._read_limited_response
     assert handlers._fetch_url_impl is fetch._fetch_url
+
+
+def test_search_backends_share_explicit_time_budget():
+    from plugins.arteta_agent.tools.web.models import SearchHit
+    from plugins.arteta_agent.tools.web.search_backends import TimeBudget, run_search_backends
+
+    now = [10.0]
+    calls = []
+    budget = TimeBudget(5.0, now_func=lambda: now[0])
+
+    class FailingBackend(object):
+        name = "first"
+        timeout_seconds = 30.0
+
+        async def search(self, query, max_results, freshness, budget):
+            calls.append(("first", round(budget.remaining(), 2)))
+            now[0] = 13.5
+            raise RuntimeError("transient backend failure")
+
+    class WorkingBackend(object):
+        name = "second"
+        timeout_seconds = 30.0
+
+        async def search(self, query, max_results, freshness, budget):
+            calls.append(("second", round(budget.remaining(), 2)))
+            return [SearchHit("Budgeted source", "https://www.arsenal.com/news/budget")]
+
+    result = asyncio.run(run_search_backends(
+        [FailingBackend(), WorkingBackend()],
+        query="Arsenal",
+        max_results=1,
+        freshness="recent",
+        budget=budget,
+    ))
+
+    assert calls == [("first", 5.0), ("second", 1.5)]
+    assert result[0].title == "Budgeted source"
+
+
+def test_search_backend_failure_logs_are_sanitized(caplog):
+    from plugins.arteta_agent.tools.web.models import SearchHit
+    from plugins.arteta_agent.tools.web.search_backends import run_search_backends
+
+    class FailingBackend(object):
+        name = "bad"
+        timeout_seconds = None
+
+        async def search(self, query, max_results, freshness, budget):
+            raise RuntimeError("secret token=abc123 https://private.example/path")
+
+    class WorkingBackend(object):
+        name = "good"
+        timeout_seconds = None
+
+        async def search(self, query, max_results, freshness, budget):
+            return [SearchHit("Clean source", "https://www.arsenal.com/news/clean")]
+
+    caplog.set_level(logging.WARNING, logger="plugins.arteta_agent.tools.web.search_backends")
+
+    result = asyncio.run(run_search_backends(
+        [FailingBackend(), WorkingBackend()],
+        query="Arsenal token=abc123",
+        max_results=1,
+        freshness="recent",
+    ))
+
+    assert result[0].title == "Clean source"
+    assert "web_search_backend_failed" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "abc123" not in caplog.text
+    assert "private.example" not in caplog.text
+
+
+def test_fetch_x_post_reports_stable_provenance(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    async def fake_x_bridge(url):
+        return {
+            "url": url,
+            "author_name": "David Ornstein",
+            "author_username": "David_Ornstein",
+            "text": "Original X text from authenticated bridge.",
+            "backend": "playwright-profile",
+        }
+
+    async def fail_public_path(*args, **kwargs):
+        raise AssertionError("public fallback should not run when bridge succeeds")
+
+    monkeypatch.setattr(web_access, "_x_fetch_bridge_enabled", lambda: True)
+    monkeypatch.setattr(web_access, "_x_fetch_bridge_fetch", fake_x_bridge)
+    monkeypatch.setattr(web_access, "_fetch_x_syndication", fail_public_path)
+
+    result = asyncio.run(web_access.fetch_x_post(
+        make_context(),
+        url="https://x.com/David_Ornstein/status/2074251813545742720",
+    ))
+
+    assert result.status == "ok"
+    assert "provenance: configured_bridge" in result.content
+    assert "bridge_backend: playwright-profile" in result.content
+
+
+def test_grok_x_fallback_is_generated_extraction_not_fake_author(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    async def empty_x_syndication(tweet_id):
+        return {}
+
+    async def empty_x_mirror(url):
+        return {}
+
+    async def fake_grok_fetch(url):
+        return "Generated extraction of the X post text."
+
+    monkeypatch.setattr(web_access, "_fetch_x_syndication", empty_x_syndication)
+    monkeypatch.setattr(web_access, "_fetch_x_mirror", empty_x_mirror)
+    monkeypatch.setattr(web_access, "_groksearch_fetch", fake_grok_fetch)
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_URL", "https://grok.example")
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
+
+    result = asyncio.run(web_access.fetch_x_post(
+        make_context(),
+        url="https://x.com/David_Ornstein/status/2074251813545742720",
+    ))
+
+    assert result.status == "ok"
+    assert "provenance: generated_extraction" in result.content
+    assert "GrokSearch" not in result.content.split("正文：", 1)[0]

@@ -3888,3 +3888,61 @@ Verification after the fix:
 
 - Consider splitting individual search parsers/backends only if the next change needs it.
 - Run deployment/smoke only after the web access package reaches a stable stop point or when explicitly requested.
+
+## 2026-07-12 Web Access Round 3 Backend Budget And X Provenance
+
+### Scope
+
+- Completed the remaining Round 3 web backend cleanup without adding new public tools.
+- Added an explicit shared search `TimeBudget` so backend fallback attempts consume one request-level budget.
+- Added sanitized fallback logging for search and X-fetch backends.
+- Added stable X provenance labels for configured bridge, public embed, mirror extraction, and Grok-generated extraction.
+
+### Changes
+
+- Added `TimeBudget` in `plugins/arteta_agent/tools/web/search_backends.py`.
+- Updated `run_search_backends()` to pass the same budget object to each backend, cap per-backend timeout by remaining budget, and log backend failures with backend name plus exception class only.
+- Kept existing monkeypatch-compatible fetch helper call shape in `_duckduckgo_search()` by enforcing remaining budget with outer `asyncio.wait_for()`.
+- Kept legacy `_duckduckgo_search()` monkeypatch compatibility by falling back when a test replacement does not accept the new `budget` keyword.
+- Added X provenance constants and formatting in `plugins/arteta_agent/tools/web/x_reader.py`.
+- Removed the old duplicate X bridge backend line and stopped labeling Grok-generated X extraction as author `GrokSearch`.
+
+### RED Checks Before Implementation
+
+- `test_search_backends_share_explicit_time_budget` failed because `TimeBudget` did not exist and backend calls did not receive a shared budget.
+- `test_search_backend_failure_logs_are_sanitized` failed because backend failures were silent.
+- `test_fetch_x_post_reports_stable_provenance` failed because bridge output did not expose stable provenance.
+- `test_grok_x_fallback_is_generated_extraction_not_fake_author` failed because Grok fallback used `author_name="GrokSearch"` and had no generated-extraction provenance.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_search_backends_share_explicit_time_budget tests/test_arteta_agent_web_modules.py::test_search_backend_failure_logs_are_sanitized tests/test_arteta_agent_web_modules.py::test_fetch_x_post_reports_stable_provenance tests/test_arteta_agent_web_modules.py::test_grok_x_fallback_is_generated_extraction_not_fake_author -q`
+  - RED result: `4 failed`.
+  - GREEN result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py -q`
+  - Initial result after budget/provenance changes: `5 failed, 220 passed`.
+  - Cause: internal fetch helper calls passed the new `timeout_seconds` keyword to old two-argument monkeypatch replacements, and legacy `_duckduckgo_search` replacements did not accept `budget`.
+  - Final result: `225 passed`.
+- `python -m pytest tests -q`
+  - Result: `592 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+- `python3.8 -m py_compile plugins/arteta_agent/tools/web_access.py plugins/arteta_agent/tools/web/*.py`
+  - Result: not run; `python3.8` is not installed on this workstation.
+- `py -3.8 -m py_compile plugins/arteta_agent/tools/web_access.py plugins/arteta_agent/tools/web/*.py`
+  - Result: not run; Windows launcher reports Python 3.8 is not installed. Available launchers were Python 3.13 and 3.10.
+
+### Risk Notes
+
+- Search backend failure logs intentionally do not include the query, URL, token-bearing exception text, or response body.
+- X provenance describes how evidence was obtained; `generated_extraction` remains a generated extraction, not an authenticated author/source identity.
+- The `_duckduckgo_search()` compatibility fallback is limited to old replacements that reject the `budget` keyword. Real search calls still use the shared budget.
+
+### Remaining
+
+- ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
+- No further Web Access features are included in this Round 3 cleanup commit.

@@ -10,6 +10,12 @@ from .security import _safe_url
 
 MAX_EXCERPT_CHARS = 1800
 
+X_PROVENANCE_OFFICIAL_API = "official_api"
+X_PROVENANCE_OFFICIAL_EMBED = "official_embed"
+X_PROVENANCE_CONFIGURED_BRIDGE = "configured_bridge"
+X_PROVENANCE_THIRD_PARTY_MIRROR = "third_party_mirror"
+X_PROVENANCE_GENERATED_EXTRACTION = "generated_extraction"
+
 
 class MetaExtractor(HTMLParser):
     """Small HTML parser that only collects meta property/name content."""
@@ -132,21 +138,27 @@ def _format_x_mirror_page(fetched: dict, source_url: str) -> str:
         "created_at": "",
         "text": text,
     }
-    return _format_x_post(page, source_url)
+    return _format_x_post(page, source_url, provenance=X_PROVENANCE_THIRD_PARTY_MIRROR)
 
 
-def _format_x_post(data: dict, source_url: str) -> str:
+def _format_x_post(data: dict, source_url: str, provenance: str = "", backend: str = "") -> str:
     text = _extract_x_text(data)
     if not text:
         return ""
 
     author_name, username = _extract_x_author(data)
     created_at = _clean_text(data.get("created_at") or data.get("date") or "")
+    provenance = _clean_text(provenance)
+    backend = _clean_text(backend)
 
     lines = [
         "[x-post]",
         "X 原帖证据：",
     ]
+    if provenance:
+        lines.append("provenance: {0}".format(provenance))
+    if backend:
+        lines.append("bridge_backend: {0}".format(backend))
     if author_name or username:
         author = author_name
         if username:
