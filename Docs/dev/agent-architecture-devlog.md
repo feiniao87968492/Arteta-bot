@@ -4183,3 +4183,55 @@ Verification after the fix:
 
 - Continue Round 3 by extracting Grok/X network client helpers or doing a final requirement-by-requirement completion audit.
 - ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
+
+## 2026-07-12 Web Access Final Local Acceptance Test Entrypoints
+
+### Scope
+
+- Added the missing test entrypoint files named by the Web Access three-round task final acceptance command list.
+- Did not change production behavior.
+
+### Changes
+
+- Added `tests/test_arteta_agent_web_search.py` with focused coverage for:
+  - search parser URL normalization;
+  - backend metadata on `JinaSearchBackend`;
+  - backend order and shared budget behavior.
+- Added `tests/test_arteta_agent_x_reader.py` with focused coverage for:
+  - X provenance formatting;
+  - generated extraction not fabricating an author;
+  - mirror metadata rejection when the author differs from the requested X URL.
+
+### RED Checks Before Implementation
+
+- `python -m pytest tests/test_arteta_agent_web_search.py -q` failed because the file did not exist.
+- `python -m pytest tests/test_arteta_agent_x_reader.py -q` failed because the file did not exist.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_search.py tests/test_arteta_agent_x_reader.py -q`
+  - Initial result after adding tests: `1 failed, 3 passed`.
+  - Cause: `_x_username()` intentionally normalizes usernames to lowercase; the new test expected original case.
+  - Final result: `4 passed`.
+- Final local acceptance commands:
+  - `python -m pytest tests/test_arteta_agent_web_security.py -q`: `7 passed`.
+  - `python -m pytest tests/test_arteta_agent_web_search.py -q`: `2 passed`.
+  - `python -m pytest tests/test_arteta_agent_web_verification.py -q`: `5 passed`.
+  - `python -m pytest tests/test_arteta_agent_x_reader.py -q`: `2 passed`.
+  - `python -m pytest tests/test_arteta_agent_runtime.py -q`: `17 passed`.
+  - `python -m pytest tests/test_arteta_agent_registry.py -q`: `192 passed`.
+  - `python -m pytest tests -q`: `604 passed`.
+  - `python -m compileall -q plugins tests tools dashboard`: passed.
+  - `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_search.py tests/test_arteta_agent_x_reader.py`: no matches.
+  - `python tools\verify_features.py --suite chat --suite agent_registry --suite agent_permissions --suite agent_loop`: passed.
+- Python 3.8 direct compile remains not run locally:
+  - `python3.8 -m py_compile plugins/arteta_agent/tools/web_access.py plugins/arteta_agent/tools/web/*.py`: command not found.
+  - `py -3.8 -m py_compile plugins/arteta_agent/tools/web_access.py plugins/arteta_agent/tools/web/*.py`: Windows launcher reports Python 3.8 is not installed; available launchers are Python 3.13 and 3.10.
+
+### Risk Notes
+
+- These tests are acceptance entrypoints over behavior already covered in broader suites. They intentionally avoid broad mocks and exercise real parser/backend/x-reader code.
+
+### Remaining
+
+- ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
