@@ -3762,7 +3762,8 @@ def test_web_fetch_rejects_non_http_urls():
 
     result = asyncio.run(web_access.web_fetch(make_context(), url="file:///etc/passwd"))
 
-    assert "只支持 http/https" in result
+    assert result.status == "error"
+    assert "只支持 http/https" in result.content
 
 
 def test_web_fetch_extracts_citable_page_metadata(monkeypatch):
@@ -3789,13 +3790,14 @@ def test_web_fetch_extracts_citable_page_metadata(monkeypatch):
 
     result = asyncio.run(web_access.web_fetch(make_context(), url="https://www.arsenal.com/news/signing"))
 
-    assert "标题：Arsenal announce signing" in result
-    assert "链接：https://www.arsenal.com/news/signing" in result
-    assert "发布时间：2026-07-01T12:00:00Z" in result
-    assert "Arsenal have announced the signing" in result
+    assert result.status == "ok"
+    assert "标题：Arsenal announce signing" in result.content
+    assert "链接：https://www.arsenal.com/news/signing" in result.content
+    assert "发布时间：2026-07-01T12:00:00Z" in result.content
+    assert "Arsenal have announced the signing" in result.content
 
 
-def test_web_fetch_uses_groksearch_when_configured(monkeypatch):
+def test_web_fetch_uses_groksearch_when_remote_proxy_enabled_and_local_fetch_fails(monkeypatch):
     from plugins.arteta_agent.tools import web_access
 
     async def fake_grok_fetch(url):
@@ -3806,14 +3808,16 @@ def test_web_fetch_uses_groksearch_when_configured(monkeypatch):
 
     monkeypatch.setattr(web_access, "GROKSEARCH_API_URL", "https://grok.example")
     monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
+    monkeypatch.setenv("ARTETA_ALLOW_REMOTE_FETCH_PROXY", "1")
     monkeypatch.setattr(web_access, "_groksearch_fetch", fake_grok_fetch)
     monkeypatch.setattr(web_access, "_fetch_url", fail_fetch)
 
     result = asyncio.run(web_access.web_fetch(make_context(), url="https://www.arsenal.com/news/signing"))
 
-    assert result.startswith("[grok]")
-    assert "https://www.arsenal.com/news/signing" in result
-    assert "GrokSearch extracted official page text" in result
+    assert result.status == "ok"
+    assert result.content.startswith("[grok]")
+    assert "https://www.arsenal.com/news/signing" in result.content
+    assert "GrokSearch extracted official page text" in result.content
 
 
 def test_web_search_reads_groksearch_env_lazily(monkeypatch):
@@ -3989,7 +3993,8 @@ def test_web_fetch_routes_x_status_urls_to_x_post_fetch(monkeypatch):
         url="https://x.com/David_Ornstein/status/2074251813545742720",
     ))
 
-    assert result == "[x-post]\nX post text"
+    assert result.status == "ok"
+    assert result.content == "[x-post]\nX post text"
     assert calls == ["https://x.com/David_Ornstein/status/2074251813545742720"]
 
 
@@ -4103,10 +4108,13 @@ def test_groksearch_timeout_reads_env_lazily(monkeypatch):
     assert web_access._groksearch_timeout() == 170.0
 
 
-def test_web_fetch_falls_back_when_groksearch_returns_empty(monkeypatch):
+def test_web_fetch_prefers_local_fetch_when_groksearch_is_configured(monkeypatch):
     from plugins.arteta_agent.tools import web_access
 
+    grok_calls = []
+
     async def empty_grok_fetch(url):
+        grok_calls.append(url)
         return None
 
     async def fake_fetch(url, timeout_seconds=10.0, max_bytes=500000):
@@ -4124,8 +4132,10 @@ def test_web_fetch_falls_back_when_groksearch_returns_empty(monkeypatch):
 
     result = asyncio.run(web_access.web_fetch(make_context(), url="https://www.arsenal.com/news/signing"))
 
-    assert "Fallback page" in result
-    assert "Fallback fetch text" in result
+    assert result.status == "ok"
+    assert grok_calls == []
+    assert "Fallback page" in result.content
+    assert "Fallback fetch text" in result.content
 
 
 def test_web_search_falls_back_to_duckduckgo_html(monkeypatch):
@@ -5740,7 +5750,8 @@ def test_web_fetch_rejects_private_network_urls():
         "http://[::1]/internal",
     ]:
         result = asyncio.run(web_access.web_fetch(make_context(), url=url))
-        assert result.startswith("[UnsafeURL]")
+        assert result.status == "error"
+        assert result.content.startswith("[UnsafeURL]")
 
 
 def test_read_document_rejects_private_network_urls():

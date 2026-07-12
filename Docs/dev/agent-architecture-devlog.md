@@ -3310,3 +3310,53 @@ Verification after the fix:
 - `ToolResult` still has no structured `data` field or typed Artifact object; decide only after the first Web handler migration proves the minimal need.
 - Full support/refute/unclear verification remains open.
 - Remote fetch proxy policy remains open.
+
+## 2026-07-12 Web Access Round 2 web_fetch Migration
+
+### Scope
+
+- Migrated the first concrete Web handler, `web_fetch`, to return the existing structured `ToolResult`.
+- Kept public tool name, schema, permission, and executor behavior compatible.
+- Did not add new `ToolResult.data` or typed Artifact classes.
+
+### Changes
+
+- `web_fetch()` now returns `ToolResult(name="web_fetch", permission="safe_read", ...)`.
+- Successful local fetches return `status="ok"` and citable page evidence in `content`.
+- Unsafe URLs, unsupported local failures, and timeouts return structured error/timeout status with `error_code`.
+- X status URLs still route through `fetch_x_post`, with the result wrapped as a `web_fetch` `ToolResult`.
+- Remote Grok `web_fetch` proxy is no longer used merely because GrokSearch is configured.
+- Remote fetch proxy requires explicit `ARTETA_ALLOW_REMOTE_FETCH_PROXY` opt-in and is only attempted after local fetch fails.
+- `tools/verify_features.py` now reads `ToolResult.content` for offline Web access checks.
+
+### RED Checks Before Implementation
+
+- `test_web_fetch_returns_structured_tool_result` failed because `web_fetch()` returned a plain string.
+- `test_web_fetch_does_not_use_remote_grok_proxy_by_default` failed because the old behavior could use Grok fetch whenever configured.
+- Existing direct `web_fetch` registry tests failed after implementation until updated to assert `ToolResult.status` and `ToolResult.content`.
+- `test_agent_registry_web_access_offline_ignores_live_grok_env` failed until `verify_features.py` was updated for structured `web_fetch` output.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_tool_result_protocol.py::test_web_fetch_returns_structured_tool_result tests/test_arteta_agent_tool_result_protocol.py::test_web_fetch_does_not_use_remote_grok_proxy_by_default -q`
+  - Result: `2 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+- `python -m pytest tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_provider.py tests/test_arteta_agent_runtime.py tests/test_arteta_agent_registry.py -q`
+  - Result: `236 passed`.
+- `python -m pytest tests/test_verify_features.py::VerifyFeaturesTests::test_agent_registry_web_access_offline_ignores_live_grok_env -q`
+  - Result: `1 passed`.
+- `python -m pytest tests -q`
+  - Result: `570 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "follow_redirects=True|dict\[|list\[|set\[|tuple\[|\| None|None \|" plugins/arteta_agent/tools/web_access.py tests/test_arteta_agent_tool_result_protocol.py tools/verify_features.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Remaining
+
+- Migrate `web_search`, `grok_search`, `fetch_x_post`, and `verify_recent_claim` to structured `ToolResult`.
+- Add sensitive URL checks before any allowed remote fetch proxy call.
+- Implement real multi-source `support/refute/unclear` verification.

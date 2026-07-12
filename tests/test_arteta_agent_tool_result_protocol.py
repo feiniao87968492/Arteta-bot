@@ -5,7 +5,7 @@ from plugins.arteta_agent.context import ToolContext
 from plugins.arteta_agent.executor import execute_tool_call_result
 from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
 from plugins.arteta_agent.response.artifacts import legacy_artifacts_for_tool
-from plugins.arteta_agent.result import TOOL_STATUS_ERROR, ToolResult
+from plugins.arteta_agent.result import TOOL_STATUS_ERROR, TOOL_STATUS_OK, ToolResult
 
 
 def make_context(**overrides):
@@ -80,3 +80,65 @@ def test_web_tool_body_marker_does_not_create_legacy_artifact():
     assert legacy_artifacts_for_tool("grok_search", body) == []
     assert legacy_artifacts_for_tool("verify_recent_claim", body) == []
     assert legacy_artifacts_for_tool("analyze_links", body) == ["[LinkSnapshotImage: /tmp/fake.png]"]
+
+
+def test_web_fetch_returns_structured_tool_result(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    async def fake_fetch(url, timeout_seconds=10.0, max_bytes=500000):
+        return {
+            "url": url,
+            "final_url": url,
+            "content_type": "text/html",
+            "text": "<html><head><title>Structured page</title></head><body>Structured body.</body></html>",
+        }
+
+    monkeypatch.setattr(web_access, "_fetch_url", fake_fetch)
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_URL", "")
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "")
+    monkeypatch.delenv("ARTETA_GROKSEARCH_API_URL", raising=False)
+    monkeypatch.delenv("ARTETA_GROKSEARCH_API_KEY", raising=False)
+
+    result = asyncio.run(web_access.web_fetch(make_context(), url="https://www.arsenal.com/news/structured"))
+
+    assert isinstance(result, ToolResult)
+    assert result.name == "web_fetch"
+    assert result.permission == "safe_read"
+    assert result.status == TOOL_STATUS_OK
+    assert result.error_code == ""
+    assert result.artifacts == []
+    assert "Structured page" in result.content
+    assert "Structured body" in result.content
+
+
+def test_web_fetch_does_not_use_remote_grok_proxy_by_default(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    remote_calls = []
+
+    async def forbidden_grok_fetch(url):
+        remote_calls.append(url)
+        return "Remote Grok proxy text should not be used."
+
+    async def fake_fetch(url, timeout_seconds=10.0, max_bytes=500000):
+        return {
+            "url": url,
+            "final_url": url,
+            "content_type": "text/html",
+            "text": "<html><head><title>Local page</title></head><body>Local fetch text.</body></html>",
+        }
+
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_URL", "https://grok.example")
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
+    monkeypatch.delenv("ARTETA_ALLOW_REMOTE_FETCH_PROXY", raising=False)
+    monkeypatch.setattr(web_access, "_groksearch_fetch", forbidden_grok_fetch)
+    monkeypatch.setattr(web_access, "_fetch_url", fake_fetch)
+
+    result = asyncio.run(web_access.web_fetch(make_context(), url="https://www.arsenal.com/news/local-first"))
+
+    assert isinstance(result, ToolResult)
+    assert result.status == TOOL_STATUS_OK
+    assert remote_calls == []
+    assert "Local page" in result.content
+    assert "Local fetch text" in result.content
+    assert "Remote Grok proxy text" not in result.content

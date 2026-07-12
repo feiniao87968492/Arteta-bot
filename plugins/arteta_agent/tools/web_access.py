@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 from ..context import ToolContext
 from ..providers.http_client import get_shared_async_client
 from ..registry import ToolSpec, ensure_tool
+from ..result import TOOL_STATUS_ERROR, TOOL_STATUS_OK, TOOL_STATUS_TIMEOUT, TOOL_STATUS_UNAVAILABLE, ToolResult
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +117,16 @@ class _ValidatedURL(object):
 def _http_client():
     """获取共享的异步 HTTP 客户端（复用连接池）。"""
     return get_shared_async_client()
+
+
+def _web_tool_result(name: str, status: str, content: str, error_code: str = "") -> ToolResult:
+    return ToolResult(
+        name=str(name or ""),
+        permission="safe_read",
+        status=str(status or TOOL_STATUS_OK),
+        content=str(content or ""),
+        error_code=str(error_code or ""),
+    )
 
 
 # 一手 / 官方来源域名（精确匹配或后缀匹配）
@@ -992,6 +1003,11 @@ def _groksearch_enabled() -> bool:
     return bool(url and key)
 
 
+def _remote_fetch_proxy_enabled() -> bool:
+    value = os.environ.get("ARTETA_ALLOW_REMOTE_FETCH_PROXY", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _x_fetch_bridge_config() -> tuple:
     """
     读取 X Fetch Bridge 配置 (API URL, API Key)，
@@ -1793,27 +1809,44 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> str:
     ).format(safe_url)
 
 
-async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHARS) -> str:
+async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHARS) -> ToolResult:
     """
     抓取指定 http/https 网页并提取标题、链接、发布时间和正文摘录。
 
     特殊处理：
     - X/Twitter 推文链接自动转发到 fetch_x_post
-    - 若 GrokSearch 已配置，优先使用 GrokSearch web_fetch（可处理 JS 页面）
-    - 回退到直接 HTTP 流式抓取
+    - 默认先直接 HTTP 流式抓取
+    - 仅显式开启 ARTETA_ALLOW_REMOTE_FETCH_PROXY 时，才在本地抓取失败后使用 GrokSearch web_fetch
     """
     safe_url = _safe_url(url)
     if not safe_url:
-        return _unsafe_url_message()
+        return _web_tool_result("web_fetch", TOOL_STATUS_ERROR, _unsafe_url_message(), "UnsafeURL")
 
     # X/Twitter 链接 → 专门的推文抓取
     if _is_x_status_url(safe_url):
-        return await fetch_x_post(ctx, safe_url)
+        x_result = await fetch_x_post(ctx, safe_url)
+        status = TOOL_STATUS_UNAVAILABLE if str(x_result).startswith("[x-post-unavailable]") else TOOL_STATUS_OK
+        return _web_tool_result("web_fetch", status, str(x_result), "XPostUnavailable" if status == TOOL_STATUS_UNAVAILABLE else "")
 
     max_chars = _safe_int(max_chars, MAX_EXCERPT_CHARS, 300, 4000)
 
-    # 优先 GrokSearch 抓取
-    if _groksearch_enabled():
+    local_error = ""
+    try:
+        fetched = await asyncio.wait_for(_fetch_url(safe_url), timeout=12.0)
+        page = _parse_page(fetched.get("final_url") or safe_url, fetched.get("text") or "")
+        page["text"] = page.get("text", "")[:max_chars]
+        return _web_tool_result("web_fetch", TOOL_STATUS_OK, _format_page_evidence(page, safe_url))
+    except asyncio.TimeoutError:
+        local_error = "[WebFetchTimeout] 抓取超时。"
+        local_error_code = "TimeoutError"
+    except ValueError as exc:
+        local_error = str(exc)
+        local_error_code = "ValueError"
+    except Exception as exc:
+        local_error = "[WebFetchError] 抓取失败：{0}: {1}".format(exc.__class__.__name__, exc)
+        local_error_code = exc.__class__.__name__
+
+    if _remote_fetch_proxy_enabled() and _groksearch_enabled():
         try:
             grok_text = await asyncio.wait_for(_groksearch_fetch(safe_url), timeout=_groksearch_timeout() + 2.0)
             if grok_text:
@@ -1823,25 +1856,14 @@ async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHA
                     "published_time": "",
                     "text": _clean_text(grok_text)[:max_chars],
                 }
-                return "[grok]\n" + _format_page_evidence(page, safe_url)
+                return _web_tool_result("web_fetch", TOOL_STATUS_OK, "[grok]\n" + _format_page_evidence(page, safe_url))
         except ValueError as exc:
-            return str(exc)
+            return _web_tool_result("web_fetch", TOOL_STATUS_ERROR, str(exc), "ValueError")
         except Exception:
             pass
 
-    # 回退：直接 HTTP 流式抓取
-    try:
-        fetched = await asyncio.wait_for(_fetch_url(safe_url), timeout=12.0)
-    except asyncio.TimeoutError:
-        return "[WebFetchTimeout] 抓取超时。"
-    except ValueError as exc:
-        return str(exc)
-    except Exception as exc:
-        return "[WebFetchError] 抓取失败：{0}: {1}".format(exc.__class__.__name__, exc)
-
-    page = _parse_page(fetched.get("final_url") or safe_url, fetched.get("text") or "")
-    page["text"] = page.get("text", "")[:max_chars]
-    return _format_page_evidence(page, safe_url)
+    status = TOOL_STATUS_TIMEOUT if local_error_code == "TimeoutError" else TOOL_STATUS_ERROR
+    return _web_tool_result("web_fetch", status, local_error, local_error_code)
 
 
 async def verify_recent_claim(ctx: ToolContext, claim: str, preferred_sources: str = "", max_results: int = 5) -> str:

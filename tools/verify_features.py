@@ -839,9 +839,11 @@ def agent_registry_web_access_offline(ctx: RunContext) -> CaseResult:
             else:
                 os.environ[key] = value
 
+    blocked_text = getattr(blocked, "content", blocked)
+    fetched_text = getattr(fetched, "content", fetched)
     ok = (
-        "只支持 http/https" in blocked
-        and "发布时间：2026-07-01" in fetched
+        "只支持 http/https" in blocked_text
+        and "发布时间：2026-07-01" in fetched_text
         and "来源等级：一手/官方来源" in verified
         and "https://www.arsenal.com/news/official-update" in verified
     )
