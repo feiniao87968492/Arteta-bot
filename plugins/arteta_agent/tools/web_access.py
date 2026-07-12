@@ -1816,7 +1816,7 @@ async def _search_web(query: str, max_results: int = 5, freshness: str = "recent
 # 对外工具函数（由 ToolSpec 注册，LLM 可调用）
 # ===================================================================
 
-async def web_search(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5) -> str:
+async def web_search(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5) -> ToolResult:
     """
     通用网页搜索工具。
 
@@ -1825,7 +1825,7 @@ async def web_search(ctx: ToolContext, query: str, freshness: str = "recent", ma
     """
     text = _clean_text(query)
     if not text:
-        return "请提供要搜索的关键词。"
+        return _web_tool_result("web_search", TOOL_STATUS_ERROR, "请提供要搜索的关键词。", "EmptyQuery")
 
     limit = _safe_int(max_results, 5, 1, MAX_SEARCH_RESULTS)
     timelimit = FRESHNESS_TO_DDG.get(str(freshness or "recent").lower())
@@ -1833,15 +1833,21 @@ async def web_search(ctx: ToolContext, query: str, freshness: str = "recent", ma
     try:
         results = await _search_web(text, max_results=limit, freshness=str(freshness or "recent"), timelimit=timelimit)
     except asyncio.TimeoutError:
-        return "[WebSearchTimeout] 搜索超时。"
+        return _web_tool_result("web_search", TOOL_STATUS_TIMEOUT, "[WebSearchTimeout] 搜索超时。", "TimeoutError")
     except Exception as exc:
-        return "[WebSearchError] 搜索失败：{0}: {1}".format(exc.__class__.__name__, exc)
+        return _web_tool_result(
+            "web_search",
+            TOOL_STATUS_ERROR,
+            "[WebSearchError] 搜索失败：{0}: {1}".format(exc.__class__.__name__, exc),
+            exc.__class__.__name__,
+        )
 
     visible_results = results[:limit]
-    return _format_search_results(visible_results)
+    markers = ["[grok]"] if any(_is_grok_result(item) for item in visible_results) else []
+    return _web_tool_result("web_search", TOOL_STATUS_OK, _format_search_results(visible_results), markers=markers)
 
 
-async def grok_search(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5) -> str:
+async def grok_search(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5) -> ToolResult:
     """
     GrokSearch 独立搜索工具。
 
@@ -1850,10 +1856,15 @@ async def grok_search(ctx: ToolContext, query: str, freshness: str = "recent", m
     """
     text = _clean_text(query)
     if not text:
-        return "请提供要用 GrokSearch 搜索的关键词。"
+        return _web_tool_result("grok_search", TOOL_STATUS_ERROR, "请提供要用 GrokSearch 搜索的关键词。", "EmptyQuery")
 
     if not _groksearch_enabled():
-        return "GrokSearch 未配置：请设置 ARTETA_GROKSEARCH_API_URL 和 ARTETA_GROKSEARCH_API_KEY。"
+        return _web_tool_result(
+            "grok_search",
+            TOOL_STATUS_UNAVAILABLE,
+            "GrokSearch 未配置：请设置 ARTETA_GROKSEARCH_API_URL 和 ARTETA_GROKSEARCH_API_KEY。",
+            "GrokSearchNotConfigured",
+        )
 
     limit = _safe_int(max_results, 5, 1, MAX_SEARCH_RESULTS)
     try:
@@ -1862,16 +1873,21 @@ async def grok_search(ctx: ToolContext, query: str, freshness: str = "recent", m
             timeout=_groksearch_timeout() + 2.0,
         )
     except asyncio.TimeoutError:
-        return "[GrokSearchTimeout] GrokSearch 搜索超时。"
+        return _web_tool_result("grok_search", TOOL_STATUS_TIMEOUT, "[GrokSearchTimeout] GrokSearch 搜索超时。", "TimeoutError")
     except Exception as exc:
-        return "[GrokSearchError] GrokSearch 搜索失败：{0}: {1}".format(exc.__class__.__name__, exc)
+        return _web_tool_result(
+            "grok_search",
+            TOOL_STATUS_ERROR,
+            "[GrokSearchError] GrokSearch 搜索失败：{0}: {1}".format(exc.__class__.__name__, exc),
+            exc.__class__.__name__,
+        )
 
     for item in results:
         if isinstance(item, dict):
             item["_backend"] = "grok"
 
     visible_results = results[:limit]
-    return _format_search_results(visible_results)
+    return _web_tool_result("grok_search", TOOL_STATUS_OK, _format_search_results(visible_results), markers=["[grok]"])
 
 
 async def fetch_x_post(ctx: ToolContext, url: str) -> str:

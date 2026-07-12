@@ -3843,9 +3843,11 @@ def test_web_search_reads_groksearch_env_lazily(monkeypatch):
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
-    assert result.startswith("[grok]")
-    assert "Lazy GrokSearch source" in result
-    assert "https://www.arsenal.com/news/lazy-grok" in result
+    assert result.status == "ok"
+    assert result.content.startswith("[grok]")
+    assert "[grok]" in result.markers
+    assert "Lazy GrokSearch source" in result.content
+    assert "https://www.arsenal.com/news/lazy-grok" in result.content
 
 
 def test_grok_search_uses_only_groksearch_backend(monkeypatch):
@@ -3876,10 +3878,12 @@ def test_grok_search_uses_only_groksearch_backend(monkeypatch):
         max_results=2,
     ))
 
-    assert result.startswith("[grok]")
+    assert result.status == "ok"
+    assert result.content.startswith("[grok]")
+    assert "[grok]" in result.markers
     assert calls == [("site:x.com Arsenal official news", 2, "recent")]
-    assert "Grok-only source" in result
-    assert "https://x.com/Arsenal/status/2074251813545742720" in result
+    assert "Grok-only source" in result.content
+    assert "https://x.com/Arsenal/status/2074251813545742720" in result.content
 
 
 def test_grok_search_does_not_fallback_when_unavailable(monkeypatch):
@@ -3896,8 +3900,9 @@ def test_grok_search_does_not_fallback_when_unavailable(monkeypatch):
 
     result = asyncio.run(web_access.grok_search(make_context(), query="Arsenal"))
 
-    assert "GrokSearch" in result
-    assert "未配置" in result
+    assert result.status == "unavailable"
+    assert "GrokSearch" in result.content
+    assert "未配置" in result.content
 
 
 def test_fetch_x_post_reads_public_syndication_payload(monkeypatch):
@@ -4173,9 +4178,10 @@ def test_web_search_falls_back_to_duckduckgo_html(monkeypatch):
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
-    assert "Arsenal official news" in result
-    assert "https://www.arsenal.com/news" in result
-    assert "Latest club updates" in result
+    assert result.status == "ok"
+    assert "Arsenal official news" in result.content
+    assert "https://www.arsenal.com/news" in result.content
+    assert "Latest club updates" in result.content
 
 
 def test_web_search_uses_groksearch_when_configured(monkeypatch):
@@ -4201,10 +4207,12 @@ def test_web_search_uses_groksearch_when_configured(monkeypatch):
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
-    assert result.startswith("[grok]")
-    assert "GrokSearch Arsenal source" in result
-    assert "https://www.arsenal.com/news/grok" in result
-    assert "Fresh result from GrokSearch" in result
+    assert result.status == "ok"
+    assert result.content.startswith("[grok]")
+    assert "[grok]" in result.markers
+    assert "GrokSearch Arsenal source" in result.content
+    assert "https://www.arsenal.com/news/grok" in result.content
+    assert "Fresh result from GrokSearch" in result.content
 
 
 def test_web_search_does_not_append_playwright_snapshot_for_grok_source(monkeypatch):
@@ -4229,8 +4237,9 @@ def test_web_search_does_not_append_playwright_snapshot_for_grok_source(monkeypa
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
-    assert result.startswith("[grok]")
-    assert "[LinkSnapshotImage:" not in result
+    assert result.status == "ok"
+    assert result.content.startswith("[grok]")
+    assert "[LinkSnapshotImage:" not in result.content
 
 
 def test_grok_snapshot_tries_next_source_when_first_fails(monkeypatch):
@@ -4313,12 +4322,13 @@ def test_web_search_reads_groksearch_sources_by_session(monkeypatch):
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
-    assert result.startswith("[grok]")
+    assert result.status == "ok"
+    assert result.content.startswith("[grok]")
     assert calls[0][0] == "web_search"
     assert calls[1] == ("get_sources", {"session_id": "session-1"})
-    assert "GrokSearch cached source" in result
-    assert "https://www.arsenal.com/news/cached" in result
-    assert "Source cached by GrokSearch" in result
+    assert "GrokSearch cached source" in result.content
+    assert "https://www.arsenal.com/news/cached" in result.content
+    assert "Source cached by GrokSearch" in result.content
 
 
 def test_web_search_reads_groksearch_content_links(monkeypatch):
@@ -4353,14 +4363,15 @@ def test_web_search_reads_groksearch_content_links(monkeypatch):
 
     result = asyncio.run(web_access.web_search(make_context(), query="site:x.com Arsenal official news", max_results=2))
 
-    assert result.startswith("[grok]")
+    assert result.status == "ok"
+    assert result.content.startswith("[grok]")
     assert calls == [("web_search", {
         "query": "site:x.com Arsenal official news",
         "max_results": 2,
         "freshness": "recent",
     })]
-    assert "https://x.com/Arsenal/status/2074251813545742720" in result
-    assert "Best of luck, Leo" in result
+    assert "https://x.com/Arsenal/status/2074251813545742720" in result.content
+    assert "Best of luck, Leo" in result.content
 
 
 def test_web_search_falls_back_when_groksearch_returns_empty(monkeypatch):
@@ -4385,8 +4396,9 @@ def test_web_search_falls_back_when_groksearch_returns_empty(monkeypatch):
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
-    assert "Legacy Arsenal source" in result
-    assert "https://www.arsenal.com/news/legacy" in result
+    assert result.status == "ok"
+    assert "Legacy Arsenal source" in result.content
+    assert "https://www.arsenal.com/news/legacy" in result.content
 
 
 def test_web_search_uses_bing_html_when_available(monkeypatch):
@@ -4413,9 +4425,10 @@ def test_web_search_uses_bing_html_when_available(monkeypatch):
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
-    assert "Arsenal official news" in result
-    assert "https://www.arsenal.com/news" in result
-    assert "Latest club updates" in result
+    assert result.status == "ok"
+    assert "Arsenal official news" in result.content
+    assert "https://www.arsenal.com/news" in result.content
+    assert "Latest club updates" in result.content
 
 
 def test_web_search_falls_back_to_jina_reader_markdown(monkeypatch):
@@ -4456,9 +4469,10 @@ def test_web_search_falls_back_to_jina_reader_markdown(monkeypatch):
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
-    assert "Arsenal News" in result
-    assert "https://www.arsenal.com/news" in result
-    assert "official home of Arsenal" in result
+    assert result.status == "ok"
+    assert "Arsenal News" in result.content
+    assert "https://www.arsenal.com/news" in result.content
+    assert "official home of Arsenal" in result.content
 
 
 def test_verify_recent_claim_prefers_primary_source(monkeypatch):

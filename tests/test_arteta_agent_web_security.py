@@ -129,8 +129,9 @@ def test_web_search_does_not_append_grok_snapshot_marker(monkeypatch):
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
-    assert "GrokSearch Arsenal source" in result
-    assert "[LinkSnapshotImage:" not in result
+    assert result.status == "ok"
+    assert "GrokSearch Arsenal source" in result.content
+    assert "[LinkSnapshotImage:" not in result.content
 
 
 def test_web_tool_registration_has_schema_bounds_and_explicit_parallel_metadata():

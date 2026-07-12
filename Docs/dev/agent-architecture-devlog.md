@@ -3425,3 +3425,49 @@ Verification after the fix:
 - Migrate `web_search`, `grok_search`, and `fetch_x_post` to structured `ToolResult`.
 - Add sensitive URL checks before an explicitly enabled remote fetch proxy call.
 - Move verification models and helpers out of `web_access.py` during Round 3.
+
+## 2026-07-12 Web Access Round 2 Search ToolResult Migration
+
+### Scope
+
+- Migrated `web_search` and `grok_search` direct handler returns to structured `ToolResult`.
+- Kept public tool names and human-readable content stable.
+- Preserved legacy `[grok]` text prefix for compatibility while also exposing `[grok]` through trusted `ToolResult.markers`.
+
+### Changes
+
+- `web_search()` now returns:
+  - `status="ok"` on successful search;
+  - `status="error"` with `error_code="EmptyQuery"` for empty queries;
+  - `status="timeout"` with `error_code="TimeoutError"` for search timeout;
+  - `status="error"` with the exception class name for other backend failures.
+- `grok_search()` now returns:
+  - `status="ok"` with `[grok]` marker on successful GrokSearch;
+  - `status="unavailable"` with `error_code="GrokSearchNotConfigured"` when GrokSearch credentials are absent;
+  - structured timeout and backend error states.
+- Updated direct-call registry and security tests to inspect `ToolResult.content`, `ToolResult.status`, and `ToolResult.markers` instead of relying on raw strings.
+
+### Compatibility
+
+- The formatted search body remains unchanged for model-facing content.
+- The `[grok]` prefix remains in `content` for existing text consumers.
+- Trusted marker extraction no longer depends on parsing untrusted tool body text.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_tool_result_protocol.py -q`
+  - Result: `205 passed`.
+- `python -m pytest tests -q`
+  - Result: `577 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web_access.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_security.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Remaining
+
+- Migrate `fetch_x_post` to structured `ToolResult`.
+- Add sensitive URL checks before an explicitly enabled remote fetch proxy call.
+- Move search and verification helpers out of `web_access.py` during Round 3.

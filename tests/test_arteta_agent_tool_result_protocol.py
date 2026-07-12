@@ -142,3 +142,43 @@ def test_web_fetch_does_not_use_remote_grok_proxy_by_default(monkeypatch):
     assert "Local page" in result.content
     assert "Local fetch text" in result.content
     assert "Remote Grok proxy text" not in result.content
+
+
+def test_web_search_returns_structured_result_with_grok_marker(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    async def fake_search(query, max_results=5, freshness="recent", timelimit=None):
+        return [{
+            "title": "Grok source",
+            "href": "https://www.arsenal.com/news/grok",
+            "body": "Fresh Grok search result.",
+            "_backend": "grok",
+        }]
+
+    monkeypatch.setattr(web_access, "_search_web", fake_search)
+
+    result = asyncio.run(web_access.web_search(make_context(), query="Arsenal latest", max_results=1))
+
+    assert isinstance(result, ToolResult)
+    assert result.name == "web_search"
+    assert result.status == TOOL_STATUS_OK
+    assert "[grok]" in result.markers
+    assert result.content.startswith("[grok]")
+    assert "Grok source" in result.content
+
+
+def test_grok_search_unconfigured_returns_structured_unavailable(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_URL", "")
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "")
+    monkeypatch.delenv("ARTETA_GROKSEARCH_API_URL", raising=False)
+    monkeypatch.delenv("ARTETA_GROKSEARCH_API_KEY", raising=False)
+
+    result = asyncio.run(web_access.grok_search(make_context(), query="Arsenal latest"))
+
+    assert isinstance(result, ToolResult)
+    assert result.name == "grok_search"
+    assert result.status == "unavailable"
+    assert result.error_code == "GrokSearchNotConfigured"
+    assert "GrokSearch 未配置" in result.content
