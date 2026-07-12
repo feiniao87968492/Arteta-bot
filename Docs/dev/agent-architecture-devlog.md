@@ -3831,3 +3831,60 @@ Verification after the fix:
 
 - Extract fetch/page parsing and formatting helpers.
 - Consider splitting individual search parsers/backends after behavior remains stable.
+
+## 2026-07-12 Web Access Round 3 Fetch/Page Extraction
+
+### Scope
+
+- Extracted page parsing, page evidence formatting, limited response reading, and the underlying HTTP fetch implementation from `handlers.py` to `fetch.py`.
+- Kept the public/private compatibility surface under `plugins.arteta_agent.tools.web_access`.
+- Preserved the existing `_fetch_url` monkeypatch contract by keeping a thin wrapper in `handlers.py` that passes the handler-local `_http_client` dependency into `fetch._fetch_url`.
+
+### Changes
+
+- Added `plugins/arteta_agent/tools/web/fetch.py` with:
+  - `PageExtractor`;
+  - `_parse_page`;
+  - `_format_page_evidence`;
+  - `_fetch_url`;
+  - `_read_limited_response`.
+- Imported page parsing and formatting helpers back into `handlers.py`.
+- Added `_fetch_url_impl` import and retained handler-level `_fetch_url` as a compatibility wrapper.
+- Removed the old page parsing/fetch bodies from `handlers.py`.
+- Added module tests proving helpers are extracted while the handler fetch wrapper still points at `fetch._fetch_url`.
+
+### RED Checks Before Implementation
+
+- `test_fetch_helpers_are_extracted_with_compatible_fetch_wrapper` failed because `plugins.arteta_agent.tools.web.fetch` did not exist.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_fetch_helpers_are_extracted_with_compatible_fetch_wrapper -q`
+  - RED result: `1 failed`.
+  - GREEN result: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_registry.py::test_web_fetch_extracts_citable_page_metadata tests/test_arteta_agent_registry.py::test_web_fetch_uses_groksearch_when_remote_proxy_enabled_and_local_fetch_fails tests/test_arteta_agent_registry.py::test_fetch_url_rechecks_final_redirect_url tests/test_arteta_agent_registry.py::test_fetch_url_stops_streaming_at_byte_limit tests/test_arteta_agent_registry.py::test_fetch_binary_rechecks_final_redirect_url tests/test_arteta_agent_tool_result_protocol.py::test_web_fetch_returns_structured_tool_result tests/test_arteta_agent_tool_result_protocol.py::test_web_fetch_does_not_use_remote_grok_proxy_by_default -q`
+  - Result: `20 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_web_modules.py -q`
+  - Result: `221 passed`.
+- `python -m pytest tests -q`
+  - Result: `588 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python3.8 -m py_compile plugins/arteta_agent/tools/web/fetch.py plugins/arteta_agent/tools/web/handlers.py`
+  - Result: not run; `python3.8` command is not installed on this workstation.
+- `py -3.8 -m py_compile plugins/arteta_agent/tools/web/fetch.py plugins/arteta_agent/tools/web/handlers.py`
+  - Result: not run; Windows launcher reports Python 3.8 is not installed.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- The handler-level `_fetch_url` wrapper is intentional. Existing tests and callers patch `web_access._http_client`; importing `fetch._fetch_url` directly would silently break that dependency injection path.
+- `fetch.py` duplicates the public user agent and default byte/excerpt limits used by the web tool. Values are unchanged; a later cleanup can centralize shared constants if needed.
+
+### Remaining
+
+- Consider splitting individual search parsers/backends only if the next change needs it.
+- Run deployment/smoke only after the web access package reaches a stable stop point or when explicitly requested.

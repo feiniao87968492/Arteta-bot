@@ -22,14 +22,20 @@ import re
 import time
 import warnings
 from html import unescape
-from html.parser import HTMLParser
 from typing import Optional
-from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from ...context import ToolContext
 from ...providers.http_client import get_shared_async_client
 from ...registry import ToolSpec, ensure_tool
 from ...result import TOOL_STATUS_ERROR, TOOL_STATUS_OK, TOOL_STATUS_TIMEOUT, TOOL_STATUS_UNAVAILABLE, ToolResult
+from .fetch import (
+    PageExtractor,
+    _fetch_url as _fetch_url_impl,
+    _format_page_evidence,
+    _parse_page,
+    _read_limited_response,
+)
 from .search_backends import CallableSearchBackend, run_search_backends
 from .security import (
     ALLOWED_FETCH_PORTS,
@@ -37,14 +43,9 @@ from .security import (
     MAX_FETCH_REDIRECTS,
     MAX_URL_CHARS,
     SENSITIVE_REMOTE_QUERY_KEYWORDS,
-    _ValidatedURL,
-    _content_length_exceeds,
     _ensure_safe_fetch_url,
     _has_sensitive_remote_query,
     _is_allowed_text_content_type,
-    _is_private_netloc,
-    _parsed_port,
-    _resolve_public_ips,
     _safe_url,
     _unsafe_url_message,
     _validate_public_http_url,
@@ -891,107 +892,19 @@ async def _append_grok_snapshot_marker(text: str, results: list) -> str:
 # 通用网页抓取 & 格式化
 # ---------------------------------------------------------------------------
 
-class PageExtractor(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.title = ""
-        self.canonical_url = ""
-        self.published_time = ""
-        self._tag_stack = []
-        self._skip_depth = 0
-        self._in_title = False
-        self._text_parts = []
-
-    def handle_starttag(self, tag, attrs):
-        tag = str(tag or "").lower()
-        attrs_dict = dict((str(k).lower(), str(v or "")) for k, v in attrs)
-        self._tag_stack.append(tag)
-
-        if tag in {"script", "style", "noscript", "svg", "nav", "footer"}:
-            self._skip_depth += 1
-
-        if tag == "title":
-            self._in_title = True
-
-        if tag == "link" and attrs_dict.get("rel", "").lower() == "canonical":
-            self.canonical_url = attrs_dict.get("href", "").strip()
-
-        if tag == "meta":
-            key = (attrs_dict.get("property") or attrs_dict.get("name") or "").lower()
-            if key in {"article:published_time", "date", "pubdate", "publishdate", "publish_date", "datepublished"}:
-                self.published_time = attrs_dict.get("content", "").strip()
-
-    def handle_endtag(self, tag):
-        tag = str(tag or "").lower()
-        if tag == "title":
-            self._in_title = False
-
-        if tag in {"script", "style", "noscript", "svg", "nav", "footer"} and self._skip_depth > 0:
-            self._skip_depth -= 1
-
-        if self._tag_stack:
-            self._tag_stack.pop()
-
-    def handle_data(self, data):
-        text = _clean_text(data)
-        if not text:
-            return
-
-        if self._in_title:
-            self.title = (self.title + " " + text).strip()
-            return
-
-        if self._skip_depth:
-            return
-
-        self._text_parts.append(text)
-
-    @property
-    def body_text(self) -> str:
-        return _clean_text(" ".join(self._text_parts))
-
-
-def _parse_page(url: str, html_text: str) -> dict:
-    """
-    使用 PageExtractor 解析 HTML，提取结构化页面信息。
-
-    返回 dict: {title, url, published_time, text}
-    """
-    parser = PageExtractor()
-    parser.feed(str(html_text or ""))
-    final_url = parser.canonical_url or url
-    return {
-        "title": _clean_text(parser.title) or "(无标题)",
-        "url": final_url,
-        "published_time": _clean_text(parser.published_time),
-        "text": parser.body_text,
-    }
-
-
-def _format_page_evidence(page: dict, source_url: str) -> str:
-    """
-    将页面证据 dict 格式化为 LLM 可读文本。
-
-    输出格式：
-    网页证据：
-    标题：...
-    来源等级：...
-    链接：...
-    发布时间：...
-    摘录：...
-    """
-    excerpt = _clean_text(page.get("text"))[:MAX_EXCERPT_CHARS]
-    lines = [
-        "网页证据：",
-        "标题：{0}".format(page.get("title") or "(无标题)"),
-        "来源等级：{0}".format(_source_level(page.get("url") or source_url)),
-        "链接：{0}".format(page.get("url") or source_url),
-    ]
-    if page.get("published_time"):
-        lines.append("发布时间：{0}".format(page.get("published_time")))
-    lines.append("摘录：{0}".format(excerpt or "未提取到正文。"))
-    return "\n".join(lines)
-
+async def _fetch_url(
+    url: str,
+    timeout_seconds: float = 10.0,
+    max_bytes: int = MAX_FETCH_BYTES,
+    max_redirects: int = MAX_FETCH_REDIRECTS,
+) -> dict:
+    return await _fetch_url_impl(
+        url,
+        timeout_seconds=timeout_seconds,
+        max_bytes=max_bytes,
+        max_redirects=max_redirects,
+        http_client_factory=_http_client,
+    )
 
 # ---------------------------------------------------------------------------
 # DuckDuckGo 搜索（多通道回退）
@@ -1062,88 +975,6 @@ async def _duckduckgo_search(query: str, max_results: int = 5, timelimit=None) -
 # ---------------------------------------------------------------------------
 # 通用 HTTP 抓取（流式，限制字节数）
 # ---------------------------------------------------------------------------
-
-async def _fetch_url(
-    url: str,
-    timeout_seconds: float = 10.0,
-    max_bytes: int = MAX_FETCH_BYTES,
-    max_redirects: int = MAX_FETCH_REDIRECTS,
-) -> dict:
-    """
-    流式抓取指定 URL，限制最大下载字节数（防止大文件撑爆内存）。
-
-    返回 dict: {url, final_url, content_type, text, truncated}
-    """
-    original_url = _ensure_safe_fetch_url(url)
-    current_url = original_url
-    headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"}
-
-    for redirect_index in range(max(0, int(max_redirects or 0)) + 1):
-        validated = _validate_public_http_url(current_url)
-        async with _http_client().stream(
-            "GET",
-            validated.url,
-            headers=headers,
-            timeout=timeout_seconds,
-            follow_redirects=False,
-        ) as response:
-            status_code = int(getattr(response, "status_code", 0) or 0)
-            is_redirect = bool(getattr(response, "is_redirect", False)) or status_code in (301, 302, 303, 307, 308)
-            if is_redirect:
-                location = response.headers.get("location", "")
-                if not location:
-                    raise ValueError("[WebFetchError] redirect response has no Location header")
-                if redirect_index >= max_redirects:
-                    raise ValueError("[WebFetchError] too many redirects")
-                current_url = urljoin(validated.url, location)
-                _validate_public_http_url(current_url)
-                continue
-
-            response.raise_for_status()
-            final_url = _ensure_safe_fetch_url(str(getattr(response, "url", validated.url)))
-            content_type = response.headers.get("content-type", "")
-            if not _is_allowed_text_content_type(content_type):
-                raise ValueError("[UnsupportedContentType] 不支持直接抓取该 Content-Type：{0}".format(content_type or "(unknown)"))
-            if _content_length_exceeds(response.headers, max_bytes):
-                raise ValueError("[ResponseTooLarge] 响应体过大。")
-            content = await _read_limited_response(response, max_bytes)
-            encoding = getattr(response, "encoding", None) or "utf-8"
-            return {
-                "url": original_url,
-                "final_url": final_url,
-                "content_type": content_type,
-                "text": content.decode(encoding, errors="replace"),
-                "truncated": len(content) >= max(0, int(max_bytes or 0)),
-            }
-
-    raise ValueError("[WebFetchError] too many redirects")
-
-
-async def _read_limited_response(response, max_bytes: int) -> bytes:
-    """
-    从流式响应中读取最多 max_bytes 字节。
-
-    到达上限后截断当前 chunk 并停止读取。
-    """
-    limit = max(0, int(max_bytes or 0))
-    chunks = []
-    total = 0
-    async for chunk in response.aiter_bytes():
-        if not chunk:
-            continue
-        remaining = limit - total
-        if remaining <= 0:
-            break
-        if len(chunk) > remaining:
-            chunks.append(chunk[:remaining])
-            total += remaining
-            break
-        chunks.append(chunk)
-        total += len(chunk)
-        if total >= limit:
-            break
-    return b"".join(chunks)
-
 
 # ---------------------------------------------------------------------------
 # 统一搜索入口（GrokSearch 优先，回退 DuckDuckGo）

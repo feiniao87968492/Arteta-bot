@@ -79,3 +79,13 @@ def test_verification_helpers_are_extracted_but_compatibly_exported():
     assert handlers._classify_evidence_stance is verification._classify_evidence_stance
     assert handlers._select_verification_verdict is verification._select_verification_verdict
     assert handlers._format_verification_result is verification._format_verification_result
+
+
+def test_fetch_helpers_are_extracted_with_compatible_fetch_wrapper():
+    from plugins.arteta_agent.tools.web import fetch, handlers
+
+    assert handlers.PageExtractor is fetch.PageExtractor
+    assert handlers._parse_page is fetch._parse_page
+    assert handlers._format_page_evidence is fetch._format_page_evidence
+    assert handlers._read_limited_response is fetch._read_limited_response
+    assert handlers._fetch_url_impl is fetch._fetch_url
