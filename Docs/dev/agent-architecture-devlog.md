@@ -4368,3 +4368,28 @@ Verification after the fix:
 - Redeployed the full `plugins/arteta_agent` Python source package to align the remote runtime with the local commit.
 - Smoke then exposed an existing startup log issue: `bot.py` imported `plugins.arteta_agent.providers.http_client` at module import time, so NoneBot later tried to load `plugins.arteta_agent` as a plugin after it was already present in `sys.modules`.
 - Fixed by changing the shutdown hook to lazy-import `close_shared_async_client` inside `close_agent_shared_async_client()`.
+
+### ECS Deployment
+
+- Deployed commits:
+  - `295cba9 feat: require web for current football freshness`;
+  - `7414b76 fix: lazy-load agent shutdown client`.
+- Remote backup directories:
+  - `/opt/arteta_bot/backups/football_freshness_295cba9_20260712221946`;
+  - `/opt/arteta_bot/backups/agent_full_freshness_295cba9_20260712222336`;
+  - `/opt/arteta_bot/backups/lazy_shutdown_7414b76_20260712223541`.
+- Remote Python version:
+  - `Python 3.8.10`.
+- Remote compile:
+  - `py_compile` passed for `bot.py`, freshness routing, runtime runner, and evaluation tool entrypoints.
+- Remote freshness evaluation:
+  - `./venv/bin/python tools/evaluate_football_freshness.py --output /tmp/football_freshness_eval_7414b76.json`
+  - Result: same 30-record seed matrix, `mismatches=[]`.
+- Remote smoke:
+  - `./venv/bin/python tools/verify_features.py --suite chat --suite agent_loop --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+- Remote service status:
+  - `arteta_bot RUNNING`;
+  - `arteta_dashboard RUNNING`.
+- Restart log health:
+  - Last 120 `logs/arteta_bot.log` lines after the final restart had no `ERROR`, `CRITICAL`, or `Traceback` matches.
