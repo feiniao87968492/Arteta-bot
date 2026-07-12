@@ -16,6 +16,7 @@ from .result import (
     TOOL_STATUS_OK,
     TOOL_STATUS_PERMISSION_REQUIRED,
     TOOL_STATUS_TIMEOUT,
+    TOOL_STATUS_UNAVAILABLE,
     ToolResult,
 )
 from .tool_policy import get_disabled_tools
@@ -125,6 +126,48 @@ def _make_result(
     return result
 
 
+def _normalize_handler_tool_result(
+    trace,
+    name: str,
+    permission: str,
+    args: dict,
+    handler_result: ToolResult,
+    duration_ms: int,
+) -> ToolResult:
+    allowed_statuses = set([
+        TOOL_STATUS_OK,
+        TOOL_STATUS_INVALID_ARGUMENTS,
+        TOOL_STATUS_PERMISSION_REQUIRED,
+        TOOL_STATUS_DISABLED,
+        TOOL_STATUS_TIMEOUT,
+        TOOL_STATUS_ERROR,
+        TOOL_STATUS_UNAVAILABLE,
+    ])
+    status = str(getattr(handler_result, "status", "") or TOOL_STATUS_OK)
+    if status not in allowed_statuses:
+        status = TOOL_STATUS_ERROR
+    pending_action_id = ""
+    if status == TOOL_STATUS_PERMISSION_REQUIRED and permission in ("confirm_write", "admin_action"):
+        pending_action_id = str(getattr(handler_result, "pending_action_id", "") or "")
+    elif status == TOOL_STATUS_PERMISSION_REQUIRED:
+        status = TOOL_STATUS_ERROR
+
+    result = ToolResult(
+        name=str(name or ""),
+        permission=str(permission or ""),
+        status=status,
+        content=str(getattr(handler_result, "content", "") or ""),
+        args=args or {},
+        pending_action_id=pending_action_id,
+        markers=list(getattr(handler_result, "markers", None) or []),
+        artifacts=list(getattr(handler_result, "artifacts", None) or []),
+        duration_ms=max(0, int(duration_ms or 0)),
+        error_code=str(getattr(handler_result, "error_code", "") or ""),
+    )
+    record_tool(trace, result.name, result.permission, result.args, result)
+    return result
+
+
 async def _run_tool_handler(spec, args: dict, ctx: ToolContext, trace, name: str) -> ToolResult:
     started = time.monotonic()
 
@@ -135,10 +178,20 @@ async def _run_tool_handler(spec, args: dict, ctx: ToolContext, trace, name: str
         result = spec.handler(ctx=ctx, **args)
         if inspect.isawaitable(result):
             result = await result
-        return str(result)
+        return result
 
     try:
-        content = await asyncio.wait_for(_run(), timeout=spec.timeout_seconds)
+        raw_result = await asyncio.wait_for(_run(), timeout=spec.timeout_seconds)
+        if isinstance(raw_result, ToolResult):
+            return _normalize_handler_tool_result(
+                trace,
+                name,
+                spec.permission,
+                args,
+                raw_result,
+                _elapsed_ms(),
+            )
+        content = str(raw_result)
         return _make_result(trace, name, spec.permission, args, TOOL_STATUS_OK, content, duration_ms=_elapsed_ms())
     except asyncio.TimeoutError:
         content = "[ToolTimeout] {0} execution timed out".format(name)

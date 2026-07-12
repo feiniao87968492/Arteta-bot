@@ -2022,14 +2022,17 @@ def test_agent_loop_prefixes_final_answer_when_grok_was_used(monkeypatch):
 
 def test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result(monkeypatch):
     from plugins.arteta_agent import planner
+    from plugins.arteta_agent.result import TOOL_STATUS_OK, ToolResult
 
     clear_registry()
 
     async def grok_search_handler(ctx: ToolContext, query: str = ""):
-        return (
-            "[grok]\n"
-            "search result\n"
-            "[LinkSnapshotImage: artifacts/agent_tools/link_snapshots/grok_source.png]"
+        return ToolResult(
+            name="web_search",
+            permission="safe_read",
+            status=TOOL_STATUS_OK,
+            content="[grok]\nsearch result",
+            artifacts=["[LinkSnapshotImage: artifacts/agent_tools/link_snapshots/grok_source.png]"],
         )
 
     register_tool(ToolSpec(

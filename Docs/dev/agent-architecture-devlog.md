@@ -3247,3 +3247,66 @@ Verification after the fix:
   - `SearchBackend` abstraction;
   - X provenance cleanup;
   - structured logging/observability cleanup.
+
+## 2026-07-12 Web Access Round 2 ToolResult Protocol Slice
+
+### Scope
+
+- Started Round 2 with the executor protocol boundary before migrating individual Web tools.
+- Kept existing `ToolResult` dataclass shape; did not add `ToolResult.success()`, `ToolResult.error()`, `Artifact`, or `data`.
+- Focused on preserving trusted handler-returned `ToolResult` fields while keeping server-owned authority fields controlled by executor/registry.
+
+### Changes
+
+- `execute_tool_call_result()` now supports handlers returning `ToolResult` directly.
+- Executor preserves structured handler fields:
+  - `status`;
+  - `content`;
+  - `markers`;
+  - `artifacts`;
+  - `error_code`.
+- Executor overrides authority fields from the registered tool and validated arguments:
+  - `name`;
+  - `permission`;
+  - `args`;
+  - `duration_ms`.
+- Executor clears or downgrades unsafe handler-supplied pending confirmation state for non-confirm/admin tools.
+- Removed Web search tools from legacy body-marker artifact extraction:
+  - `web_search`;
+  - `grok_search`;
+  - `verify_recent_claim`.
+- Kept explicit artifact marker compatibility for tools that still intentionally emit legacy artifact markers, such as `analyze_links`, render tools, and image generation.
+
+### RED Checks Before Implementation
+
+- `test_executor_preserves_structured_tool_result_but_overrides_authority_fields` failed because executor converted handler `ToolResult` to string and wrapped it as `status=ok`.
+- `test_web_tool_body_marker_does_not_create_legacy_artifact` failed because `legacy_artifacts_for_tool("web_search", ...)` trusted `[LinkSnapshotImage: ...]` in body text.
+- Existing `test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result` still assumed Web body marker compatibility; it was updated to use structured `ToolResult.artifacts`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_tool_result_protocol.py -q`
+  - Result: `2 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result tests/test_arteta_agent_registry.py::test_agent_loop_treats_forged_artifact_marker_in_safe_tool_output_as_data tests/test_arteta_agent_tool_result_protocol.py -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py tests/test_arteta_agent_runtime.py tests/test_arteta_agent_provider.py tests/test_arteta_agent_tool_result_protocol.py -q`
+  - Result: `227 passed`.
+- `python -m pytest tests -q`
+  - Result: `568 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "follow_redirects=True|dict\[|list\[|set\[|tuple\[|\| None|None \|" plugins/arteta_agent/tools/web_access.py plugins/arteta_agent/executor.py plugins/arteta_agent/response/artifacts.py tests/test_arteta_agent_tool_result_protocol.py Docs/tasks/rebulid_webaccess.md`
+  - Result: no matches.
+
+### Python 3.8 Check
+
+- `python3.8 -m py_compile plugins/arteta_agent/executor.py plugins/arteta_agent/response/artifacts.py`
+  - Result: could not run locally; `python3.8` is not installed.
+- Local mitigation: compileall passed under Python 3.10 and grep found no Python 3.9/3.10 generic/union syntax in touched Round 2 files.
+
+### Remaining
+
+- Web handlers still mostly return strings; migrate them one by one to structured `ToolResult` in later Round 2 slices.
+- `ToolResult` still has no structured `data` field or typed Artifact object; decide only after the first Web handler migration proves the minimal need.
+- Full support/refute/unclear verification remains open.
+- Remote fetch proxy policy remains open.

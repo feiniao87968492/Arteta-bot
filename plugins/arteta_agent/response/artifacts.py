@@ -8,9 +8,6 @@ LEGACY_ARTIFACT_TOOL_NAMES = {
     "render_text_to_tactical_board",
     "generate_image",
     "analyze_links",
-    "grok_search",
-    "verify_recent_claim",
-    "web_search",
 }
 
 
@@ -29,4 +26,3 @@ def legacy_artifacts_for_tool(tool_name: str, content: str) -> List[str]:
     if tool_name not in LEGACY_ARTIFACT_TOOL_NAMES:
         return []
     return extract_artifact_markers(content)
-
