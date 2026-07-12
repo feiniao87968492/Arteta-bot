@@ -142,6 +142,8 @@ refactor: 重构
 docs: 文档
 ```
 
+每次更新完成后，必须创建聚焦 Git commit，并推送到远端仓库 `origin`（`https://github.com/feiniao87968492/Arteta-bot.git`）。除非用户明确要求暂停或凭据/网络阻塞，否则不要只保留本地提交。
+
 ### 部署（线上 ECS）
 
 ```
