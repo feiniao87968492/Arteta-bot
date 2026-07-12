@@ -173,6 +173,61 @@ def test_search_backends_share_explicit_time_budget():
     assert result[0].title == "Budgeted source"
 
 
+def test_legacy_search_chain_uses_concrete_backend_classes(monkeypatch):
+    from plugins.arteta_agent.tools.web import handlers
+    from plugins.arteta_agent.tools.web.search_backends import (
+        BingHtmlBackend,
+        DDGSBackend,
+        DuckDuckGoHtmlBackend,
+        JinaSearchBackend,
+    )
+
+    monkeypatch.delenv("ARTETA_WEB_SEARCH_USE_DDGS", raising=False)
+    backends = handlers._legacy_search_backends(timelimit="m")
+
+    assert [type(backend) for backend in backends] == [
+        BingHtmlBackend,
+        DuckDuckGoHtmlBackend,
+        JinaSearchBackend,
+    ]
+
+    monkeypatch.setenv("ARTETA_WEB_SEARCH_USE_DDGS", "1")
+    backends_with_ddgs = handlers._legacy_search_backends(timelimit="m")
+    assert isinstance(backends_with_ddgs[-1], DDGSBackend)
+
+
+def test_duckduckgo_search_fallback_uses_concrete_backends(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    calls = []
+
+    async def fake_bing(query, max_results):
+        calls.append("bing")
+        return "<html></html>"
+
+    async def fake_duckduckgo(query, max_results):
+        calls.append("duckduckgo")
+        return "<html></html>"
+
+    async def fake_jina(query, max_results):
+        calls.append("jina")
+        return "## [Arsenal](https://www.arsenal.com/news)\nOfficial source."
+
+    monkeypatch.setattr(web_access, "_fetch_bing_html", fake_bing)
+    monkeypatch.setattr(web_access, "_fetch_duckduckgo_html", fake_duckduckgo)
+    monkeypatch.setattr(web_access, "_fetch_jina_duckduckgo_markdown", fake_jina)
+
+    result = asyncio.run(web_access._duckduckgo_search("Arsenal", max_results=2))
+
+    assert calls == ["bing", "duckduckgo", "jina"]
+    assert result == [{
+        "title": "Arsenal",
+        "href": "https://www.arsenal.com/news",
+        "body": "Official source.",
+        "_backend": "jina",
+    }]
+
+
 def test_search_backend_failure_logs_are_sanitized(caplog):
     from plugins.arteta_agent.tools.web.models import SearchHit
     from plugins.arteta_agent.tools.web.search_backends import run_search_backends

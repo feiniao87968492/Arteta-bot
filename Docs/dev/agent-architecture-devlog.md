@@ -4083,3 +4083,54 @@ Verification after the fix:
 
 - Continue Round 3 by extracting concrete search backend classes or residual network client helpers from `handlers.py`.
 - ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
+
+## 2026-07-12 Web Access Round 3 Concrete Search Backends
+
+### Scope
+
+- Completed the next SearchBackend abstraction step by replacing the handler-local legacy search fallback loop with concrete backend classes.
+- Kept public `web_search`, `grok_search`, and `_duckduckgo_search` compatibility behavior intact.
+
+### Changes
+
+- Added concrete backend classes in `plugins/arteta_agent/tools/web/search_backends.py`:
+  - `BingHtmlBackend`;
+  - `DuckDuckGoHtmlBackend`;
+  - `JinaSearchBackend`;
+  - `DDGSBackend`.
+- Added `_legacy_search_backends()` in `handlers.py` to construct the legacy fallback chain.
+- Rewrote `_duckduckgo_search()` to run those backends through `run_search_backends()` and then return legacy dicts.
+- Preserved the existing two-argument monkeypatch contract for `_fetch_bing_html`, `_fetch_duckduckgo_html`, and `_fetch_jina_duckduckgo_markdown`.
+- Kept DDGS opt-in behind `ARTETA_WEB_SEARCH_USE_DDGS`.
+
+### RED Checks Before Implementation
+
+- `test_legacy_search_chain_uses_concrete_backend_classes` failed because the concrete backend classes and `_legacy_search_backends()` did not exist.
+- `test_duckduckgo_search_fallback_uses_concrete_backends` failed because legacy fallback returned parser dicts directly without backend metadata and did not use concrete backend objects.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_legacy_search_chain_uses_concrete_backend_classes tests/test_arteta_agent_web_modules.py::test_duckduckgo_search_fallback_uses_concrete_backends -q`
+  - RED result: `2 failed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_legacy_search_chain_uses_concrete_backend_classes tests/test_arteta_agent_web_modules.py::test_duckduckgo_search_fallback_uses_concrete_backends tests/test_arteta_agent_registry.py::test_web_search_falls_back_to_duckduckgo_html tests/test_arteta_agent_registry.py::test_web_search_uses_bing_html_when_available tests/test_arteta_agent_registry.py::test_web_search_falls_back_to_jina_reader_markdown tests/test_arteta_agent_registry.py::test_web_search_falls_back_when_groksearch_returns_empty -q`
+  - GREEN result: `6 passed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py -q`
+  - Result: `230 passed`.
+- `python -m pytest tests -q`
+  - Result: `597 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- Backend failure logging is now centralized in `run_search_backends()` for the legacy chain as well. Logs remain sanitized and do not include query text, URLs, response bodies, or tokens.
+- `_duckduckgo_search()` still returns legacy dicts because older tests and monkeypatch paths depend on that shape.
+
+### Remaining
+
+- Continue Round 3 by extracting Grok/X network client helpers or deciding whether to retire the old private Grok snapshot helpers.
+- ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.

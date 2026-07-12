@@ -44,7 +44,15 @@ from .parsers.grok import (
 )
 from .parsers.markdown import _parse_markdown_search_results
 from .registration import register_tools
-from .search_backends import CallableSearchBackend, TimeBudget, run_search_backends
+from .search_backends import (
+    BingHtmlBackend,
+    CallableSearchBackend,
+    DDGSBackend,
+    DuckDuckGoHtmlBackend,
+    JinaSearchBackend,
+    TimeBudget,
+    run_search_backends,
+)
 from .security import (
     ALLOWED_FETCH_PORTS,
     ALLOWED_TEXT_CONTENT_TYPES,
@@ -603,77 +611,28 @@ async def _duckduckgo_search(query: str, max_results: int = 5, timelimit=None, b
     任意通道返回非空结果即停止尝试后续通道。
     """
     limit = _safe_int(max_results, 5, 1, MAX_SEARCH_RESULTS)
-
-    def _remaining_timeout(default: float) -> float:
-        if budget is None:
-            return default
-        remaining = budget.remaining()
-        if remaining is not None and remaining <= 0:
-            raise asyncio.TimeoutError("web search budget exhausted")
-        if remaining is None:
-            return default
-        return max(0.01, min(default, remaining))
-
-    # 通道 1：Bing HTML
     try:
-        bing_html = await asyncio.wait_for(
-            _fetch_bing_html(query, limit),
-            timeout=_remaining_timeout(10.0),
+        hits = await run_search_backends(
+            _legacy_search_backends(timelimit=timelimit),
+            query=query,
+            max_results=limit,
+            freshness="recent",
+            budget=budget,
         )
-        results = _parse_bing_html(bing_html, limit)
-        if results:
-            return results
-    except Exception as exc:
-        _log_web_fallback("search_backend", exc, "bing_html")
-
-    # 通道 2：DuckDuckGo HTML
-    try:
-        html_text = await asyncio.wait_for(
-            _fetch_duckduckgo_html(query, limit),
-            timeout=_remaining_timeout(12.0),
-        )
-        results = _parse_duckduckgo_html(html_text, limit)
-        if results:
-            return results
-    except Exception as exc:
-        _log_web_fallback("search_backend", exc, "duckduckgo_html")
-
-    # 通道 3：Jina AI + DuckDuckGo
-    try:
-        markdown_text = await asyncio.wait_for(
-            _fetch_jina_duckduckgo_markdown(query, limit),
-            timeout=_remaining_timeout(18.0),
-        )
-        results = _parse_markdown_search_results(markdown_text, limit)
-        if results:
-            return results
-    except Exception as exc:
-        _log_web_fallback("search_backend", exc, "jina_duckduckgo")
-
-    # 通道 4：duckduckgo_search 库（需显式开启）
-    if os.environ.get("ARTETA_WEB_SEARCH_USE_DDGS", "").lower() not in {"1", "true", "yes"}:
+    except Exception:
         return []
+    return [hit.to_legacy_dict() for hit in hits]
 
-    def _search():
-        """同步搜索函数，在 executor 中运行以避开 DDGS 的同步阻塞。"""
-        if DDGS_CLASS is None:
-            return []
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            with DDGS_CLASS(headers={"User-Agent": USER_AGENT}) as ddgs:
-                try:
-                    return list(ddgs.text(query, max_results=limit, timelimit=timelimit))
-                except TypeError:
-                    return list(ddgs.text(query, max_results=limit))
 
-    try:
-        return await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(None, _search),
-            timeout=_remaining_timeout(12.0),
-        )
-    except Exception as exc:
-        _log_web_fallback("search_backend", exc, "ddgs")
-        return []
+def _legacy_search_backends(timelimit=None) -> list:
+    backends = [
+        BingHtmlBackend(_fetch_bing_html),
+        DuckDuckGoHtmlBackend(_fetch_duckduckgo_html),
+        JinaSearchBackend(_fetch_jina_duckduckgo_markdown),
+    ]
+    if os.environ.get("ARTETA_WEB_SEARCH_USE_DDGS", "").lower() in {"1", "true", "yes"}:
+        backends.append(DDGSBackend(DDGS_CLASS, USER_AGENT, timelimit=timelimit))
+    return backends
 
 
 # ---------------------------------------------------------------------------

@@ -3,9 +3,13 @@
 import asyncio
 import logging
 import time
+import warnings
 from typing import Awaitable, Callable, Iterable, List, Optional, Protocol
 
 from .models import SearchHit
+from .parsers.bing import _parse_bing_html
+from .parsers.duckduckgo import _parse_duckduckgo_html
+from .parsers.markdown import _parse_markdown_search_results
 
 
 LOGGER = logging.getLogger(__name__)
@@ -54,6 +58,83 @@ class CallableSearchBackend(object):
             if hit.title and hit.url:
                 hits.append(hit)
         return hits[:max_results]
+
+
+def _hits_from_items(items: Iterable[object], max_results: int, default_backend: str) -> List[SearchHit]:
+    hits = []
+    for item in list(items or []):
+        hit = SearchHit.from_mapping(item, default_backend=default_backend)
+        if hit.title and hit.url:
+            hits.append(hit)
+    return hits[:max_results]
+
+
+class BingHtmlBackend(object):
+    name = "bing_html"
+
+    def __init__(self, fetch_html: Callable[[str, int], Awaitable[str]], timeout_seconds: float = 10.0):
+        self._fetch_html = fetch_html
+        self.timeout_seconds = timeout_seconds
+
+    async def search(self, query: str, max_results: int, freshness: str, budget: Optional[TimeBudget]) -> List[SearchHit]:
+        html_text = await self._fetch_html(query, max_results)
+        return _hits_from_items(_parse_bing_html(html_text, max_results), max_results, "bing")
+
+
+class DuckDuckGoHtmlBackend(object):
+    name = "duckduckgo_html"
+
+    def __init__(self, fetch_html: Callable[[str, int], Awaitable[str]], timeout_seconds: float = 12.0):
+        self._fetch_html = fetch_html
+        self.timeout_seconds = timeout_seconds
+
+    async def search(self, query: str, max_results: int, freshness: str, budget: Optional[TimeBudget]) -> List[SearchHit]:
+        html_text = await self._fetch_html(query, max_results)
+        return _hits_from_items(_parse_duckduckgo_html(html_text, max_results), max_results, "duckduckgo")
+
+
+class JinaSearchBackend(object):
+    name = "jina_duckduckgo"
+
+    def __init__(self, fetch_markdown: Callable[[str, int], Awaitable[str]], timeout_seconds: float = 18.0):
+        self._fetch_markdown = fetch_markdown
+        self.timeout_seconds = timeout_seconds
+
+    async def search(self, query: str, max_results: int, freshness: str, budget: Optional[TimeBudget]) -> List[SearchHit]:
+        markdown_text = await self._fetch_markdown(query, max_results)
+        return _hits_from_items(_parse_markdown_search_results(markdown_text, max_results), max_results, "jina")
+
+
+class DDGSBackend(object):
+    name = "ddgs"
+
+    def __init__(
+        self,
+        ddgs_class,
+        user_agent: str,
+        timelimit=None,
+        timeout_seconds: float = 12.0,
+    ):
+        self._ddgs_class = ddgs_class
+        self._user_agent = str(user_agent or "")
+        self._timelimit = timelimit
+        self.timeout_seconds = timeout_seconds
+
+    async def search(self, query: str, max_results: int, freshness: str, budget: Optional[TimeBudget]) -> List[SearchHit]:
+        if self._ddgs_class is None:
+            return []
+
+        def _search():
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                with self._ddgs_class(headers={"User-Agent": self._user_agent}) as ddgs:
+                    try:
+                        return list(ddgs.text(query, max_results=max_results, timelimit=self._timelimit))
+                    except TypeError:
+                        return list(ddgs.text(query, max_results=max_results))
+
+        results = await asyncio.get_event_loop().run_in_executor(None, _search)
+        return _hits_from_items(results, max_results, "ddgs")
 
 
 async def run_search_backends(
