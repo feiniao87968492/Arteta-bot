@@ -3994,3 +3994,49 @@ Verification after the fix:
 
 - Continue Round 3 by extracting registration/formatting or concrete search backend classes from `handlers.py`.
 - ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
+
+## 2026-07-12 Web Access Round 3 Registration Extraction
+
+### Scope
+
+- Continued Round 3 module splitting by moving Web tool registration out of `handlers.py`.
+- Kept `handlers.register_tools` and `plugins.arteta_agent.tools.web_access.register_tools` compatible.
+- Did not change public tool names, schemas, permissions, timeout values, concurrency metadata, or handlers.
+
+### Changes
+
+- Added `plugins/arteta_agent/tools/web/registration.py`.
+- Moved the five Web `ToolSpec` registrations into `registration.register_tools()`.
+- Used lazy handler imports inside `registration.register_tools()` to avoid circular imports while keeping handler references stable.
+- Removed direct `ToolSpec`/`ensure_tool` dependency from `handlers.py`.
+
+### RED Checks Before Implementation
+
+- `test_web_registration_is_extracted_but_compatibly_exported` failed because `plugins.arteta_agent.tools.web.registration` did not exist.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_web_registration_is_extracted_but_compatibly_exported -q`
+  - RED result: `1 failed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_web_registration_is_extracted_but_compatibly_exported tests/test_arteta_agent_web_security.py::test_web_tool_registration_has_schema_bounds_and_explicit_parallel_metadata -q`
+  - GREEN result: `2 passed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py -q`
+  - Result: `227 passed`.
+- `python -m pytest tests -q`
+  - Result: `594 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- `registration.py` imports `handlers` inside the function body, not at module import time. This avoids a registration/handler circular import while preserving existing handler identity in ToolSpec.
+- The registration schema is intentionally copied unchanged from the previous handler-local implementation.
+
+### Remaining
+
+- Continue Round 3 by extracting formatting or concrete search backend classes from `handlers.py`.
+- ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.

@@ -123,6 +123,12 @@ def test_search_parsers_are_extracted_but_compatibly_exported():
     assert handlers._parse_groksearch_sources_response is grok._parse_groksearch_sources_response
 
 
+def test_web_registration_is_extracted_but_compatibly_exported():
+    from plugins.arteta_agent.tools.web import handlers, registration
+
+    assert handlers.register_tools is registration.register_tools
+
+
 def test_search_backends_share_explicit_time_budget():
     from plugins.arteta_agent.tools.web.models import SearchHit
     from plugins.arteta_agent.tools.web.search_backends import TimeBudget, run_search_backends
