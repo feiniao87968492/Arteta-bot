@@ -3932,11 +3932,13 @@ def test_fetch_x_post_reads_public_syndication_payload(monkeypatch):
         url="https://x.com/David_Ornstein/status/2074251813545742720",
     ))
 
-    assert result.startswith("[x-post]\n")
+    assert result.status == "ok"
+    assert result.content.startswith("[x-post]\n")
+    assert "[x-post]" in result.markers
     assert calls == ["2074251813545742720"]
-    assert "David Ornstein" in result
-    assert "@David_Ornstein" in result
-    assert "Arsenal injury update via original X post" in result
+    assert "David Ornstein" in result.content
+    assert "@David_Ornstein" in result.content
+    assert "Arsenal injury update via original X post" in result.content
 
 
 def test_fetch_x_post_prefers_authenticated_x_bridge(monkeypatch):
@@ -3968,10 +3970,12 @@ def test_fetch_x_post_prefers_authenticated_x_bridge(monkeypatch):
         url="https://x.com/David_Ornstein/status/2074251813545742720",
     ))
 
-    assert result.startswith("[x-post]")
+    assert result.status == "ok"
+    assert result.content.startswith("[x-post]")
+    assert "[x-post]" in result.markers
     assert calls == ["https://x.com/David_Ornstein/status/2074251813545742720"]
-    assert "Original X text from authenticated browser" in result
-    assert "playwright-profile" in result
+    assert "Original X text from authenticated browser" in result.content
+    assert "playwright-profile" in result.content
 
 
 def test_web_fetch_routes_x_status_urls_to_x_post_fetch(monkeypatch):
@@ -4034,9 +4038,11 @@ def test_fetch_x_post_reads_public_mirror_metadata(monkeypatch):
         url="https://x.com/David_Ornstein/status/2074251813545742720",
     ))
 
-    assert result.startswith("[x-post]")
-    assert "Amadou Onana has suffered an ACL injury update" in result
-    assert "fxtwitter.com/David_Ornstein/status/2074251813545742720" in result
+    assert result.status == "ok"
+    assert result.content.startswith("[x-post]")
+    assert "[x-post]" in result.markers
+    assert "Amadou Onana has suffered an ACL injury update" in result.content
+    assert "fxtwitter.com/David_Ornstein/status/2074251813545742720" in result.content
 
 
 def test_fetch_x_post_rejects_mirror_metadata_for_different_author(monkeypatch):
@@ -4072,8 +4078,10 @@ def test_fetch_x_post_rejects_mirror_metadata_for_different_author(monkeypatch):
         url="https://x.com/David_Ornstein/status/2074251813545742720",
     ))
 
-    assert result.startswith("[x-post-unavailable]")
-    assert "Best of luck, Leo" not in result
+    assert result.status == "unavailable"
+    assert result.error_code == "XPostUnavailable"
+    assert result.content.startswith("[x-post-unavailable]")
+    assert "Best of luck, Leo" not in result.content
 
 
 def test_fetch_x_post_degrades_clearly_when_original_text_unavailable(monkeypatch):
@@ -4099,9 +4107,11 @@ def test_fetch_x_post_degrades_clearly_when_original_text_unavailable(monkeypatc
         url="https://x.com/David_Ornstein/status/2074251813545742720",
     ))
 
-    assert result.startswith("[x-post-unavailable]")
-    assert "无法读取 X 原帖正文" in result
-    assert "截图" in result
+    assert result.status == "unavailable"
+    assert result.error_code == "XPostUnavailable"
+    assert result.content.startswith("[x-post-unavailable]")
+    assert "无法读取 X 原帖正文" in result.content
+    assert "截图" in result.content
 
 
 def test_groksearch_timeout_reads_env_lazily(monkeypatch):

@@ -5,7 +5,7 @@ from plugins.arteta_agent.context import ToolContext
 from plugins.arteta_agent.executor import execute_tool_call_result
 from plugins.arteta_agent.registry import ToolSpec, clear_registry, register_tool
 from plugins.arteta_agent.response.artifacts import legacy_artifacts_for_tool
-from plugins.arteta_agent.result import TOOL_STATUS_ERROR, TOOL_STATUS_OK, ToolResult
+from plugins.arteta_agent.result import TOOL_STATUS_ERROR, TOOL_STATUS_OK, TOOL_STATUS_UNAVAILABLE, ToolResult
 
 
 def make_context(**overrides):
@@ -182,3 +182,100 @@ def test_grok_search_unconfigured_returns_structured_unavailable(monkeypatch):
     assert result.status == "unavailable"
     assert result.error_code == "GrokSearchNotConfigured"
     assert "GrokSearch 未配置" in result.content
+
+
+def test_fetch_x_post_returns_structured_tool_result(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    async def fake_x_syndication(tweet_id):
+        return {
+            "id": tweet_id,
+            "url": "https://x.com/David_Ornstein/status/2074251813545742720",
+            "author_name": "David Ornstein",
+            "author_username": "David_Ornstein",
+            "created_at": "2026-07-07T10:00:00Z",
+            "text": "Structured X post text.",
+        }
+
+    async def fail_grok_fetch(*args, **kwargs):
+        raise AssertionError("Grok fetch should not run when syndication succeeds")
+
+    monkeypatch.setattr(web_access, "_fetch_x_syndication", fake_x_syndication)
+    monkeypatch.setattr(web_access, "_groksearch_fetch", fail_grok_fetch)
+
+    result = asyncio.run(web_access.fetch_x_post(
+        make_context(),
+        url="https://x.com/David_Ornstein/status/2074251813545742720",
+    ))
+
+    assert isinstance(result, ToolResult)
+    assert result.name == "fetch_x_post"
+    assert result.status == TOOL_STATUS_OK
+    assert result.error_code == ""
+    assert "[x-post]" in result.markers
+    assert result.content.startswith("[x-post]\n")
+    assert "Structured X post text." in result.content
+
+
+def test_web_fetch_preserves_structured_x_post_status_and_markers(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    async def fake_fetch_x_post(ctx, url):
+        return ToolResult(
+            name="fetch_x_post",
+            permission="safe_read",
+            status=TOOL_STATUS_UNAVAILABLE,
+            content="[x-post-unavailable]\nX text is unavailable.",
+            error_code="XPostUnavailable",
+            markers=["[x-post-unavailable]"],
+        )
+
+    async def fail_fetch_url(*args, **kwargs):
+        raise AssertionError("normal web fetch should not run for x.com status URLs")
+
+    monkeypatch.setattr(web_access, "fetch_x_post", fake_fetch_x_post)
+    monkeypatch.setattr(web_access, "_fetch_url", fail_fetch_url)
+
+    result = asyncio.run(web_access.web_fetch(
+        make_context(),
+        url="https://x.com/David_Ornstein/status/2074251813545742720",
+    ))
+
+    assert result.name == "web_fetch"
+    assert result.status == TOOL_STATUS_UNAVAILABLE
+    assert result.error_code == "XPostUnavailable"
+    assert result.markers == ["[x-post-unavailable]"]
+    assert result.content == "[x-post-unavailable]\nX text is unavailable."
+
+
+def test_web_fetch_revalidates_url_before_remote_fetch_proxy(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    validate_calls = []
+    remote_calls = []
+
+    async def fail_local_fetch(url, timeout_seconds=10.0, max_bytes=500000):
+        raise RuntimeError("local fetch failed")
+
+    def reject_proxy_url(url):
+        validate_calls.append(url)
+        raise ValueError(web_access._unsafe_url_message())
+
+    async def forbidden_grok_fetch(url):
+        remote_calls.append(url)
+        return "Remote proxy text should not be used."
+
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_URL", "https://grok.example")
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
+    monkeypatch.setenv("ARTETA_ALLOW_REMOTE_FETCH_PROXY", "1")
+    monkeypatch.setattr(web_access, "_fetch_url", fail_local_fetch)
+    monkeypatch.setattr(web_access, "_validate_public_http_url", reject_proxy_url)
+    monkeypatch.setattr(web_access, "_groksearch_fetch", forbidden_grok_fetch)
+
+    result = asyncio.run(web_access.web_fetch(make_context(), url="https://www.arsenal.com/news/proxy-check"))
+
+    assert validate_calls == ["https://www.arsenal.com/news/proxy-check"]
+    assert remote_calls == []
+    assert result.status == TOOL_STATUS_ERROR
+    assert result.error_code == "ValueError"
+    assert "[UnsafeURL]" in result.content

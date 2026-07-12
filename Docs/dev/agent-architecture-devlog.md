@@ -3471,3 +3471,53 @@ Verification after the fix:
 - Migrate `fetch_x_post` to structured `ToolResult`.
 - Add sensitive URL checks before an explicitly enabled remote fetch proxy call.
 - Move search and verification helpers out of `web_access.py` during Round 3.
+
+## 2026-07-12 Web Access Round 2 X Fetch ToolResult Migration
+
+### Scope
+
+- Migrated `fetch_x_post` direct handler returns to structured `ToolResult`.
+- Preserved the existing human-readable `[x-post]`, `[grok]`, and `[x-post-unavailable]` content prefixes for compatibility.
+- Added an explicit DNS-aware validation gate before the optional Grok remote fetch proxy can receive a URL after local fetch failure.
+
+### Changes
+
+- `fetch_x_post()` now returns:
+  - `status="ok"` with marker `[x-post]` for X Fetch Bridge, syndication, and mirror success paths;
+  - `status="ok"` with markers `[grok]` and `[x-post]` when the Grok fetch fallback supplies X post text;
+  - `status="unavailable"` with `error_code="XPostUnavailable"` when all X channels fail;
+  - `status="error"` with `error_code="InvalidXStatusURL"` for non-X/non-status URLs.
+- `web_fetch()` now preserves structured X subtool `status`, `content`, `error_code`, and `markers` instead of inferring state from raw text.
+- Before using `ARTETA_ALLOW_REMOTE_FETCH_PROXY`, `web_fetch()` revalidates the URL through `_validate_public_http_url()` so the remote proxy path cannot skip the same DNS-aware SSRF gate used by local fetch.
+
+### RED Checks Before Implementation
+
+- `test_fetch_x_post_returns_structured_tool_result` failed because `fetch_x_post()` still returned a raw string.
+- `test_web_fetch_preserves_structured_x_post_status_and_markers` failed because `web_fetch()` dropped structured markers from an X subtool result.
+- `test_web_fetch_revalidates_url_before_remote_fetch_proxy` failed because the remote proxy path did not call the DNS-aware validator before `_groksearch_fetch()`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_tool_result_protocol.py -q`
+  - RED result before implementation: `3 failed, 6 passed`.
+  - GREEN result after implementation: `9 passed`.
+- `python -m pytest tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_security.py -q`
+  - Result: `208 passed`.
+- `python -m pytest tests -q`
+  - Result: `580 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web_access.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_security.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- Python 3.8 is still not available in the local Windows launcher, so direct `python3.8 -m py_compile` could not be run here. The touched files were checked for Python 3.9+ annotation syntax and compiled under the available interpreter.
+- The optional remote fetch proxy still depends on the remote service enforcing its own SSRF and egress policy; local validation prevents this code path from knowingly forwarding unsafe URLs from this agent.
+
+### Remaining
+
+- Decide whether a minimal `ToolResult.data` field is needed after all Web tools now return structured status/content/markers.
+- Move search, X, and verification helpers out of `web_access.py` during Round 3 without changing behavior.

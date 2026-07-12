@@ -1890,7 +1890,7 @@ async def grok_search(ctx: ToolContext, query: str, freshness: str = "recent", m
     return _web_tool_result("grok_search", TOOL_STATUS_OK, _format_search_results(visible_results), markers=["[grok]"])
 
 
-async def fetch_x_post(ctx: ToolContext, url: str) -> str:
+async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
     """
     抓取 X/Twitter 推文原文，多通道自动降级。
 
@@ -1905,7 +1905,7 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> str:
     safe_url = _safe_url(url)
     tweet_id = _x_status_id(safe_url)
     if not safe_url or not tweet_id:
-        return "请提供 x.com/twitter.com 的 status 链接。"
+        return _web_tool_result("fetch_x_post", TOOL_STATUS_ERROR, "请提供 x.com/twitter.com 的 status 链接。", "InvalidXStatusURL")
 
     # 通道 1：X Fetch Bridge
     if _x_fetch_bridge_enabled():
@@ -1916,7 +1916,7 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> str:
                 backend = _clean_text(data.get("backend") or "")
                 if backend:
                     formatted = "{0}\n读取方式：{1}".format(formatted, backend)
-                return formatted
+                return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, formatted, markers=["[x-post]"])
         except Exception:
             pass
 
@@ -1925,7 +1925,7 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> str:
         data = await asyncio.wait_for(_fetch_x_syndication(tweet_id), timeout=20.0)
         formatted = _format_x_post(data, safe_url)
         if formatted:
-            return formatted
+            return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, formatted, markers=["[x-post]"])
     except Exception:
         pass
 
@@ -1935,7 +1935,7 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> str:
             fetched = await asyncio.wait_for(_fetch_x_mirror(mirror_url), timeout=20.0)
             formatted = _format_x_mirror_page(fetched, safe_url)
             if formatted:
-                return formatted
+                return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, formatted, markers=["[x-post]"])
         except Exception:
             pass
 
@@ -1953,17 +1953,18 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> str:
                 }
                 formatted = _format_x_post(page, safe_url)
                 if formatted:
-                    return "[grok]\n" + formatted
+                    return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, "[grok]\n" + formatted, markers=["[grok]", "[x-post]"])
         except Exception:
             pass
 
     # 全部失败
-    return (
+    content = (
         "[x-post-unavailable]\n"
         "无法读取 X 原帖正文：X 可能要求登录、JS 渲染或触发反爬限制。\n"
         "链接：{0}\n"
         "请让用户提供原帖截图、复制原文，或改用可公开打开的权威来源页面再核实。"
     ).format(safe_url)
+    return _web_tool_result("fetch_x_post", TOOL_STATUS_UNAVAILABLE, content, "XPostUnavailable", markers=["[x-post-unavailable]"])
 
 
 async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHARS) -> ToolResult:
@@ -1982,6 +1983,14 @@ async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHA
     # X/Twitter 链接 → 专门的推文抓取
     if _is_x_status_url(safe_url):
         x_result = await fetch_x_post(ctx, safe_url)
+        if isinstance(x_result, ToolResult):
+            return _web_tool_result(
+                "web_fetch",
+                x_result.status,
+                x_result.content,
+                x_result.error_code,
+                markers=x_result.markers,
+            )
         status = TOOL_STATUS_UNAVAILABLE if str(x_result).startswith("[x-post-unavailable]") else TOOL_STATUS_OK
         return _web_tool_result("web_fetch", status, str(x_result), "XPostUnavailable" if status == TOOL_STATUS_UNAVAILABLE else "")
 
@@ -2005,6 +2014,7 @@ async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHA
 
     if _remote_fetch_proxy_enabled() and _groksearch_enabled():
         try:
+            _validate_public_http_url(safe_url)
             grok_text = await asyncio.wait_for(_groksearch_fetch(safe_url), timeout=_groksearch_timeout() + 2.0)
             if grok_text:
                 page = {
