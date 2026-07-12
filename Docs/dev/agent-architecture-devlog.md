@@ -3670,3 +3670,57 @@ Verification after the fix:
 - Extract fetch/page parsing and formatting helpers.
 - Introduce `SearchBackend` abstraction and typed internal search hit models.
 - Extract X reader and verification helpers while keeping public tool names unchanged.
+
+## 2026-07-12 Web Access Round 3 Search Backend Abstraction
+
+### Scope
+
+- Added internal structured search models and a minimal `SearchBackend` abstraction.
+- Routed `_search_web()` through the backend abstraction while preserving the old public return shape (`list[dict]`) for existing formatters and tests.
+- Kept the existing Grok-first, legacy fallback behavior.
+
+### Changes
+
+- Added `plugins/arteta_agent/tools/web/models.py`:
+  - `SearchHit` dataclass;
+  - `from_mapping()` compatibility adapter for legacy dict search results;
+  - `to_legacy_dict()` adapter for existing formatters.
+- Added `plugins/arteta_agent/tools/web/search_backends.py`:
+  - `SearchBackend` protocol;
+  - `CallableSearchBackend` adapter for current search functions;
+  - `run_search_backends()` sequential runner.
+- Added `_search_backends_for_request()` in `handlers.py`:
+  - wraps `_groksearch_search()` when GrokSearch is configured;
+  - always appends the legacy `_duckduckgo_search()` fallback;
+  - keeps Grok errors non-fatal and keeps the final backend error/timeout behavior visible to callers.
+- Updated module tests to prove `_search_web()` can run through a fake backend and still return the legacy dict shape.
+
+### RED Checks Before Implementation
+
+- `test_search_web_uses_search_backend_abstraction` failed because `plugins.arteta_agent.tools.web.models` did not exist.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py -q`
+  - RED result before implementation: `1 failed, 2 passed`.
+  - GREEN result after implementation: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_tool_result_protocol.py -q`
+  - Result: `215 passed`.
+- `python -m pytest tests -q`
+  - Result: `585 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- Search parsers still return legacy dictionaries internally; `SearchHit.from_mapping()` is the compatibility bridge.
+- More granular backend classes (`GrokSearchBackend`, `BingHtmlBackend`, etc.) remain future extraction work, but the execution path now has a real backend interface and runner.
+
+### Remaining
+
+- Extract fetch/page parsing and formatting helpers.
+- Extract X reader and verification helpers while keeping public tool names unchanged.

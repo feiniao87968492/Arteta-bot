@@ -1,3 +1,6 @@
+import asyncio
+
+
 def test_web_access_compatibility_module_delegates_to_web_handlers():
     from plugins.arteta_agent.tools import web_access
     from plugins.arteta_agent.tools.web import handlers
@@ -20,3 +23,34 @@ def test_web_security_helpers_are_extracted_but_compatibly_exported():
     assert handlers._validate_public_http_url is security._validate_public_http_url
     assert handlers._has_sensitive_remote_query is security._has_sensitive_remote_query
     assert handlers._is_allowed_text_content_type is security._is_allowed_text_content_type
+
+
+def test_search_web_uses_search_backend_abstraction(monkeypatch):
+    from plugins.arteta_agent.tools.web import handlers
+    from plugins.arteta_agent.tools.web.models import SearchHit
+
+    calls = []
+
+    class FakeBackend(object):
+        name = "fake"
+
+        async def search(self, query, max_results, freshness):
+            calls.append((query, max_results, freshness))
+            return [SearchHit(
+                title="Backend source",
+                url="https://www.arsenal.com/news/backend",
+                snippet="Backend abstraction result.",
+                backend="fake",
+            )]
+
+    monkeypatch.setattr(handlers, "_search_backends_for_request", lambda freshness, timelimit: [FakeBackend()])
+
+    result = asyncio.run(handlers._search_web("Arsenal", max_results=2, freshness="recent", timelimit="m"))
+
+    assert calls == [("Arsenal", 2, "recent")]
+    assert result == [{
+        "title": "Backend source",
+        "href": "https://www.arsenal.com/news/backend",
+        "body": "Backend abstraction result.",
+        "_backend": "fake",
+    }]

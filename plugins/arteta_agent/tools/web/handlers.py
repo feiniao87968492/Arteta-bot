@@ -31,6 +31,7 @@ from ...context import ToolContext
 from ...providers.http_client import get_shared_async_client
 from ...registry import ToolSpec, ensure_tool
 from ...result import TOOL_STATUS_ERROR, TOOL_STATUS_OK, TOOL_STATUS_TIMEOUT, TOOL_STATUS_UNAVAILABLE, ToolResult
+from .search_backends import CallableSearchBackend, run_search_backends
 from .security import (
     ALLOWED_FETCH_PORTS,
     ALLOWED_TEXT_CONTENT_TYPES,
@@ -1635,25 +1636,39 @@ async def _search_web(query: str, max_results: int = 5, freshness: str = "recent
     若 GrokSearch 已配置，优先使用；失败或超时则回退到 DuckDuckGo。
     """
     limit = _safe_int(max_results, 5, 1, MAX_SEARCH_RESULTS)
+    hits = await run_search_backends(
+        _search_backends_for_request(freshness=freshness, timelimit=timelimit),
+        query=query,
+        max_results=limit,
+        freshness=freshness,
+    )
+    return [hit.to_legacy_dict() for hit in hits]
+
+
+def _search_backends_for_request(freshness: str = "recent", timelimit=None) -> list:
+    backends = []
 
     if _groksearch_enabled():
-        try:
-            grok_results = await asyncio.wait_for(
-                _groksearch_search(query, max_results=limit, freshness=freshness),
-                timeout=_groksearch_timeout() + 2.0,
-            )
-            if grok_results:
-                for item in grok_results:
-                    if isinstance(item, dict):
-                        item["_backend"] = "grok"
-                return grok_results[:limit]
-        except Exception:
-            pass
+        async def _run_grok(query: str, max_results: int, freshness_arg: str):
+            return await _groksearch_search(query, max_results=max_results, freshness=freshness_arg)
 
-    return await asyncio.wait_for(
-        _duckduckgo_search(query, max_results=limit, timelimit=timelimit),
-        timeout=12.0,
-    )
+        backends.append(CallableSearchBackend(
+            name="grok",
+            func=_run_grok,
+            timeout_seconds=_groksearch_timeout() + 2.0,
+            result_backend="grok",
+        ))
+
+    async def _run_legacy(query: str, max_results: int, freshness_arg: str):
+        return await _duckduckgo_search(query, max_results=max_results, timelimit=timelimit)
+
+    backends.append(CallableSearchBackend(
+        name="legacy",
+        func=_run_legacy,
+        timeout_seconds=12.0,
+        result_backend="",
+    ))
+    return backends
 
 
 # ===================================================================
