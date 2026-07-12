@@ -4558,3 +4558,34 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - Commit and push this manual smoke acceptance slice.
 - Redeploy `plugins/arteta_agent/routing/freshness.py` to ECS.
 - Run remote Python 3.8 compile, seed eval, service restart, smoke, and log health checks again because production code changed after commit `73f375e`.
+
+### ECS Deployment
+
+- Deployed commit: `927ee04 fix: cover implicit Arsenal fixture smoke route`.
+- Remote path: `/opt/arteta_bot`.
+- Uploaded:
+  - `plugins/arteta_agent/routing/freshness.py`.
+- Remote backup directory:
+  - `/opt/arteta_bot/backups/football_freshness_smoke_927ee04_20260712234125`.
+- Remote Python version:
+  - `Python 3.8.10`.
+- Remote compile:
+  - `./venv/bin/python -m py_compile plugins/arteta_agent/routing/freshness.py`: passed.
+- Remote seed evaluation:
+  - `./venv/bin/python tools/evaluate_football_freshness.py --output /tmp/football_freshness_eval_927ee04.json`
+  - Result: `30` repo-safe seed records, `required_recall=1.0`, `required_precision=1.0`, `mismatches=[]`.
+- Restarted services:
+  - `supervisorctl restart arteta_bot arteta_dashboard`.
+- Remote service status:
+  - `arteta_bot RUNNING`;
+  - `arteta_dashboard RUNNING`.
+- Remote smoke:
+  - `./venv/bin/python tools/verify_features.py --suite chat --suite agent_loop --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+- Restart log health:
+  - Last 120 `logs/arteta_bot.log` lines after restart had no `ERROR`, `CRITICAL`, or `Traceback` matches.
+
+### Final Status
+
+- The task-plan manual smoke matrix is now covered by automated routing/planning acceptance tests.
+- No football freshness plan acceptance item remains open from this follow-up.
