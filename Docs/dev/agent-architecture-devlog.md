@@ -3620,3 +3620,53 @@ Verification after the fix:
 - Extract security/fetch helpers into focused modules.
 - Introduce `SearchBackend` abstraction and typed internal search hit models.
 - Extract X reader and verification helpers while keeping public tool names unchanged.
+
+## 2026-07-12 Web Access Round 3 Security Module Extraction
+
+### Scope
+
+- Extracted URL, SSRF, content-type, content-length, and sensitive-query helpers from `tools/web/handlers.py` to `tools/web/security.py`.
+- Preserved compatibility by importing the same private helper names back into `handlers.py`, so legacy access through `plugins.arteta_agent.tools.web_access._safe_url` still works.
+- Did not change public tool behavior or schema.
+
+### Changes
+
+- Added `plugins/arteta_agent/tools/web/security.py` with:
+  - `_ValidatedURL`;
+  - URL syntax and netloc validation;
+  - DNS-aware public IP validation;
+  - sensitive remote query detection;
+  - text Content-Type and Content-Length helpers;
+  - fetch URL constants.
+- Removed duplicate helper implementations from `handlers.py`.
+- Extended `tests/test_arteta_agent_web_modules.py` to assert compatibility exports still point at the extracted security helpers.
+
+### RED Checks Before Implementation
+
+- `test_web_security_helpers_are_extracted_but_compatibly_exported` failed because `plugins.arteta_agent.tools.web.security` did not exist.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_tool_result_protocol.py -q`
+  - Result: `20 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py tests/test_arteta_agent_provider.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_web_modules.py -q`
+  - Result: `215 passed`.
+- `python -m pytest tests -q`
+  - Result: `584 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_provider.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- The extracted module keeps underscore-prefixed names because current tests and compatibility callers still use the old private helper names through `web_access`.
+- Stronger connection-layer SSRF protection such as IP pinning remains outside this application-layer extraction.
+
+### Remaining
+
+- Extract fetch/page parsing and formatting helpers.
+- Introduce `SearchBackend` abstraction and typed internal search hit models.
+- Extract X reader and verification helpers while keeping public tool names unchanged.

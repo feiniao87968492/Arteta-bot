@@ -16,23 +16,39 @@ Web 访问工具模块 —— ArtetaBot 的网络搜索、网页抓取与事实�
 
 import asyncio
 import base64
-import ipaddress
 import json
 import os
 import re
-import socket
 import time
 import warnings
 from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
-from typing import Optional, Set, Tuple
+from typing import Optional
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 from ...context import ToolContext
 from ...providers.http_client import get_shared_async_client
 from ...registry import ToolSpec, ensure_tool
 from ...result import TOOL_STATUS_ERROR, TOOL_STATUS_OK, TOOL_STATUS_TIMEOUT, TOOL_STATUS_UNAVAILABLE, ToolResult
+from .security import (
+    ALLOWED_FETCH_PORTS,
+    ALLOWED_TEXT_CONTENT_TYPES,
+    MAX_FETCH_REDIRECTS,
+    MAX_URL_CHARS,
+    SENSITIVE_REMOTE_QUERY_KEYWORDS,
+    _ValidatedURL,
+    _content_length_exceeds,
+    _ensure_safe_fetch_url,
+    _has_sensitive_remote_query,
+    _is_allowed_text_content_type,
+    _is_private_netloc,
+    _parsed_port,
+    _resolve_public_ips,
+    _safe_url,
+    _unsafe_url_message,
+    _validate_public_http_url,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -47,39 +63,6 @@ MAX_SEARCH_RESULTS = 8
 
 # 单次网页抓取最大字节数（约 500KB）
 MAX_FETCH_BYTES = 500_000
-
-# URL 最大长度，和工具 schema 保持一致
-MAX_URL_CHARS = 2048
-
-# 抓取 URL 默认只允许常规 HTTP(S) 端口
-ALLOWED_FETCH_PORTS = set([80, 443])
-
-# 手动重定向上限
-MAX_FETCH_REDIRECTS = 5
-
-# 允许直接作为文本网页处理的 Content-Type
-ALLOWED_TEXT_CONTENT_TYPES = (
-    "text/html",
-    "text/plain",
-    "application/xhtml+xml",
-    "application/json",
-)
-
-SENSITIVE_REMOTE_QUERY_KEYWORDS = set([
-    "access",
-    "apikey",
-    "auth",
-    "authorization",
-    "credential",
-    "jwt",
-    "key",
-    "password",
-    "secret",
-    "session",
-    "signature",
-    "sig",
-    "token",
-])
 
 # 正文摘录最大字符数（返回给 LLM 的片段长度）
 MAX_EXCERPT_CHARS = 1800
@@ -121,14 +104,6 @@ FRESHNESS_TO_DDG = {
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class _ValidatedURL(object):
-    url: str
-    hostname: str
-    port: int
-    resolved_ips: Tuple[str, ...]
-
 
 @dataclass
 class _VerificationEvidence(object):
@@ -328,170 +303,6 @@ def _safe_float(value, default: float, low: float, high: float) -> float:
     except (TypeError, ValueError):
         number = default
     return max(low, min(high, number))
-
-
-def _parsed_port(parsed) -> Optional[int]:
-    try:
-        return parsed.port
-    except ValueError:
-        return None
-
-
-def _safe_url(url: str) -> str:
-    """
-    校验 URL 安全性：仅允许 http/https 公网链接。
-
-    拒绝条件：
-    - 非 http/https scheme
-    - 私有/回环/链路本地/多播/保留 IP 地址
-    - localhost / .local / .internal / .lan 域名
-    """
-    value = str(url or "").strip()
-    if not value or len(value) > MAX_URL_CHARS:
-        return ""
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"}:
-        return ""
-    if parsed.username or parsed.password:
-        return ""
-    hostname = parsed.hostname or ""
-    if not hostname:
-        return ""
-    port = _parsed_port(parsed)
-    if port is not None and port not in ALLOWED_FETCH_PORTS:
-        return ""
-    if not parsed.netloc or _is_private_netloc(hostname):
-        return ""
-    return value
-
-
-def _unsafe_url_message() -> str:
-    """不安全 URL 的统一错误提示。"""
-    return "[UnsafeURL] URL 不安全：只支持 http/https 公网链接。"
-
-
-def _has_sensitive_remote_query(url: str) -> bool:
-    parsed = urlparse(str(url or ""))
-    if not parsed.query:
-        return False
-    for key in parse_qs(parsed.query, keep_blank_values=True).keys():
-        normalized = re.sub(r"[^a-z0-9]+", "_", str(key or "").lower()).strip("_")
-        if not normalized:
-            continue
-        parts = [part for part in normalized.split("_") if part]
-        if any(part in SENSITIVE_REMOTE_QUERY_KEYWORDS for part in parts):
-            return True
-        compact = normalized.replace("_", "")
-        if any(compact.endswith(keyword) for keyword in SENSITIVE_REMOTE_QUERY_KEYWORDS):
-            return True
-    return False
-
-
-def _is_private_netloc(hostname: str) -> bool:
-    """
-    判断主机名/IP 是否属于私有/内网地址。
-
-    检查范围：
-    - localhost / .local / .internal / .lan 域名
-    - 无点的短主机名（可能是内网机器名）
-    - RFC 1918 私有 IP、回环、链路本地、保留、未指定、多播地址
-    """
-    host = str(hostname or "").strip().strip("[]").lower().rstrip(".")
-    if not host:
-        return True
-    if host == "localhost" or host.endswith(".localhost"):
-        return True
-    if host.endswith((".local", ".internal", ".lan")):
-        return True
-    # 无点且无冒号 → 可能是内网短主机名
-    if "." not in host and ":" not in host:
-        return True
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False  # 非 IP 格式，交由 DNS 解析，暂不拦截
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_unspecified
-        or ip.is_multicast
-        or not ip.is_global
-    )
-
-
-def _ensure_safe_fetch_url(url: str) -> str:
-    """校验抓取 URL 安全性，不通过则抛出 ValueError。"""
-    safe_url = _safe_url(url)
-    if not safe_url:
-        raise ValueError(_unsafe_url_message())
-    return safe_url
-
-
-def _resolve_public_ips(hostname: str, port: int) -> Tuple[str, ...]:
-    resolved = []
-    seen = set()
-    try:
-        infos = socket.getaddrinfo(hostname, int(port), type=socket.SOCK_STREAM)
-    except Exception:
-        raise ValueError(_unsafe_url_message())
-    for info in infos:
-        sockaddr = info[4]
-        if not sockaddr:
-            continue
-        ip_text = str(sockaddr[0] or "").strip()
-        if not ip_text or ip_text in seen:
-            continue
-        try:
-            ip = ipaddress.ip_address(ip_text)
-        except ValueError:
-            raise ValueError(_unsafe_url_message())
-        if not ip.is_global:
-            raise ValueError(_unsafe_url_message())
-        seen.add(ip_text)
-        resolved.append(ip_text)
-    if not resolved:
-        raise ValueError(_unsafe_url_message())
-    return tuple(resolved)
-
-
-def _validate_public_http_url(url: str, allowed_ports: Optional[Set[int]] = None) -> _ValidatedURL:
-    safe_url = _ensure_safe_fetch_url(url)
-    parsed = urlparse(safe_url)
-    hostname = parsed.hostname or ""
-    port = _parsed_port(parsed)
-    if port is None:
-        port = 443 if parsed.scheme == "https" else 80
-    ports = allowed_ports or ALLOWED_FETCH_PORTS
-    if port not in ports:
-        raise ValueError(_unsafe_url_message())
-    return _ValidatedURL(
-        url=safe_url,
-        hostname=hostname,
-        port=port,
-        resolved_ips=_resolve_public_ips(hostname, port),
-    )
-
-
-def _is_allowed_text_content_type(content_type: str) -> bool:
-    value = str(content_type or "").split(";", 1)[0].strip().lower()
-    if not value:
-        return True
-    return value in ALLOWED_TEXT_CONTENT_TYPES
-
-
-def _content_length_exceeds(headers, max_bytes: int) -> bool:
-    try:
-        value = headers.get("content-length", "")
-    except Exception:
-        value = ""
-    if not value:
-        return False
-    try:
-        return int(value) > int(max_bytes)
-    except (TypeError, ValueError):
-        return False
 
 
 # ---------------------------------------------------------------------------
