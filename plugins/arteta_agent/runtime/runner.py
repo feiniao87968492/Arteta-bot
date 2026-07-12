@@ -5,7 +5,15 @@ from typing import Awaitable, Callable, Iterable, Optional, Set
 from ..context import ToolContext
 from ..executor import execute_tool_call_result
 from ..registry import get_tool
-from ..result import TOOL_STATUS_PERMISSION_REQUIRED, ToolResult
+from ..result import (
+    TOOL_STATUS_ERROR,
+    TOOL_STATUS_INVALID_ARGUMENTS,
+    TOOL_STATUS_OK,
+    TOOL_STATUS_PERMISSION_REQUIRED,
+    TOOL_STATUS_TIMEOUT,
+    TOOL_STATUS_UNAVAILABLE,
+    ToolResult,
+)
 from ..trace import record_round
 from .config import AgentRunConfig
 from .loop_guard import LoopGuard, loop_guard_message
@@ -17,6 +25,7 @@ from .state import (
     STOP_REASON_INITIAL_TOOLS_COMPLETE,
     STOP_REASON_LOOP_GUARD,
     STOP_REASON_MAX_ROUNDS,
+    STOP_REASON_REQUIRED_CURRENT_INFORMATION_UNAVAILABLE,
     STOP_REASON_TIMEOUT,
     STOP_REASON_WAITING_CONFIRMATION,
 )
@@ -132,7 +141,7 @@ class AgentRuntimeRunner:
                     self.tool_executor(tool_call, state.ctx) for tool_call in batch
                 ])
                 for tool_call, tool_result in zip(batch, tool_results):
-                    stopped = await self._observe_tool_result(state, guard, tool_call, tool_result)
+                    stopped = await self._observe_tool_result(state, config, guard, tool_call, tool_result)
                     completed_call_ids.add(str(tool_call.get("id") or ""))
                     if stopped is not None:
                         return stopped
@@ -146,7 +155,7 @@ class AgentRuntimeRunner:
                 return AgentRunResult(loop_guard_message(guard_reason), STOP_REASON_LOOP_GUARD, state)
 
             tool_result = await self.tool_executor(tool_call, state.ctx)
-            stopped = await self._observe_tool_result(state, guard, tool_call, tool_result)
+            stopped = await self._observe_tool_result(state, config, guard, tool_call, tool_result)
             completed_call_ids.add(str(tool_call.get("id") or ""))
             if stopped is not None:
                 return stopped
@@ -211,6 +220,7 @@ class AgentRuntimeRunner:
     async def _observe_tool_result(
         self,
         state: AgentState,
+        config: AgentRunConfig,
         guard: LoopGuard,
         tool_call: dict,
         tool_result: ToolResult,
@@ -224,6 +234,19 @@ class AgentRuntimeRunner:
             state.pending_action_id = tool_result.pending_action_id
             return AgentRunResult(tool_result.content, STOP_REASON_WAITING_CONFIRMATION, state)
 
+        if self._is_required_current_information_call(tool_call, config):
+            state.required_web_tools_attempted.append(tool_result.name)
+            if self._current_information_result_satisfied(tool_result):
+                state.current_information_satisfied = True
+            else:
+                state.stop_reason = STOP_REASON_REQUIRED_CURRENT_INFORMATION_UNAVAILABLE
+                state.required_web_failure_code = self._current_information_failure_code(tool_result)
+                return AgentRunResult(
+                    self._required_current_information_unavailable_message(state),
+                    STOP_REASON_REQUIRED_CURRENT_INFORMATION_UNAVAILABLE,
+                    state,
+                )
+
         state.total_observation_chars += len(str(tool_result.content or ""))
         guard_reason = guard.after_observation(state.total_observation_chars)
         if guard_reason:
@@ -236,6 +259,37 @@ class AgentRuntimeRunner:
             "content": tool_result.content,
         })
         return None
+
+    def _is_required_current_information_call(self, tool_call: dict, config: AgentRunConfig) -> bool:
+        call_id = str((tool_call or {}).get("id") or "")
+        return bool(call_id and call_id in set(config.required_current_information_tool_call_ids or []))
+
+    def _current_information_result_satisfied(self, tool_result: ToolResult) -> bool:
+        if tool_result.status != TOOL_STATUS_OK:
+            return False
+        if tool_result.status in {
+            TOOL_STATUS_ERROR,
+            TOOL_STATUS_INVALID_ARGUMENTS,
+            TOOL_STATUS_TIMEOUT,
+            TOOL_STATUS_UNAVAILABLE,
+        }:
+            return False
+        return bool(str(tool_result.content or "").strip())
+
+    def _current_information_failure_code(self, tool_result: ToolResult) -> str:
+        if tool_result.status == TOOL_STATUS_OK and not str(tool_result.content or "").strip():
+            return "EmptyObservation"
+        return (
+            tool_result.error_code
+            or tool_result.status
+            or "RequiredCurrentInformationUnavailable"
+        )
+
+    def _required_current_information_unavailable_message(self, state: AgentState) -> str:
+        value = str(state.metadata.get("current_info_failure_message") or "").strip()
+        if value:
+            return value
+        return "这个问题依赖当前比赛或新闻信息，但这次联网查询没有获得可靠结果，我现在无法核实。"
 
     async def _finish_final_response(self, state: AgentState, assistant_msg: dict) -> AgentRunResult:
         content = (assistant_msg.get("content") or "").strip()

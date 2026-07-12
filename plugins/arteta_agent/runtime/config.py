@@ -12,3 +12,4 @@ class AgentRunConfig:
     stop_after_initial_tools: bool = False
     max_parallel_tools: int = 3
     tool_call_dependencies: Dict[str, List[str]] = field(default_factory=dict)
+    required_current_information_tool_call_ids: List[str] = field(default_factory=list)

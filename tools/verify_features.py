@@ -1803,7 +1803,7 @@ def agent_loop_continues_after_unavailable_web_verification(ctx: RunContext) -> 
     registry.register_tool(registry.ToolSpec(
         name="verify_recent_claim",
         description="verify recent claim",
-        parameters={"type": "object", "properties": {}},
+        parameters=VERIFY_RECENT_CLAIM_VERIFY_SCHEMA,
         handler=web_handler,
         permission="safe_read",
     ))
@@ -1822,7 +1822,7 @@ def agent_loop_continues_after_unavailable_web_verification(ctx: RunContext) -> 
                     "type": "function",
                     "function": {
                         "name": "verify_recent_claim",
-                        "arguments": json.dumps({"claim": "2026 年阿森纳最新转会新闻"}, ensure_ascii=False),
+                        "arguments": json.dumps({"claim": "阿尔特塔喜欢高位逼抢"}, ensure_ascii=False),
                     },
                 }],
             }
@@ -1831,7 +1831,7 @@ def agent_loop_continues_after_unavailable_web_verification(ctx: RunContext) -> 
     try:
         planner.call_llm_with_tools = fake_call
         result = asyncio.run(planner.run_agent_loop(
-            [{"role": "user", "content": "查一下 2026 年阿森纳最新转会新闻"}],
+            [{"role": "user", "content": "帮我核一下阿尔特塔喜欢高位逼抢这个说法"}],
             tool_ctx,
             "model",
             "key",
@@ -1859,6 +1859,78 @@ def agent_loop_continues_after_unavailable_web_verification(ctx: RunContext) -> 
         "agent_loop",
         "continues_after_unavailable_web_verification",
         "Unavailable web verification is passed back as context instead of becoming the final answer",
+        start,
+        details={"result": result, "tools": tools, "calls": len(calls)},
+    )
+
+
+def agent_loop_blocks_stale_answer_after_required_current_info_unavailable(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    planner = import_module("plugins.arteta_agent.planner")
+    registry = import_module("plugins.arteta_agent.registry")
+    context_mod = import_module("plugins.arteta_agent.context")
+    result_mod = import_module("plugins.arteta_agent.result")
+    trace_mod = import_module("plugins.arteta_agent.trace")
+
+    registry.clear_registry()
+    agent_trace = trace_mod.new_trace("agent_registry")
+
+    def web_handler(ctx, claim="", preferred_sources="", max_results=5):
+        return result_mod.ToolResult(
+            name="verify_recent_claim",
+            permission="safe_read",
+            status=result_mod.TOOL_STATUS_UNAVAILABLE,
+            content="未找到可靠网页来源，不能确认该说法。",
+            error_code="NoReliableSource",
+        )
+
+    registry.register_tool(registry.ToolSpec(
+        name="verify_recent_claim",
+        description="verify recent claim",
+        parameters=VERIFY_RECENT_CLAIM_VERIFY_SCHEMA,
+        handler=web_handler,
+        permission="safe_read",
+    ))
+    tool_ctx = context_mod.ToolContext(bot=None, event=None, user_id="verify-user", group_id="verify-group", extra={"agent_trace": agent_trace})
+    original_call = planner.call_llm_with_tools
+    calls = []
+
+    async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
+        calls.append(messages)
+        return {"role": "assistant", "content": "根据我所知这笔转会已经完成。"}
+
+    try:
+        planner.call_llm_with_tools = fake_call
+        result = asyncio.run(planner.run_agent_loop(
+            [{"role": "user", "content": "查一下 2026 年阿森纳最新转会新闻"}],
+            tool_ctx,
+            "model",
+            "key",
+            max_rounds=2,
+            trace=agent_trace,
+        ))
+    finally:
+        planner.call_llm_with_tools = original_call
+
+    tools = agent_trace.get("tools") or []
+    if (
+        calls
+        or "无法核实" not in result
+        or not tools
+        or tools[0].get("name") != "verify_recent_claim"
+        or tools[0].get("status") != "unavailable"
+    ):
+        return fail_result(
+            "agent_loop",
+            "blocks_stale_answer_after_required_current_info_unavailable",
+            "Required current-information failure allowed stale model fallback or skipped unavailable status",
+            start,
+            details={"result": result, "tools": tools, "calls": len(calls)},
+        )
+    return pass_result(
+        "agent_loop",
+        "blocks_stale_answer_after_required_current_info_unavailable",
+        "Required current-information failure stops before stale model fallback",
         start,
         details={"result": result, "tools": tools, "calls": len(calls)},
     )
@@ -2067,6 +2139,7 @@ def build_registry() -> Dict[str, SuiteSpec]:
                 ("lets_llm_choose_memory_for_yesterday_prediction_score", safe_case("agent_loop", "lets_llm_choose_memory_for_yesterday_prediction_score", agent_loop_lets_llm_choose_memory_for_yesterday_prediction_score)),
                 ("allows_llm_to_choose_web_verification_tool", safe_case("agent_loop", "allows_llm_to_choose_web_verification_tool", agent_loop_allows_llm_to_choose_web_verification_tool)),
                 ("continues_after_unavailable_web_verification", safe_case("agent_loop", "continues_after_unavailable_web_verification", agent_loop_continues_after_unavailable_web_verification)),
+                ("blocks_stale_answer_after_required_current_info_unavailable", safe_case("agent_loop", "blocks_stale_answer_after_required_current_info_unavailable", agent_loop_blocks_stale_answer_after_required_current_info_unavailable)),
                 ("forces_explicit_memory_tool", safe_case("agent_loop", "forces_explicit_memory_tool", agent_loop_forces_explicit_memory_tool)),
             ],
         ),

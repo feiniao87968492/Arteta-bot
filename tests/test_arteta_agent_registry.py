@@ -673,6 +673,12 @@ def test_agent_loop_keeps_football_tools_for_football_intent(monkeypatch):
     from plugins.arteta_agent import planner
 
     clear_registry()
+    executed = []
+
+    async def web_handler(ctx: ToolContext, query: str = "", freshness: str = "recent", max_results: int = 5):
+        executed.append(("web_search", query, freshness, max_results))
+        return "latest table source"
+
     register_tool(ToolSpec(
         "get_pl_table",
         "table",
@@ -690,8 +696,15 @@ def test_agent_loop_keeps_football_tools_for_football_intent(monkeypatch):
     register_tool(ToolSpec(
         "web_search",
         "web",
-        {"type": "object", "properties": {"query": {"type": "string"}}},
-        sample_handler,
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "freshness": {"type": "string"},
+                "max_results": {"type": "integer"},
+            },
+        },
+        web_handler,
         category="web",
     ))
 
@@ -699,6 +712,8 @@ def test_agent_loop_keeps_football_tools_for_football_intent(monkeypatch):
 
     async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         captured["disabled_tools"] = set(disabled_tools or ())
+        assert messages[-1]["role"] == "tool"
+        assert "latest table source" in messages[-1]["content"]
         return {"role": "assistant", "content": "table answer"}
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
@@ -711,6 +726,7 @@ def test_agent_loop_keeps_football_tools_for_football_intent(monkeypatch):
     ))
 
     assert result == "table answer"
+    assert executed and executed[0][0] == "web_search"
     assert "get_pl_table" not in captured["disabled_tools"]
     assert "get_football_knowledge" not in captured["disabled_tools"]
     assert "web_search" not in captured["disabled_tools"]
@@ -4610,6 +4626,8 @@ def test_agent_prompt_requires_web_verification_for_recent_facts():
     assert "X/Twitter" in AGENT_TOOL_PRINCIPLES
     assert "优先调用 grok_search" in AGENT_TOOL_PRINCIPLES
     assert "不能凭模型记忆" in AGENT_TOOL_PRINCIPLES
+    assert "current_information_required" in AGENT_TOOL_PRINCIPLES
+    assert "不得继续用参数化知识或旧知识兜底" in AGENT_TOOL_PRINCIPLES
 
 
 def test_phase2_football_news_tool_wraps_existing_search(monkeypatch):

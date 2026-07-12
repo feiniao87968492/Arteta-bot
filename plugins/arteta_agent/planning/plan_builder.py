@@ -6,6 +6,7 @@ from .models import AgentPlan
 
 
 PUBLIC_CURRENT_FACT_TOOLS = ("grok_search", "verify_recent_claim", "web_search")
+CURRENT_INFORMATION_TOOLS = ("grok_search", "verify_recent_claim", "web_search", "fetch_x_post", "web_fetch")
 DIRECT_TECHNICAL_TOOLS = {
     "solve_science_question",
     "solve_algorithm_problem",
@@ -107,6 +108,10 @@ def build_plan(
     constraints = dict(decision.constraints or {})
     if any(intent.name == "public_current_fact" for intent in decision.intents or []):
         constraints["execute_single_required_tool"] = True
+        constraints["current_information_required"] = bool(
+            constraints.get("current_information_required")
+            or getattr(getattr(decision, "freshness", None), "mode", "") == "required"
+        )
     if (
         any(intent.name == "memory_preference" for intent in decision.intents or [])
         and len(decision.required_tools or []) == 1
@@ -139,6 +144,10 @@ def build_plan(
         disabled_tools=disabled_tools,
         is_tool_available=is_tool_available,
     )
+    if constraints.get("current_information_required"):
+        constraints["required_current_information_tool_names"] = [
+            planned.name for planned in required_tools if planned.name in CURRENT_INFORMATION_TOOLS
+        ]
     dependencies = {}
     if (
         any(intent.name == "document_read" for intent in decision.intents or [])

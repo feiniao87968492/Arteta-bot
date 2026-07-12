@@ -3,6 +3,7 @@ from typing import Awaitable, Callable
 from ..context import ToolContext
 from ..executor import execute_tool_call, execute_tool_call_result
 from ..registry import get_tool
+from ..response.composer import compose_current_information_unavailable_response
 from ..response.mood import maybe_send_mood_emoji
 from .config import AgentRunConfig
 from .loop_guard import loop_guard_message
@@ -32,6 +33,9 @@ def build_runtime_state(
     trace,
     temperature: float,
     request_timeout: float,
+    current_information_required: bool = False,
+    freshness_mode: str = "none",
+    freshness_reason_codes=None,
 ) -> AgentState:
     return AgentState(
         messages=list(state),
@@ -47,7 +51,11 @@ def build_runtime_state(
             "api_url": api_url,
             "temperature": temperature,
             "request_timeout": request_timeout,
+            "current_info_failure_message": compose_current_information_unavailable_response(),
         },
+        requires_current_information=bool(current_information_required),
+        freshness_mode=str(freshness_mode or "none"),
+        freshness_reason_codes=list(freshness_reason_codes or []),
     )
 
 
@@ -111,6 +119,10 @@ async def run_runtime_loop_from_state(
     initial_tool_calls=None,
     stop_after_initial_tools: bool = False,
     tool_call_dependencies=None,
+    current_information_required: bool = False,
+    freshness_mode: str = "none",
+    freshness_reason_codes=None,
+    required_current_information_tool_call_ids=None,
 ) -> str:
     runtime_state = build_runtime_state(
         state,
@@ -124,6 +136,9 @@ async def run_runtime_loop_from_state(
         trace,
         temperature,
         request_timeout,
+        current_information_required=current_information_required,
+        freshness_mode=freshness_mode,
+        freshness_reason_codes=freshness_reason_codes,
     )
     runner = AgentRuntimeRunner(
         model_call=lambda messages, agent_state: _runtime_model_call(
@@ -149,9 +164,12 @@ async def run_runtime_loop_from_state(
             request_timeout_seconds=request_timeout,
             stop_after_initial_tools=stop_after_initial_tools,
             tool_call_dependencies=dict(tool_call_dependencies or {}),
+            required_current_information_tool_call_ids=list(required_current_information_tool_call_ids or []),
         ),
         initial_tool_calls=initial_tool_calls,
     )
+    if result.stop_reason == "required_current_information_unavailable":
+        return compose_current_information_unavailable_response()
     state[:] = runtime_state.messages
     if result.stop_reason == "max_rounds":
         return "Agent runtime stopped after the maximum model rounds. Please restate the goal more specifically."

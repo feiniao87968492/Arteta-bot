@@ -285,7 +285,7 @@ def test_plan_builder_routes_recent_team_match_questions_to_grok_search():
     assert any(intent.name == "public_current_fact" for intent in decision.intents)
     assert tool_names(plan) == ["grok_search"]
     assert plan.required_tools[0].arguments == {
-        "query": "塔子你了解西班牙和比利时最近的一场比赛吗",
+        "query": "塔子你了解西班牙和比利时最近的一场比赛吗 latest match result scorers",
         "freshness": "recent",
         "max_results": 5,
     }

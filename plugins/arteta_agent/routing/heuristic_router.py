@@ -1,10 +1,12 @@
 import json
+import re
 from typing import List
 
 from .. import behavior_policy
 from ..context import ToolContext
 from .contextual_tools import detect_memory_preference_args
 from .contextual_tools import detect_ui_preference_args
+from .freshness import detect_football_freshness
 from .models import Intent, PlannedToolCall, RouteDecision
 from ..tool_policy import parse_tool_block_instruction
 
@@ -204,6 +206,15 @@ def _has_any(text: str, markers) -> bool:
     return any(str(marker).lower() in lowered for marker in markers)
 
 
+def _has_x_status_url(text: str, extra: dict) -> bool:
+    candidates = list((extra or {}).get("detected_urls") or [])
+    candidates.extend(re.findall(r"https?://[^\s)）]+", str(text or "")))
+    return any(
+        re.search(r"https?://(?:www\.)?(?:x|twitter)\.com/[^/\s]+/status/\d+", str(url), flags=re.I)
+        for url in candidates
+    )
+
+
 def _looks_like_math(text: str) -> bool:
     compact = text.replace(" ", "")
     if _has_any(text, MATH_INTENT_MARKERS) and any(token in compact for token in ("=", "^", "+", "*", "/", "x", "X")):
@@ -243,6 +254,34 @@ def _public_current_fact_query(text: str) -> str:
     if "转会" in text and "transfer" not in lowered:
         query = "{0} transfer news".format(query)
     return query
+
+
+def _append_freshness_required_tool(decision: RouteDecision) -> None:
+    freshness = decision.freshness
+    if freshness.mode != "required":
+        return
+    if freshness.domain != "football":
+        return
+    decision.intents.append(Intent("public_current_fact", freshness.confidence, "current football information required"))
+    decision.constraints["current_information_required"] = True
+    decision.constraints["freshness_reason_codes"] = list(freshness.reason_codes or [])
+    preferred = list(freshness.preferred_web_tools or [])
+    tool_name = preferred[0] if preferred else "grok_search"
+    if tool_name == "fetch_x_post":
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="fetch_x_post",
+            arguments={"url": freshness.query_hint},
+            reason="current football source post required",
+            forced=True,
+        ))
+        return
+    query = freshness.query_hint or _public_current_fact_query(_latest_user_content([{"role": "user", "content": freshness.query_hint}]))
+    _append_tool_once(decision.required_tools, PlannedToolCall(
+        name=tool_name,
+        arguments={"query": query, "freshness": "recent", "max_results": 5},
+        reason="current football information required",
+        forced=True,
+    ))
 
 
 def _allows_public_fact_with_local_memory(text: str) -> bool:
@@ -343,7 +382,12 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
         ))
 
     has_document_read = any(intent.name == "document_read" for intent in decision.intents)
-    if not has_document_read and extra.get("detected_urls") and (not text or _has_any(text, LINK_INTENT_MARKERS)):
+    if (
+        not has_document_read
+        and extra.get("detected_urls")
+        and (not text or _has_any(text, LINK_INTENT_MARKERS))
+        and not _has_x_status_url(text, extra)
+    ):
         decision.intents.append(Intent("link_analysis", 0.9, "link context present with analysis intent"))
         _append_tool_once(decision.required_tools, PlannedToolCall(
             name="analyze_links",
@@ -361,28 +405,12 @@ def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
             forced=True,
         ))
 
-    is_recent_match_question = _looks_like_recent_public_match_question(text)
     if (
         _allows_public_fact_with_local_memory(text)
-        and
-        (
-            _has_any(text, CURRENT_FACT_MARKERS)
-            or _has_any(text, CURRENT_FACT_ASCII_MARKERS)
-            or is_recent_match_question
-        )
-        and (
-            _has_any(text, FOOTBALL_MARKERS)
-            or _has_any(text, FOOTBALL_ASCII_MARKERS)
-            or is_recent_match_question
-        )
+        and not any(intent.name == "memory_preference" for intent in decision.intents)
     ):
-        decision.intents.append(Intent("public_current_fact", 0.85, "current football fact"))
-        _append_tool_once(decision.required_tools, PlannedToolCall(
-            name="grok_search",
-            arguments={"query": _public_current_fact_query(text), "freshness": "recent", "max_results": 5},
-            reason="verify current public football fact",
-            forced=True,
-        ))
+        decision.freshness = detect_football_freshness(text, decision.intents, ctx)
+        _append_freshness_required_tool(decision)
 
     science_tool = _science_tool_for_text(text)
     if science_tool:

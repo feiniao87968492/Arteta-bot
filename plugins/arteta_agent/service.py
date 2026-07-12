@@ -79,6 +79,22 @@ def finish_agent_run(value: str, ctx: ToolContext, prepared: PreparedAgentRun) -
     )
 
 
+def required_current_information_call_ids(plan, planned_calls) -> List[str]:
+    if not (getattr(plan, "constraints", {}) or {}).get("current_information_required"):
+        return []
+    required_names = set((getattr(plan, "constraints", {}) or {}).get("required_current_information_tool_names") or [])
+    if not required_names:
+        return []
+    result = []
+    for call in list(planned_calls or []):
+        function = (call or {}).get("function") or {}
+        if str(function.get("name") or "") in required_names:
+            call_id = str((call or {}).get("id") or "")
+            if call_id:
+                result.append(call_id)
+    return result
+
+
 async def run_agent_request(request: AgentRequest) -> str:
     allowed = {"safe_read", "safe_write", "confirm_write", "admin_action"}
     ctx = request.ctx
@@ -104,6 +120,7 @@ async def run_agent_request(request: AgentRequest) -> str:
     )
     planned_initial_calls = initial_tool_calls_from_plan(initial_plan, disabled_tools, is_tool_available)
     planned_tool_dependencies = initial_tool_dependencies_from_plan(initial_plan, planned_initial_calls)
+    required_current_call_ids = required_current_information_call_ids(initial_plan, planned_initial_calls)
     if planned_initial_calls and should_execute_initial_plan(initial_plan, disabled_tools, is_tool_available):
         initial_result = await run_runtime_loop_from_state(
             state,
@@ -128,6 +145,10 @@ async def run_agent_request(request: AgentRequest) -> str:
                 or initial_plan.constraints.get("direct_tool_response")
             ),
             tool_call_dependencies=planned_tool_dependencies,
+            current_information_required=bool(initial_plan.constraints.get("current_information_required")),
+            freshness_mode=str(getattr(route_decision.freshness, "mode", "") or "none"),
+            freshness_reason_codes=list(getattr(route_decision.freshness, "reason_codes", []) or []),
+            required_current_information_tool_call_ids=required_current_call_ids,
             chat_model_call=request.chat_model_call,
             emoji_enabled=mood_emoji_enabled,
         )

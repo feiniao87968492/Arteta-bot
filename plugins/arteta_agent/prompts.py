@@ -10,7 +10,8 @@ AGENT_TOOL_PRINCIPLES = """【工具使用原则】：
 - grok_search 只使用 GrokSearch，不会回退普通搜索；它适合发现 X/Twitter 和实时新闻线索，但普通网页、转载或社媒贴仍不等于官方确认。
 - web_search 只用于发现来源线索，不等于事实证明；做事实结论前应优先用 web_fetch 抓取原页面，或直接调用 verify_recent_claim。
 - 核实来源优先级：官网/官方公告/原始文件/一手来源 > 权威媒体原创报道 > 普通网页。找不到可靠来源时，明确说“我还没核到官方/可靠来源”，不要编造日期、报价、伤情、官宣状态或引用。
-- verify_recent_claim、grok_search、web_search、fetch_x_post、web_fetch 没有找到可靠来源时，不要把工具结果当最终回复；继续回答用户原问题。能从群记忆/当前上下文回答的，就说明依据并回答；确实无法确认的，再说明无法确认。
+- 当运行时或工具上下文标记 current_information_required 时，只能依据本回合当前信息工具观察值回答；工具失败、超时、无结果或来源不足时，必须明确无法核实，不得继续用参数化知识或旧知识兜底。
+- verify_recent_claim、grok_search、web_search、fetch_x_post、web_fetch 没有找到可靠来源时，不要把工具结果当最终回复；如果不是 current_information_required，可继续回答用户原问题。能从群记忆/当前上下文回答的，就说明依据并回答；确实无法确认的，再说明无法确认。
 - 回答近期事实时，用中文简短标注来源名或链接；如果只有单一来源或非官方来源，要说明证据强度有限。
 - 用户发送图片且需要理解图片内容时，必须调用 analyze_image，不要假装已经看过图片。
 - 用户引用或发送 PDF/DOCX 文档并要求总结、解释、提取内容时，必须调用 read_document，不要假装已经读过文档。

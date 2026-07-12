@@ -4282,3 +4282,82 @@ Verification after the fix:
 ### Remaining
 
 - No Web Access Round 1/2/3 acceptance item remains open from this rollout.
+
+## 2026-07-12 Football Freshness Required Web Routing
+
+### Scope
+
+- Implemented the football freshness routing plan from `docs/tasks/arteta_football_freshness_web_plan.md`.
+- Kept the change inside Routing, Planning, Runtime, Response, prompts, verification tooling, and tests.
+- Did not expand Web Access safety behavior, rewrite `verify_recent_claim`, add a new football data API, or add planner.py forced branches.
+
+### Interface Audit
+
+- `RouteDecision` now carries structured `FreshnessDecision`.
+- `AgentPlan.constraints` carries `current_information_required` and `required_current_information_tool_names`.
+- `AgentRunConfig` carries `required_current_information_tool_call_ids`.
+- `AgentState` records required-current information status, freshness mode, reason codes, attempted web tools, and failure code.
+- Required web tool calls are still produced through `planning/plan_builder.py` and executed by the unified runtime path.
+- The stable fallback response is owned by `response/composer.py`.
+
+### Changes
+
+- Added deterministic football freshness detection in `plugins/arteta_agent/routing/freshness.py`.
+- Added high-recall current-football detection for lineup absence, injuries, transfers, X/Twitter status links, fixtures, standings, recent match results, and recent player/team form.
+- Added reply and recent-message context handling for followups such as `他怎么没上` and `下一场呢`.
+- X/Twitter status URLs now route to `fetch_x_post` instead of generic link analysis.
+- Current-football `required` decisions generate required web plan steps instead of only exposing web tools.
+- Runtime stops before model fallback when required current-information tools return timeout, unavailable, invalid/error, or empty observations.
+- Empty required-current observations now use `EmptyObservation` as a structured failure code.
+- Static tool principles now distinguish ordinary optional web failure from `current_information_required`; required-current failures must not use stale model knowledge.
+- Developer verifier now covers both:
+  - optional LLM-chosen web verification failure continuing as observation;
+  - required-current web unavailability blocking stale model fallback.
+- Added `tools/evaluate_football_freshness.py` and an anonymized seed fixture for confusion-matrix evaluation.
+
+### Compatibility Notes
+
+- `planner.py` remains a compatibility entrypoint.
+- Existing tool names and schemas are unchanged.
+- Preferred current-fact routing policy remains honored through `route.public_current_fact.preferred_tool`.
+- Required-current behavior is based on structured tool status, not natural-language tool body markers.
+- The default offline evaluation fixture is anonymized and repo-safe. A larger private 100+ real-message set should be kept outside Git if it contains raw group content.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_football_freshness.py -q`
+  - Result: `11 passed`.
+- `python -m pytest tests/test_arteta_agent_planning.py -q`
+  - Result: `4 passed`.
+- `python -m pytest tests/test_arteta_agent_routing.py tests/test_arteta_agent_planning.py tests/test_arteta_agent_football_freshness.py tests/test_arteta_agent_football_freshness_eval.py -q`
+  - Result: `52 passed`.
+- `python -m pytest tests/test_arteta_agent_runtime.py tests/test_arteta_agent_provider.py tests/test_arteta_agent_registry.py -q`
+  - Result: `225 passed`.
+- `python tools\verify_features.py --suite agent_loop --suite chat --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+- `python tools\evaluate_football_freshness.py --output artifacts\football_freshness_eval_report.json`
+  - Result: `30` records, `required_recall=1.0`, `required_precision=1.0`, `mismatches=[]`.
+  - Confusion matrix:
+    - `WEB_REQUIRED`: `17 required / 0 optional / 0 not_needed`;
+    - `WEB_OPTIONAL`: `0 required / 3 optional / 0 not_needed`;
+    - `WEB_NOT_NEEDED`: `0 required / 0 optional / 10 not_needed`.
+- `python -m pytest tests -q`
+  - Result: `620 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins\arteta_agent tests\test_arteta_agent_football_freshness.py tests\test_arteta_agent_planning.py tools\evaluate_football_freshness.py`
+  - Result: no matches.
+- `git diff --check`
+  - Result: passed.
+
+### Risk Notes
+
+- The current classifier is deterministic and intentionally high-recall for football freshness. Borderline optional/required boundaries should be calibrated with private real group samples over time.
+- The committed evaluation fixture is a repo-safe anonymized seed set, not a dump of raw group chat.
+- Search-result-to-followup `web_fetch` chaining remains conservative and is not generalized into a new evidence engine in this slice.
+
+### Remaining
+
+- Deploy the freshness slice to ECS.
+- Run remote Python 3.8 compile and smoke suites.
+- Run private real-message evaluation outside Git if raw group messages are needed for the 100+ sample acceptance gate.
