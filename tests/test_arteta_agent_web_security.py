@@ -186,8 +186,9 @@ def test_verify_recent_claim_does_not_claim_verdict_for_single_candidate(monkeyp
 
     result = asyncio.run(web_access.verify_recent_claim(make_context(), claim="Arsenal made a current announcement"))
 
-    assert "已找到可核查来源" not in result
-    assert "尚未判断该来源支持或反驳" in result
+    assert "已找到可核查来源" not in result.content
+    assert "核验结论：不明确" in result.content
+    assert "unclear" in result.markers
 
 
 def test_claim_ranking_has_no_task_specific_entity_hardcodes():

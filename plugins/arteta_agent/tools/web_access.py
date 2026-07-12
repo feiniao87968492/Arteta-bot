@@ -114,18 +114,35 @@ class _ValidatedURL(object):
     resolved_ips: Tuple[str, ...]
 
 
+@dataclass
+class _VerificationEvidence(object):
+    url: str
+    title: str
+    source_level: str
+    stance: str
+    excerpt: str
+    fetched: bool = True
+
+
 def _http_client():
     """获取共享的异步 HTTP 客户端（复用连接池）。"""
     return get_shared_async_client()
 
 
-def _web_tool_result(name: str, status: str, content: str, error_code: str = "") -> ToolResult:
+def _web_tool_result(
+    name: str,
+    status: str,
+    content: str,
+    error_code: str = "",
+    markers: Optional[list] = None,
+) -> ToolResult:
     return ToolResult(
         name=str(name or ""),
         permission="safe_read",
         status=str(status or TOOL_STATUS_OK),
         content=str(content or ""),
         error_code=str(error_code or ""),
+        markers=list(markers or []),
     )
 
 
@@ -537,6 +554,130 @@ def _claim_result_score(claim: str, item: dict) -> int:
 def _is_strong_match_result(claim: str, item: dict) -> bool:
     """搜索结果与说法高度匹配（得分 ≥ 12）时视为强证据候选。"""
     return _claim_result_score(claim, item) >= 12
+
+
+def _claim_tokens(text: str) -> list:
+    tokens = re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", str(text or "").lower())
+    stopwords = set([
+        "a", "an", "the", "to", "of", "and", "or", "in", "on", "for", "with",
+        "after", "before", "was", "were", "is", "are", "be", "been", "being",
+    ])
+    return [token for token in tokens if token not in stopwords and len(token) > 1]
+
+
+def _token_overlap_ratio(claim: str, text: str) -> float:
+    claim_tokens = set(_claim_tokens(claim))
+    if not claim_tokens:
+        return 0.0
+    text_tokens = set(_claim_tokens(text))
+    if not text_tokens:
+        return 0.0
+    return float(len(claim_tokens.intersection(text_tokens))) / float(len(claim_tokens))
+
+
+def _contains_negation_near_claim(claim: str, text: str) -> bool:
+    value = str(text or "").lower()
+    negations = (
+        "did not",
+        "has not",
+        "have not",
+        "not signed",
+        "not agree",
+        "not completed",
+        "false",
+        "denied",
+        "refuted",
+        "no agreement",
+        "未",
+        "没有",
+        "否认",
+        "不属实",
+        "辟谣",
+    )
+    if not any(term in value for term in negations):
+        return False
+    return _token_overlap_ratio(claim, value) >= 0.5
+
+
+def _classify_evidence_stance(claim: str, page_text: str) -> str:
+    normalized_claim = _clean_text(claim).lower()
+    normalized_text = _clean_text(page_text).lower()
+    if not normalized_text:
+        return "unclear"
+    if _contains_negation_near_claim(claim, normalized_text):
+        return "refute"
+    if normalized_claim and normalized_claim in normalized_text:
+        return "support"
+    if _token_overlap_ratio(claim, normalized_text) >= 0.75:
+        return "support"
+    return "unclear"
+
+
+def _stance_label(stance: str) -> str:
+    return {
+        "support": "支持",
+        "refute": "反驳",
+        "unclear": "不明确",
+    }.get(str(stance or ""), "不明确")
+
+
+def _verdict_marker(verdict: str) -> str:
+    return {
+        "support": "supported",
+        "refute": "refuted",
+        "unclear": "unclear",
+    }.get(str(verdict or ""), "unclear")
+
+
+def _is_authoritative_source_level(source_level: str) -> bool:
+    return source_level in ("一手/官方来源", "权威媒体来源")
+
+
+def _select_verification_verdict(evidence: list) -> tuple:
+    authoritative_support = [
+        item for item in evidence
+        if item.stance == "support" and _is_authoritative_source_level(item.source_level)
+    ]
+    authoritative_refute = [
+        item for item in evidence
+        if item.stance == "refute" and _is_authoritative_source_level(item.source_level)
+    ]
+    fetched_items = [item for item in evidence if item.fetched]
+    limitations = []
+    if authoritative_support and authoritative_refute:
+        limitations.append("来源冲突：权威来源之间存在支持和反驳。")
+        return "unclear", limitations
+    if authoritative_support:
+        return "support", limitations
+    if authoritative_refute:
+        return "refute", limitations
+    if not fetched_items and evidence:
+        limitations.append("搜索摘要不能单独确认该说法。")
+    elif any(item.stance in ("support", "refute") for item in evidence):
+        limitations.append("ordinary source only: 找到的支持/反驳线索不是官方或权威来源。")
+    else:
+        limitations.append("未找到足够明确的正文证据。")
+    return "unclear", limitations
+
+
+def _format_verification_result(claim: str, verdict: str, evidence: list, limitations: list) -> str:
+    lines = [
+        "核验结论：{0}".format(_stance_label(verdict)),
+        "待核实说法：{0}".format(_clean_text(claim)),
+        "证据：",
+    ]
+    for index, item in enumerate(evidence, start=1):
+        lines.append("{0}. {1}".format(index, item.title or "(无标题)"))
+        lines.append("   立场：{0}".format(_stance_label(item.stance)))
+        lines.append("   来源等级：{0}".format(item.source_level))
+        lines.append("   链接：{0}".format(item.url))
+        if item.excerpt:
+            lines.append("   摘录：{0}".format(_clean_text(item.excerpt)[:MAX_EXCERPT_CHARS]))
+    if limitations:
+        lines.append("局限：")
+        for limitation in limitations:
+            lines.append("- {0}".format(limitation))
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1866,7 +2007,7 @@ async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHA
     return _web_tool_result("web_fetch", status, local_error, local_error_code)
 
 
-async def verify_recent_claim(ctx: ToolContext, claim: str, preferred_sources: str = "", max_results: int = 5) -> str:
+async def verify_recent_claim(ctx: ToolContext, claim: str, preferred_sources: str = "", max_results: int = 5) -> ToolResult:
     """
     核实近期/最新事实陈述。
 
@@ -1880,56 +2021,80 @@ async def verify_recent_claim(ctx: ToolContext, claim: str, preferred_sources: s
     """
     text = _clean_text(claim)
     if not text:
-        return "请提供要核实的说法。"
+        return _web_tool_result("verify_recent_claim", TOOL_STATUS_ERROR, "请提供要核实的说法。", "EmptyClaim")
 
     query = text
     if preferred_sources:
         query = "{0} {1}".format(text, _clean_text(preferred_sources))
 
-    limit = _safe_int(max_results, 5, 1, MAX_SEARCH_RESULTS)
+    limit = _safe_int(max_results, 5, 2, MAX_SEARCH_RESULTS)
 
     try:
         results = await _search_web(query, max_results=limit, freshness="recent", timelimit="m")
     except asyncio.TimeoutError:
-        return "[WebVerifyTimeout] 核实搜索超时。"
+        return _web_tool_result("verify_recent_claim", TOOL_STATUS_TIMEOUT, "[WebVerifyTimeout] 核实搜索超时。", "TimeoutError")
     except Exception as exc:
-        return "[WebVerifyError] 核实搜索失败：{0}: {1}".format(exc.__class__.__name__, exc)
+        return _web_tool_result(
+            "verify_recent_claim",
+            TOOL_STATUS_ERROR,
+            "[WebVerifyError] 核实搜索失败：{0}: {1}".format(exc.__class__.__name__, exc),
+            exc.__class__.__name__,
+        )
 
     # 过滤无有效 URL 的结果
     candidates = [item for item in results if _safe_url(_search_result_url(item))]
     if not candidates:
-        return "未找到可靠网页来源，不能确认该说法。"
+        content = _format_verification_result(
+            text,
+            "unclear",
+            [],
+            ["未找到可靠网页来源，不能确认该说法。"],
+        )
+        return _web_tool_result("verify_recent_claim", TOOL_STATUS_OK, content, markers=["unclear"])
 
-    # 按得分降序排列，选取最佳来源
+    # 按得分降序排列，选取最多 3 个独立候选来源
     candidates.sort(key=lambda item: _claim_result_score(text, item), reverse=True)
-    selected = candidates[0]
-    selected_url = _search_result_url(selected)
+    evidence_items = []
+    seen_domains = set()
+    for selected in candidates:
+        selected_url = _search_result_url(selected)
+        domain = _domain(selected_url)
+        if domain in seen_domains:
+            continue
+        seen_domains.add(domain)
+        title = _clean_text(selected.get("title") or selected.get("name") or "") or "(无标题)"
+        source_level = _source_level(selected_url)
+        try:
+            fetched = await asyncio.wait_for(_fetch_url(selected_url), timeout=12.0)
+            page = _parse_page(fetched.get("final_url") or selected_url, fetched.get("text") or "")
+            page_text = _clean_text(page.get("text") or "")
+            evidence_items.append(_VerificationEvidence(
+                url=page.get("url") or selected_url,
+                title=page.get("title") or title,
+                source_level=_source_level(page.get("url") or selected_url),
+                stance=_classify_evidence_stance(text, page_text),
+                excerpt=page_text[:MAX_EXCERPT_CHARS],
+                fetched=True,
+            ))
+        except Exception:
+            evidence_items.append(_VerificationEvidence(
+                url=selected_url,
+                title=title,
+                source_level=source_level,
+                stance="unclear",
+                excerpt=_clean_text(selected.get("body") or selected.get("snippet") or selected.get("description") or ""),
+                fetched=False,
+            ))
+        if len(evidence_items) >= 3:
+            break
 
-    # 抓取最佳来源页面
-    try:
-        fetched = await asyncio.wait_for(_fetch_url(selected_url), timeout=12.0)
-        page = _parse_page(fetched.get("final_url") or selected_url, fetched.get("text") or "")
-        evidence = _format_page_evidence(page, selected_url)
-    except Exception:
-        # 抓取失败时使用搜索结果摘要作为降级证据
-        page = {
-            "title": _clean_text(selected.get("title")) or "(无标题)",
-            "url": selected_url,
-            "published_time": _clean_text(selected.get("date")),
-            "text": _clean_text(selected.get("body") or selected.get("snippet")),
-        }
-        evidence = _format_page_evidence(page, selected_url)
-
-    # Round 1 只收集候选证据，不判断该来源支持或反驳待核实说法。
-    caveat = "结论：已找到候选来源，但工具尚未判断该来源支持或反驳该说法；回答时必须基于下方证据说明局限。"
-    if _source_level(selected_url) == "普通网页来源" and not _is_strong_match_result(text, selected):
-        caveat = "结论：只找到候选普通网页来源，尚未判断该来源支持或反驳该说法；回答时必须说明仍未核到官方/权威来源。"
-
-    result = "{0}\n待核实说法：{1}\n{2}".format(caveat, text, evidence)
-
-    if _is_grok_result(selected):
-        return "[grok]\n" + result
-    return result
+    verdict, limitations = _select_verification_verdict(evidence_items)
+    content = _format_verification_result(text, verdict, evidence_items, limitations)
+    markers = [_verdict_marker(verdict)]
+    if any(_is_grok_result(item) for item in candidates):
+        markers.append("[grok]")
+        content = "[grok]\n" + content
+    return _web_tool_result("verify_recent_claim", TOOL_STATUS_OK, content, markers=markers)
 
 
 # ===================================================================

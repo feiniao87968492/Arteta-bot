@@ -4493,9 +4493,10 @@ def test_verify_recent_claim_prefers_primary_source(monkeypatch):
 
     result = asyncio.run(web_access.verify_recent_claim(make_context(), claim="Arsenal official update 2026"))
 
-    assert "来源等级：一手/官方来源" in result
-    assert "https://www.arsenal.com/news/official-update" in result
-    assert "Arsenal confirmed the update" in result
+    assert result.status == "ok"
+    assert "来源等级：一手/官方来源" in result.content
+    assert "https://www.arsenal.com/news/official-update" in result.content
+    assert "Arsenal confirmed the update" in result.content
 
 
 def test_verify_recent_claim_uses_groksearch_search_path(monkeypatch):
@@ -4532,10 +4533,11 @@ def test_verify_recent_claim_uses_groksearch_search_path(monkeypatch):
 
     result = asyncio.run(web_access.verify_recent_claim(make_context(), claim="Arsenal official update 2026"))
 
-    assert result.startswith("[grok]")
+    assert result.content.startswith("[grok]")
+    assert "[grok]" in result.markers
     assert calls
-    assert "https://www.arsenal.com/news/grok-verify" in result
-    assert "Official evidence via GrokSearch" in result
+    assert "https://www.arsenal.com/news/grok-verify" in result.content
+    assert "Official evidence via GrokSearch" in result.content
 
 
 def test_verify_recent_claim_prefers_match_result_over_team_profile(monkeypatch):
@@ -4566,9 +4568,10 @@ def test_verify_recent_claim_prefers_match_result_over_team_profile(monkeypatch)
         claim="阿根廷和佛得角今天上午有比赛，比分是3-2",
     ))
 
-    assert "https://sports.cctv.com/2026/07/04/VIDETzKIEvALGOF74ZtcuCz9260704.shtml" in result
-    assert "阿根廷通过加时赛以3-2战胜佛得角" in result
-    assert "不能当作强证据" not in result
+    assert result.status == "ok"
+    assert "https://sports.cctv.com/2026/07/04/VIDETzKIEvALGOF74ZtcuCz9260704.shtml" in result.content
+    assert "阿根廷通过加时赛以3-2战胜佛得角" in result.content
+    assert "核验结论：不明确" in result.content
 
 
 def test_agent_prompt_requires_web_verification_for_recent_facts():

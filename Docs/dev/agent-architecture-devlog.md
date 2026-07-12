@@ -3360,3 +3360,68 @@ Verification after the fix:
 - Migrate `web_search`, `grok_search`, `fetch_x_post`, and `verify_recent_claim` to structured `ToolResult`.
 - Add sensitive URL checks before any allowed remote fetch proxy call.
 - Implement real multi-source `support/refute/unclear` verification.
+
+## 2026-07-12 Web Access Round 2 Claim Verification Verdict
+
+### Scope
+
+- Migrated `verify_recent_claim` to structured `ToolResult`.
+- Implemented the first conservative multi-source `support/refute/unclear` verdict path.
+- Kept implementation inside `web_access.py`; extraction to `tools/web/verification.py` remains Round 3.
+
+### Changes
+
+- Added internal `_VerificationEvidence` model and verification helpers.
+- `verify_recent_claim()` now:
+  - searches candidates;
+  - de-duplicates by domain;
+  - fetches up to 3 independent candidate pages;
+  - classifies fetched page text as `support`, `refute`, or `unclear`;
+  - refuses to confirm based only on search snippets;
+  - returns `ToolResult` with verdict markers: `supported`, `refuted`, or `unclear`.
+- Verdict policy:
+  - one official/authoritative support with no authoritative refute -> supported;
+  - one official/authoritative refute with no authoritative support -> refuted;
+  - authoritative support and refute conflict -> unclear;
+  - only ordinary sources -> unclear;
+  - fetch failures with only snippets -> unclear.
+- `tools/verify_features.py` now reads structured `verify_recent_claim.content` and stores text in report details.
+
+### RED Checks Before Implementation
+
+- `test_verify_recent_claim_supported_by_official_source` failed because the handler returned a string and did not produce verdict markers.
+- `test_verify_recent_claim_refuted_by_official_source` failed because there was no refutation verdict path.
+- `test_verify_recent_claim_unclear_with_single_ordinary_source` failed because the old flow selected a best candidate rather than evaluating source strength.
+- `test_verify_recent_claim_unclear_when_authoritative_sources_conflict` failed because only one source was evaluated.
+- `test_verify_recent_claim_does_not_trust_search_snippet_only` failed because fetch failures still rendered snippets as candidate evidence without a formal unclear verdict.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_verification.py -q`
+  - Result: `5 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+- `python -m pytest tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_registry.py -q`
+  - Result: `208 passed`.
+- `python -m pytest tests/test_verify_features.py::VerifyFeaturesTests::test_agent_registry_web_access_offline_ignores_live_grok_env -q`
+  - Result: `1 passed`.
+- `python -m pytest tests -q`
+  - Result: `575 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "follow_redirects=True|dict\[|list\[|set\[|tuple\[|\| None|None \|" plugins/arteta_agent/tools/web_access.py tests/test_arteta_agent_web_verification.py tools/verify_features.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- The stance classifier is intentionally conservative and rule-based. It handles direct support/refute phrasing and obvious negation, not arbitrary natural-language entailment.
+- Ordinary source support remains `unclear`, even when text appears to support the claim.
+- Full LLM-assisted stance classification, if needed, should be designed separately with JSON-only output and untrusted-data wrapping.
+
+### Remaining
+
+- Migrate `web_search`, `grok_search`, and `fetch_x_post` to structured `ToolResult`.
+- Add sensitive URL checks before an explicitly enabled remote fetch proxy call.
+- Move verification models and helpers out of `web_access.py` during Round 3.

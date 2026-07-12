@@ -841,11 +841,12 @@ def agent_registry_web_access_offline(ctx: RunContext) -> CaseResult:
 
     blocked_text = getattr(blocked, "content", blocked)
     fetched_text = getattr(fetched, "content", fetched)
+    verified_text = getattr(verified, "content", verified)
     ok = (
         "只支持 http/https" in blocked_text
         and "发布时间：2026-07-01" in fetched_text
-        and "来源等级：一手/官方来源" in verified
-        and "https://www.arsenal.com/news/official-update" in verified
+        and "来源等级：一手/官方来源" in verified_text
+        and "https://www.arsenal.com/news/official-update" in verified_text
     )
     if not ok:
         return fail_result(
@@ -853,14 +854,14 @@ def agent_registry_web_access_offline(ctx: RunContext) -> CaseResult:
             "web_access_offline",
             "Web access tools did not produce safe citable evidence offline",
             start,
-            details={"blocked": blocked, "fetched": fetched, "verified": verified},
+            details={"blocked": blocked_text, "fetched": fetched_text, "verified": verified_text},
         )
     return pass_result(
         "agent_registry",
         "web_access_offline",
         "Web access tools reject unsafe URLs and produce citable source evidence",
         start,
-        details={"blocked": blocked, "verified": verified},
+        details={"blocked": blocked_text, "verified": verified_text},
     )
 
 
