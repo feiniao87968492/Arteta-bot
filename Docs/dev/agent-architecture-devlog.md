@@ -4040,3 +4040,46 @@ Verification after the fix:
 
 - Continue Round 3 by extracting formatting or concrete search backend classes from `handlers.py`.
 - ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
+
+## 2026-07-12 Web Access Round 3 Formatting Extraction
+
+### Scope
+
+- Continued Round 3 module splitting by moving search observation formatting out of `handlers.py`.
+- Kept existing Web tool output text, markers, and compatibility exports unchanged.
+
+### Changes
+
+- Added `plugins/arteta_agent/tools/web/formatting.py`.
+- Moved `_is_grok_result()` and `_format_search_results()` into `formatting.py`.
+- Imported those helpers back into `handlers.py` for compatibility with existing private imports and tests.
+
+### RED Checks Before Implementation
+
+- `test_web_formatting_is_extracted_but_compatibly_exported` failed because `plugins.arteta_agent.tools.web.formatting` did not exist.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_web_formatting_is_extracted_but_compatibly_exported -q`
+  - RED result: `1 failed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_web_formatting_is_extracted_but_compatibly_exported tests/test_arteta_agent_registry.py::test_web_search_uses_groksearch_when_configured tests/test_arteta_agent_registry.py::test_web_search_falls_back_to_duckduckgo_html tests/test_arteta_agent_registry.py::test_web_search_uses_bing_html_when_available tests/test_arteta_agent_registry.py::test_web_search_falls_back_to_jina_reader_markdown -q`
+  - GREEN result: `5 passed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py -q`
+  - Result: `228 passed`.
+- `python -m pytest tests -q`
+  - Result: `595 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- Only search observation formatting moved. Permission, tool status, artifact, verification, and provider behavior are unchanged.
+
+### Remaining
+
+- Continue Round 3 by extracting concrete search backend classes or residual network client helpers from `handlers.py`.
+- ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.

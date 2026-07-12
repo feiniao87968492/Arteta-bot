@@ -129,6 +129,13 @@ def test_web_registration_is_extracted_but_compatibly_exported():
     assert handlers.register_tools is registration.register_tools
 
 
+def test_web_formatting_is_extracted_but_compatibly_exported():
+    from plugins.arteta_agent.tools.web import formatting, handlers
+
+    assert handlers._is_grok_result is formatting._is_grok_result
+    assert handlers._format_search_results is formatting._format_search_results
+
+
 def test_search_backends_share_explicit_time_budget():
     from plugins.arteta_agent.tools.web.models import SearchHit
     from plugins.arteta_agent.tools.web.search_backends import TimeBudget, run_search_backends

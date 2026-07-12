@@ -33,6 +33,7 @@ from .fetch import (
     _parse_page,
     _read_limited_response,
 )
+from .formatting import _format_search_results, _is_grok_result
 from .parsers.bing import _normalize_bing_href, _parse_bing_html
 from .parsers.duckduckgo import _normalize_duckduckgo_href, _parse_duckduckgo_html
 from .parsers.grok import (
@@ -197,11 +198,6 @@ def _safe_float(value, default: float, low: float, high: float) -> float:
     except (TypeError, ValueError):
         number = default
     return max(low, min(high, number))
-
-
-def _is_grok_result(item: dict) -> bool:
-    """判断搜索结果是否来自 GrokSearch 后端。"""
-    return isinstance(item, dict) and str(item.get("_backend") or "") == "grok"
 
 
 # ---------------------------------------------------------------------------
@@ -500,41 +496,6 @@ async def _fetch_x_mirror(url: str) -> dict:
         "content_type": response.headers.get("content-type", ""),
         "text": response.text,
     }
-
-
-# 搜索结果格式化
-# ---------------------------------------------------------------------------
-
-def _format_search_results(results: list) -> str:
-    """
-    将搜索结果列表格式化为 LLM 可读的文本块。
-
-    每条结果包含：序号、标题、来源等级、日期（如有）、链接、摘要。
-    若含 GrokSearch 结果，顶部追加 [grok] 标记。
-    """
-    if not results:
-        return "未找到可用搜索结果。"
-
-    lines = ["搜索结果（仅用于发现线索，回答事实前应继续抓取来源页面核实）："]
-    if any(_is_grok_result(item) for item in results):
-        lines.insert(0, "[grok]")
-
-    for index, item in enumerate(results, start=1):
-        url = _search_result_url(item)
-        title = _clean_text(item.get("title")) or "(无标题)"
-        snippet = _clean_text(item.get("body") or item.get("snippet"))[:260]
-        date = _clean_text(item.get("date") or item.get("published") or "")
-        source_level = _source_level(url)
-
-        lines.append("{0}. {1}".format(index, title))
-        lines.append("   来源等级：{0}".format(source_level))
-        if date:
-            lines.append("   日期：{0}".format(date))
-        lines.append("   链接：{0}".format(url))
-        if snippet:
-            lines.append("   摘要：{0}".format(snippet))
-
-    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
