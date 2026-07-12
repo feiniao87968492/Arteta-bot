@@ -555,7 +555,8 @@ async def _grok_source_snapshot_marker(source_urls: list) -> str:
         try:
             page = {"url": safe_url, "title": "", "published_time": "", "text": ""}
             snapshot_path = await _write_grok_snapshot_image(page, safe_url)
-        except Exception:
+        except Exception as exc:
+            _log_web_fallback("grok_snapshot", exc, "link_snapshot")
             continue
         if snapshot_path:
             return "[LinkSnapshotImage: {0}]".format(snapshot_path)
@@ -619,7 +620,8 @@ async def _duckduckgo_search(query: str, max_results: int = 5, timelimit=None, b
             freshness="recent",
             budget=budget,
         )
-    except Exception:
+    except Exception as exc:
+        _log_web_fallback("search_backend", exc, "legacy_chain")
         return []
     return [hit.to_legacy_dict() for hit in hits]
 
@@ -909,7 +911,8 @@ async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHA
                 return _web_tool_result("web_fetch", TOOL_STATUS_OK, "[grok]\n" + _format_page_evidence(page, safe_url))
         except ValueError as exc:
             return _web_tool_result("web_fetch", TOOL_STATUS_ERROR, str(exc), "ValueError")
-        except Exception:
+        except Exception as exc:
+            _log_web_fallback("remote_fetch_proxy", exc, "grok")
             pass
 
     status = TOOL_STATUS_TIMEOUT if local_error_code == "TimeoutError" else TOOL_STATUS_ERROR
@@ -985,7 +988,8 @@ async def verify_recent_claim(ctx: ToolContext, claim: str, preferred_sources: s
                 excerpt=page_text[:MAX_EXCERPT_CHARS],
                 fetched=True,
             ))
-        except Exception:
+        except Exception as exc:
+            _log_web_fallback("verify_recent_claim", exc, "fetch_url")
             evidence_items.append(_VerificationEvidence(
                 url=selected_url,
                 title=title,

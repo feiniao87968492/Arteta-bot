@@ -4134,3 +4134,52 @@ Verification after the fix:
 
 - Continue Round 3 by extracting Grok/X network client helpers or deciding whether to retire the old private Grok snapshot helpers.
 - ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
+
+## 2026-07-12 Web Access Round 3 Sanitized Fallback Logging
+
+### Scope
+
+- Closed remaining Web Access silent fallback paths that could hide failures without observability.
+- Kept fallback behavior unchanged: failed optional paths still degrade to the next source or to the existing local error response.
+
+### Changes
+
+- Added sanitized fallback logs for:
+  - Grok snapshot helper failures;
+  - legacy search-chain terminal failures;
+  - remote Grok fetch proxy failures;
+  - `verify_recent_claim` page-fetch failures.
+- Logs include only event name, source label, and exception class through `_log_web_fallback()`.
+- Added regression tests proving token-like exception text and private URLs are not logged.
+
+### RED Checks Before Implementation
+
+- `test_remote_fetch_proxy_failure_logs_are_sanitized` failed because remote proxy exceptions were silently ignored.
+- `test_verify_recent_claim_fetch_failure_logs_are_sanitized` failed because failed evidence fetches were silently downgraded.
+- `test_grok_snapshot_failure_logs_are_sanitized` failed because Grok snapshot helper failures were silently skipped.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_remote_fetch_proxy_failure_logs_are_sanitized tests/test_arteta_agent_web_modules.py::test_verify_recent_claim_fetch_failure_logs_are_sanitized tests/test_arteta_agent_web_modules.py::test_grok_snapshot_failure_logs_are_sanitized -q`
+  - RED result: `3 failed`.
+  - GREEN result: `3 passed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py -q`
+  - Result: `233 passed`.
+- `python -m pytest tests -q`
+  - Result: `600 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions --suite agent_loop --suite chat`
+  - Result: passed.
+
+### Risk Notes
+
+- The optional-import and config-read fallbacks still return empty availability values without logging because they are environment capability checks, not request execution failures.
+- The remote fetch proxy branch still returns the local fetch error when the remote fallback fails; only observability changed.
+
+### Remaining
+
+- Continue Round 3 by extracting Grok/X network client helpers or doing a final requirement-by-requirement completion audit.
+- ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.

@@ -262,6 +262,81 @@ def test_search_backend_failure_logs_are_sanitized(caplog):
     assert "private.example" not in caplog.text
 
 
+def test_remote_fetch_proxy_failure_logs_are_sanitized(monkeypatch, caplog):
+    from plugins.arteta_agent.tools import web_access
+
+    async def fail_local_fetch(url, timeout_seconds=10.0, max_bytes=500000):
+        raise RuntimeError("local fetch failed")
+
+    async def fail_grok_fetch(url):
+        raise RuntimeError("secret token=abc123 https://private.example/path")
+
+    monkeypatch.setattr(web_access, "_fetch_url", fail_local_fetch)
+    monkeypatch.setattr(web_access, "_remote_fetch_proxy_enabled", lambda: True)
+    monkeypatch.setattr(web_access, "_groksearch_enabled", lambda: True)
+    monkeypatch.setattr(web_access, "_validate_public_http_url", lambda url: object())
+    monkeypatch.setattr(web_access, "_groksearch_fetch", fail_grok_fetch)
+
+    caplog.set_level(logging.WARNING, logger="plugins.arteta_agent.tools.web.handlers")
+
+    result = asyncio.run(web_access.web_fetch(make_context(), url="https://www.arsenal.com/news/proxy"))
+
+    assert result.status == "error"
+    assert "web_access_fallback_failed event=remote_fetch_proxy" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "abc123" not in caplog.text
+    assert "private.example" not in caplog.text
+
+
+def test_verify_recent_claim_fetch_failure_logs_are_sanitized(monkeypatch, caplog):
+    from plugins.arteta_agent.tools import web_access
+
+    async def fake_search(query, max_results=5, freshness="recent", timelimit=None):
+        return [{
+            "title": "Arsenal official update",
+            "href": "https://www.arsenal.com/news/update",
+            "body": "Official source snippet.",
+        }]
+
+    async def fail_fetch(url, timeout_seconds=10.0, max_bytes=500000):
+        raise RuntimeError("secret token=abc123 https://private.example/path")
+
+    monkeypatch.setattr(web_access, "_search_web", fake_search)
+    monkeypatch.setattr(web_access, "_fetch_url", fail_fetch)
+    caplog.set_level(logging.WARNING, logger="plugins.arteta_agent.tools.web.handlers")
+
+    result = asyncio.run(web_access.verify_recent_claim(make_context(), claim="Arsenal official update"))
+
+    assert result.status == "ok"
+    assert "web_access_fallback_failed event=verify_recent_claim" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "abc123" not in caplog.text
+    assert "private.example" not in caplog.text
+
+
+def test_grok_snapshot_failure_logs_are_sanitized(monkeypatch, caplog):
+    from plugins.arteta_agent.tools import web_access
+
+    async def fake_write_snapshot(page, source_url):
+        if "first" in source_url:
+            raise RuntimeError("secret token=abc123 https://private.example/path")
+        return "artifacts/agent_tools/link_snapshots/second.png"
+
+    monkeypatch.setattr(web_access, "_write_grok_snapshot_image", fake_write_snapshot)
+    caplog.set_level(logging.WARNING, logger="plugins.arteta_agent.tools.web.handlers")
+
+    marker = asyncio.run(web_access._grok_source_snapshot_marker([
+        "https://www.arsenal.com/news/first",
+        "https://www.arsenal.com/news/second",
+    ]))
+
+    assert marker == "[LinkSnapshotImage: artifacts/agent_tools/link_snapshots/second.png]"
+    assert "web_access_fallback_failed event=grok_snapshot" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "abc123" not in caplog.text
+    assert "private.example" not in caplog.text
+
+
 def test_fetch_x_post_reports_stable_provenance(monkeypatch):
     from plugins.arteta_agent.tools import web_access
 
