@@ -7,8 +7,6 @@ import nonebot
 from loguru import logger
 from nonebot.adapters.onebot.v11 import Adapter
 
-from plugins.arteta_agent.providers.http_client import close_shared_async_client
-
 
 _SECRET_LOG_KEY_RE = re.compile(r"('(?:[^']*(?:key|token|secret|password)[^']*)'\s*:\s*)'[^']*'", re.IGNORECASE)
 
@@ -68,6 +66,12 @@ def setup_logging() -> None:
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
 
+async def close_agent_shared_async_client() -> None:
+    from plugins.arteta_agent.providers.http_client import close_shared_async_client
+
+    await close_shared_async_client()
+
+
 if __name__ == "__main__":
     setup_logging()
     logger.info("Loguru 日志系统已初始化")
@@ -75,6 +79,6 @@ if __name__ == "__main__":
     nonebot.init()
     driver = nonebot.get_driver()
     driver.register_adapter(Adapter)
-    driver.on_shutdown(close_shared_async_client)
+    driver.on_shutdown(close_agent_shared_async_client)
     nonebot.load_plugins("plugins")
     nonebot.run()

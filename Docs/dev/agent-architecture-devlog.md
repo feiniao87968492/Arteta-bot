@@ -4361,3 +4361,10 @@ Verification after the fix:
 - Deploy the freshness slice to ECS.
 - Run remote Python 3.8 compile and smoke suites.
 - Run private real-message evaluation outside Git if raw group messages are needed for the 100+ sample acceptance gate.
+
+### ECS Smoke Follow-up
+
+- Initial ECS smoke after deploying only changed freshness files failed because the remote executor/result stack was older than the local branch and normalized a handler `ToolResult(status="unavailable")` to `ok`.
+- Redeployed the full `plugins/arteta_agent` Python source package to align the remote runtime with the local commit.
+- Smoke then exposed an existing startup log issue: `bot.py` imported `plugins.arteta_agent.providers.http_client` at module import time, so NoneBot later tried to load `plugins.arteta_agent` as a plugin after it was already present in `sys.modules`.
+- Fixed by changing the shutdown hook to lazy-import `close_shared_async_client` inside `close_agent_shared_async_client()`.

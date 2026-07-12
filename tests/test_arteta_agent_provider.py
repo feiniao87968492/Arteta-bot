@@ -442,7 +442,9 @@ def test_bot_entry_registers_provider_client_shutdown_hook():
     source = Path("bot.py").read_text(encoding="utf-8")
 
     assert "close_shared_async_client" in source
-    assert "driver.on_shutdown(close_shared_async_client)" in source
+    before_shutdown_hook = source.split("async def close_agent_shared_async_client", 1)[0]
+    assert "from plugins.arteta_agent.providers.http_client import close_shared_async_client" not in before_shutdown_hook
+    assert "driver.on_shutdown(close_agent_shared_async_client)" in source
 
 
 def test_planner_provider_call_uses_fixed_adapter_protocol():
