@@ -15,16 +15,13 @@ Web 访问工具模块 —— ArtetaBot 的网络搜索、网页抓取与事实�
 """
 
 import asyncio
-import base64
 import json
 import logging
 import os
-import re
 import time
 import warnings
-from html import unescape
 from typing import Optional
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import quote
 
 from ...context import ToolContext
 from ...providers.http_client import get_shared_async_client
@@ -37,6 +34,15 @@ from .fetch import (
     _parse_page,
     _read_limited_response,
 )
+from .parsers.bing import _normalize_bing_href, _parse_bing_html
+from .parsers.duckduckgo import _normalize_duckduckgo_href, _parse_duckduckgo_html
+from .parsers.grok import (
+    _parse_groksearch_content_links,
+    _parse_groksearch_search_response,
+    _parse_groksearch_sources_response,
+    _search_result_url,
+)
+from .parsers.markdown import _parse_markdown_search_results
 from .search_backends import CallableSearchBackend, TimeBudget, run_search_backends
 from .security import (
     ALLOWED_FETCH_PORTS,
@@ -193,140 +199,9 @@ def _safe_float(value, default: float, low: float, high: float) -> float:
     return max(low, min(high, number))
 
 
-def _search_result_url(item: dict) -> str:
-    """从不同引擎返回的 dict 中提取 URL（兼容 href/url/link 字段名差异）。"""
-    return str(item.get("href") or item.get("url") or item.get("link") or "").strip()
-
-
 def _is_grok_result(item: dict) -> bool:
     """判断搜索结果是否来自 GrokSearch 后端。"""
     return isinstance(item, dict) and str(item.get("_backend") or "") == "grok"
-
-
-# ---------------------------------------------------------------------------
-# X/Twitter URL 解析工具
-# ---------------------------------------------------------------------------
-
-# 搜索引擎结果 URL 规范化
-# ---------------------------------------------------------------------------
-
-def _normalize_duckduckgo_href(href: str) -> str:
-    """
-    还原 DuckDuckGo 跳转链接中的真实目标 URL。
-
-    DuckDuckGo HTML 结果中的 href 形如：
-    /l/?uddg=https%3A%2F%2Fexample.com&...
-    此函数提取 uddg 参数并 URL 解码。
-    """
-    value = unescape(str(href or "").strip())
-    parsed = urlparse(value)
-    if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
-        target = parse_qs(parsed.query).get("uddg", [""])[0]
-        if target:
-            return unquote(target)
-    return value
-
-
-def _normalize_bing_href(href: str) -> str:
-    """
-    还原 Bing 跳转链接中的真实目标 URL。
-
-    Bing 结果链接可能形如 /ck/a?...&u=a1<base64>...，
-    需解码 a1 前缀的 base64url 编码。
-    """
-    value = unescape(str(href or "").strip())
-    parsed = urlparse(value)
-    if "bing.com" in parsed.netloc and parsed.path.startswith("/ck/"):
-        target = parse_qs(parsed.query).get("u", [""])[0]
-        if target.startswith("a1"):
-            payload = target[2:]
-            # 补齐 base64 填充
-            payload += "=" * (-len(payload) % 4)
-            try:
-                return base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8", errors="replace")
-            except Exception:
-                return value
-    return value
-
-
-# ---------------------------------------------------------------------------
-# 搜索 HTML 解析器
-# ---------------------------------------------------------------------------
-
-def _parse_bing_html(html_text: str, max_results: int) -> list:
-    """
-    从 Bing 搜索结果 HTML 中解析出标题、链接、摘要。
-
-    匹配策略：
-    1. 正则定位 class 含 "b_algo" 的 <li> 块
-    2. 在块内提取 <h2><a href="..."> 标题和链接
-    3. 在块内提取 <p> 摘要
-    """
-    # 匹配 Bing 搜索结果块
-    pattern = re.compile(r'<li[^>]+class=["\'][^"\']*b_algo[^"\']*["\'][^>]*>(.*?)</li>', re.I | re.S)
-    results = []
-    seen = set()
-    for block_match in pattern.finditer(str(html_text or "")):
-        block = block_match.group(1)
-
-        # 提取标题链接
-        link_match = re.search(
-            r'<h2[^>]*>.*?<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>.*?</h2>',
-            block, re.I | re.S,
-        )
-        if not link_match:
-            continue
-
-        href = _normalize_bing_href(link_match.group(1))
-        title = _clean_text(re.sub(r"<[^>]+>", " ", link_match.group(2)))
-
-        # 提取摘要
-        snippet_match = re.search(r"<p[^>]*>(.*?)</p>", block, re.I | re.S)
-        snippet = _clean_text(re.sub(r"<[^>]+>", " ", snippet_match.group(1))) if snippet_match else ""
-
-        if title and _safe_url(href) and href not in seen:
-            results.append({"title": title, "href": href, "body": snippet})
-            seen.add(href)
-
-        if len(results) >= max_results:
-            break
-
-    return results
-
-
-def _parse_duckduckgo_html(html_text: str, max_results: int) -> list:
-    """
-    从 DuckDuckGo HTML 搜索结果中解析标题、链接、摘要。
-
-    匹配策略：
-    - 定位 class 含 "result__a" 的 <a> 标签作为结果条目
-    - 从后续 HTML 中提取 class 含 "result__snippet" 的摘要
-    """
-    pattern = re.compile(
-        r'<a[^>]+class=["\'][^"\']*result__a[^"\']*["\'][^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>'
-        r'(?P<tail>.*?)(?=<a[^>]+class=["\'][^"\']*result__a|\Z)',
-        re.I | re.S,
-    )
-    results = []
-    for match in pattern.finditer(str(html_text or "")):
-        href = _normalize_duckduckgo_href(match.group(1))
-        title = _clean_text(re.sub(r"<[^>]+>", " ", match.group(2)))
-
-        # 在当前结果条目和下一个条目之间的 HTML 中寻找摘要
-        tail = match.group("tail") or ""
-        snippet_match = re.search(
-            r'class=["\'][^"\']*result__snippet[^"\']*["\'][^>]*>(.*?)</',
-            tail, re.I | re.S,
-        )
-        snippet = _clean_text(re.sub(r"<[^>]+>", " ", snippet_match.group(1))) if snippet_match else ""
-
-        if title and _safe_url(href):
-            results.append({"title": title, "href": href, "body": snippet})
-
-        if len(results) >= max_results:
-            break
-
-    return results
 
 
 # ---------------------------------------------------------------------------
@@ -377,176 +252,6 @@ async def _fetch_jina_duckduckgo_markdown(query: str, max_results: int, timeout_
     )
     response.raise_for_status()
     return response.text
-
-
-# ---------------------------------------------------------------------------
-# Markdown 搜索结果解析（Jina 通道）
-# ---------------------------------------------------------------------------
-
-def _parse_markdown_search_results(markdown_text: str, max_results: int) -> list:
-    """
-    从 Jina 返回的 Markdown 中解析搜索结果。
-
-    Jina 将 DuckDuckGo 结果转为 `## [标题](链接)` 格式的 Markdown 标题，
-    标题之间的正文即为该结果的摘要。
-    """
-    matches = list(re.finditer(r"##\s+\[([^\]]+)\]\(([^)]+)\)", str(markdown_text or "")))
-    results = []
-    seen = set()
-    for index, match in enumerate(matches):
-        title = _clean_text(match.group(1))
-        href = _normalize_duckduckgo_href(match.group(2))
-        if not title or not _safe_url(href) or href in seen:
-            continue
-
-        # 两个标题之间的文本即为摘要
-        snippet_start = match.end()
-        snippet_end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown_text)
-        snippet = str(markdown_text or "")[snippet_start:snippet_end]
-
-        # 去掉图片和链接 Markdown 语法，保留纯文本
-        snippet = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", snippet)
-        snippet = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", snippet)
-        snippet = _clean_text(snippet)[:300]
-
-        results.append({"title": title, "href": href, "body": snippet})
-        seen.add(href)
-
-        if len(results) >= max_results:
-            break
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# GrokSearch API 响应解析
-# ---------------------------------------------------------------------------
-
-def _parse_groksearch_search_response(data: dict, max_results: int) -> list:
-    """
-    解析 GrokSearch web_search 返回的 JSON。
-
-    兼容多种响应结构：
-    - data.results / data.data / data.sources 中的列表
-    - 每条记录的 title/name、url/href/link、snippet/content/description
-    - 如果结构化列表为空，则尝试从 content 中的 Markdown 链接提取
-    """
-    results = []
-    seen = set()
-    items = []
-
-    # 枚举可能的列表字段
-    if isinstance(data, dict):
-        for key in ("results", "data", "sources"):
-            value = data.get(key)
-            if isinstance(value, list):
-                items = value
-                break
-
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        url = _search_result_url(item)
-        title = _clean_text(item.get("title") or item.get("name")) or ""
-        snippet = _clean_text(item.get("snippet") or item.get("content") or item.get("description") or "")
-        if not title and url:
-            title = url
-        if title and _safe_url(url) and url not in seen:
-            results.append({"title": title, "href": url, "body": snippet})
-            seen.add(url)
-        if len(results) >= max_results:
-            break
-
-    # 回退：从 content 文本中提取 Markdown 链接
-    if not results and isinstance(data, dict):
-        results = _parse_groksearch_content_links(data, max_results)
-
-    return results
-
-
-def _parse_groksearch_content_links(data: dict, max_results: int) -> list:
-    """
-    从 GrokSearch 返回的 content/markdown 文本中提取 Markdown 链接作为结果。
-
-    当 API 返回的是一个文本回答而非结构化结果列表时使用此回退逻辑。
-    """
-    content = ""
-    if isinstance(data, dict):
-        for key in ("content", "text", "markdown", "result"):
-            value = data.get(key)
-            if isinstance(value, str) and value.strip():
-                content = value
-                break
-    if not content:
-        return []
-
-    # 匹配 [标签](url) 或 [[标签]](url) 格式
-    matches = list(re.finditer(r"\[{1,2}([^\[\]]+)\]{1,2}\((https?://[^)\s]+)\)", content))
-    results = []
-    seen = set()
-
-    for index, match in enumerate(matches):
-        url = match.group(2).strip()
-        if not _safe_url(url) or url in seen:
-            continue
-
-        # 用链接前后的文本作为摘要
-        next_start = matches[index + 1].start() if index + 1 < len(matches) else len(content)
-        tail = content[match.end():next_start]
-        snippet = re.sub(r"\[[^\]]+\]\([^)]+\)", " ", tail)
-        snippet = _clean_text(snippet)
-
-        if not snippet:
-            start = max(0, match.start() - 180)
-            end = min(len(content), match.end() + 260)
-            snippet = _clean_text(re.sub(r"\[[^\]]+\]\([^)]+\)", " ", content[start:end]))
-
-        label = _clean_text(match.group(1))
-        # 纯数字引用标签 → 用 snippet 作为标题
-        if re.fullmatch(r"\[?\d+\]?", label):
-            title = snippet[:100] or url
-        else:
-            title = label or snippet[:100] or url
-
-        results.append({"title": title, "href": url, "body": snippet})
-        seen.add(url)
-
-        if len(results) >= max_results:
-            break
-
-    return results
-
-
-def _parse_groksearch_sources_response(data: dict, max_results: int) -> list:
-    """
-    解析 GrokSearch get_sources 返回的来源列表。
-
-    结构与主搜索结果类似，但从 data.sources 字段读取。
-    """
-    results = []
-    seen = set()
-    items = []
-
-    if isinstance(data, dict):
-        value = data.get("sources")
-        if isinstance(value, list):
-            items = value
-
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        url = _search_result_url(item)
-        title = _clean_text(item.get("title") or item.get("name") or item.get("provider")) or ""
-        snippet = _clean_text(item.get("description") or item.get("content") or item.get("snippet") or "")
-        if not title and url:
-            title = url
-        if title and _safe_url(url) and url not in seen:
-            results.append({"title": title, "href": url, "body": snippet})
-            seen.add(url)
-        if len(results) >= max_results:
-            break
-
-    return results
 
 
 # ---------------------------------------------------------------------------

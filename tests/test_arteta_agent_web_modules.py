@@ -109,6 +109,20 @@ def test_fetch_helpers_are_extracted_with_compatible_fetch_wrapper():
     assert handlers._fetch_url_impl is fetch._fetch_url
 
 
+def test_search_parsers_are_extracted_but_compatibly_exported():
+    from plugins.arteta_agent.tools.web import handlers
+    from plugins.arteta_agent.tools.web.parsers import bing, duckduckgo, grok, markdown
+
+    assert handlers._normalize_bing_href is bing._normalize_bing_href
+    assert handlers._parse_bing_html is bing._parse_bing_html
+    assert handlers._normalize_duckduckgo_href is duckduckgo._normalize_duckduckgo_href
+    assert handlers._parse_duckduckgo_html is duckduckgo._parse_duckduckgo_html
+    assert handlers._parse_markdown_search_results is markdown._parse_markdown_search_results
+    assert handlers._parse_groksearch_search_response is grok._parse_groksearch_search_response
+    assert handlers._parse_groksearch_content_links is grok._parse_groksearch_content_links
+    assert handlers._parse_groksearch_sources_response is grok._parse_groksearch_sources_response
+
+
 def test_search_backends_share_explicit_time_budget():
     from plugins.arteta_agent.tools.web.models import SearchHit
     from plugins.arteta_agent.tools.web.search_backends import TimeBudget, run_search_backends

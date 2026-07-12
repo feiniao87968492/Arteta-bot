@@ -3946,3 +3946,51 @@ Verification after the fix:
 
 - ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
 - No further Web Access features are included in this Round 3 cleanup commit.
+
+## 2026-07-12 Web Access Round 3 Search Parser Extraction
+
+### Scope
+
+- Continued Round 3 module splitting by moving pure search-result parsers out of `handlers.py`.
+- Kept the public/private compatibility surface unchanged by importing the same underscore helper names back into `handlers.py`.
+- Did not change search backend ordering, HTTP behavior, ToolResult structure, or registered tool names.
+
+### Changes
+
+- Added `plugins/arteta_agent/tools/web/parsers/` with:
+  - `bing.py` for Bing redirect normalization and HTML parsing;
+  - `duckduckgo.py` for DuckDuckGo redirect normalization and HTML parsing;
+  - `markdown.py` for Jina/DuckDuckGo Markdown parsing;
+  - `grok.py` for GrokSearch search/content/source response parsing.
+- Removed the corresponding parser function bodies from `handlers.py`.
+- Added module-boundary coverage proving `handlers.py` still compatibly exports the parser helpers.
+
+### RED Checks Before Implementation
+
+- `test_search_parsers_are_extracted_but_compatibly_exported` failed with `ModuleNotFoundError: No module named 'plugins.arteta_agent.tools.web.parsers'`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py::test_search_parsers_are_extracted_but_compatibly_exported -q`
+  - RED result: `1 failed`.
+  - GREEN result: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py -q`
+  - Result: `226 passed`.
+- `python -m pytest tests -q`
+  - Result: `593 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- Parser modules intentionally depend only on existing security and verification text helpers. Network calls and backend orchestration remain outside parser modules.
+- Compatibility exports remain underscore-prefixed because existing tests and legacy monkeypatch paths still import these helpers through `web_access`/`handlers`.
+
+### Remaining
+
+- Continue Round 3 by extracting registration/formatting or concrete search backend classes from `handlers.py`.
+- ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
