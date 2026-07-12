@@ -4504,3 +4504,57 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 ### Final Status
 
 - No football freshness plan acceptance item remains open from this calibration and deployment slice.
+
+## 2026-07-12 Football Freshness Manual Smoke Matrix Follow-up
+
+### Scope
+
+- Converted the task-plan manual smoke message list into a fixed routing acceptance test.
+- Kept the production change narrow: direct fixture questions such as `下一场打谁` are treated as implicit Arsenal fixture questions when no entity is provided.
+- Did not broaden generic single-word or generic date/price/math routing.
+
+### RED Check
+
+- Added `test_task_manual_smoke_matrix_routes_current_and_stable_football_questions`.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_agent_football_freshness.py::test_task_manual_smoke_matrix_routes_current_and_stable_football_questions -q`
+  - Result: failed on `下一场打谁`, which was incorrectly routed as `freshness.mode == "none"`.
+
+### Changes
+
+- Added `IMPLICIT_FOOTBALL_QUERY_MARKERS` for:
+  - `下一场打谁`;
+  - `下一场对谁`;
+  - `下场打谁`;
+  - `下场对谁`.
+- These markers count as football context only for explicit fixture-opponent questions.
+- Query hint construction now defaults these implicit fixture questions to `Arsenal` when no resolved team/player context is available.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_agent_football_freshness.py::test_task_manual_smoke_matrix_routes_current_and_stable_football_questions -q`
+  - Result after fix: `1 passed`.
+- `python -m pytest tests\test_arteta_agent_football_freshness.py tests\test_arteta_agent_football_freshness_eval.py -q`
+  - Result: `18 passed`.
+- `python tools\evaluate_football_freshness.py --output artifacts\football_freshness_eval_report.json`
+  - Result: `30` repo-safe seed records, `required_recall=1.0`, `required_precision=1.0`, `mismatches=[]`.
+- `python -m pytest tests\test_arteta_agent_routing.py tests\test_arteta_agent_planning.py tests\test_arteta_agent_football_freshness.py tests\test_arteta_agent_football_freshness_eval.py -q`
+  - Result: `58 passed`.
+- `python -m pytest tests\test_arteta_agent_runtime.py tests\test_arteta_agent_provider.py tests\test_arteta_agent_registry.py -q`
+  - Result: `225 passed`.
+- `python -m pytest tests -q`
+  - Result: `626 passed`.
+- `python tools\evaluate_football_freshness.py --dataset artifacts\private\football_freshness_real_eval_20260712_activation_scope.json --output artifacts\private\football_freshness_real_eval_report_20260712_activation_scope.json`
+  - Result: `120` private real-message records, `required_recall=1.0`, `required_precision=1.0`.
+- `python -m compileall -q bot.py plugins tests tools dashboard`
+  - Result: passed.
+- `python tools\verify_features.py --suite agent_loop --suite chat --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+- `git diff --check`
+  - Result: passed.
+
+### Pre-Deployment Remaining
+
+- Commit and push this manual smoke acceptance slice.
+- Redeploy `plugins/arteta_agent/routing/freshness.py` to ECS.
+- Run remote Python 3.8 compile, seed eval, service restart, smoke, and log health checks again because production code changed after commit `73f375e`.

@@ -177,6 +177,31 @@ def test_recent_context_does_not_force_non_question_future_hope():
     assert all(name not in WEB_TOOLS for name in _tool_names(plan))
 
 
+def test_task_manual_smoke_matrix_routes_current_and_stable_football_questions():
+    examples = [
+        ("阿森纳上一场谁进球了", "required", "recent_match_result"),
+        ("萨卡怎么没上", "required", "lineup"),
+        ("下一场打谁", "required", "current_fixture"),
+        ("这笔转会到底成没成", "required", "transfer_status"),
+        ("罗马诺又说什么了", "required", "breaking_football_news"),
+        ("你觉得赖斯最近状态怎么样", "required", "current_player_evaluation"),
+        ("温格为什么离开阿森纳", "none", "stable_football_knowledge"),
+        ("高位逼抢为什么容易被打身后", "none", "stable_football_knowledge"),
+        ("2006 年欧冠决赛发生了什么", "none", "stable_football_knowledge"),
+    ]
+
+    for text, expected_mode, expected_intent in examples:
+        decision, plan = _decision_and_plan(text)
+
+        assert decision.freshness.mode == expected_mode, text
+        assert decision.freshness.intent == expected_intent
+        if expected_mode == "required":
+            assert any(name in WEB_TOOLS for name in _tool_names(plan)), text
+            assert plan.constraints.get("current_information_required") is True
+        else:
+            assert all(name not in WEB_TOOLS for name in _tool_names(plan)), text
+
+
 def test_x_status_url_requires_fetch_x_post_plan():
     ctx = make_context(
         raw_message="罗马诺这个是真的吗 https://x.com/FabrizioRomano/status/123456789",

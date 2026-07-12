@@ -187,6 +187,13 @@ FOOTBALL_MARKERS = (
     "injury",
 )
 
+IMPLICIT_FOOTBALL_QUERY_MARKERS = (
+    "下一场打谁",
+    "下一场对谁",
+    "下场打谁",
+    "下场对谁",
+)
+
 PRONOUN_OR_FOLLOWUP_MARKERS = (
     "这场",
     "这个",
@@ -393,6 +400,8 @@ def _query_hint(text: str, intent: str, entities: ConversationEntities) -> str:
     if needs_context_expansion:
         parts.extend(entities.players)
         parts.extend(entities.teams)
+    if not parts and intent == "current_fixture" and _has_any(raw_text, IMPLICIT_FOOTBALL_QUERY_MARKERS):
+        parts.append("Arsenal")
     if not parts and _has_any(text, ("阿森纳", "枪手")):
         parts.append("Arsenal")
     parts.append(raw_text)
@@ -456,10 +465,15 @@ def detect_football_freshness(
     combined = "{0}\n{1}".format(text, context_text)
     has_football_context = (
         _has_any(combined, FOOTBALL_MARKERS)
+        or _has_any(text, IMPLICIT_FOOTBALL_QUERY_MARKERS)
         or bool(entities.players)
         or bool(entities.teams)
     )
-    text_has_football_context = _has_any(text, FOOTBALL_MARKERS) or _has_known_football_entity(text)
+    text_has_football_context = (
+        _has_any(text, FOOTBALL_MARKERS)
+        or _has_any(text, IMPLICIT_FOOTBALL_QUERY_MARKERS)
+        or _has_known_football_entity(text)
+    )
     text_has_question_signal = _has_question_or_verification_signal(text)
     text_has_relative_time = _has_any(text, RELATIVE_TIME_MARKERS)
     text_has_current_fact = _has_any(text, CURRENT_FACT_MARKERS) or _has_scoreline(text)
