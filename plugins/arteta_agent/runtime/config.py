@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Dict, List
 
 
 @dataclass(frozen=True)
@@ -10,3 +11,4 @@ class AgentRunConfig:
     request_timeout_seconds: float = 80.0
     stop_after_initial_tools: bool = False
     max_parallel_tools: int = 3
+    tool_call_dependencies: Dict[str, List[str]] = field(default_factory=dict)

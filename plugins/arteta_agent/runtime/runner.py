@@ -1,6 +1,6 @@
 import asyncio
 import inspect
-from typing import Awaitable, Callable, Iterable, Optional
+from typing import Awaitable, Callable, Iterable, Optional, Set
 
 from ..context import ToolContext
 from ..executor import execute_tool_call_result
@@ -119,8 +119,9 @@ class AgentRuntimeRunner:
         calls = list(tool_calls or [])
         record_round(state.trace, len(calls))
         index = 0
+        completed_call_ids = self._completed_tool_call_ids(state)
         while index < len(calls):
-            batch = self._parallel_safe_batch(calls, index, config)
+            batch = self._parallel_safe_batch(calls, index, config, completed_call_ids)
             if len(batch) > 1:
                 for tool_call in batch:
                     guard_reason = guard.before_tool_call(tool_call, state.tool_call_count)
@@ -132,6 +133,7 @@ class AgentRuntimeRunner:
                 ])
                 for tool_call, tool_result in zip(batch, tool_results):
                     stopped = await self._observe_tool_result(state, guard, tool_call, tool_result)
+                    completed_call_ids.add(str(tool_call.get("id") or ""))
                     if stopped is not None:
                         return stopped
                 index += len(batch)
@@ -145,21 +147,55 @@ class AgentRuntimeRunner:
 
             tool_result = await self.tool_executor(tool_call, state.ctx)
             stopped = await self._observe_tool_result(state, guard, tool_call, tool_result)
+            completed_call_ids.add(str(tool_call.get("id") or ""))
             if stopped is not None:
                 return stopped
             index += 1
         return None
 
-    def _parallel_safe_batch(self, calls: list, start_index: int, config: AgentRunConfig) -> list:
+    def _completed_tool_call_ids(self, state: AgentState) -> Set[str]:
+        completed: Set[str] = set()
+        for message in list(state.messages or []):
+            if (message or {}).get("role") != "tool":
+                continue
+            tool_call_id = str((message or {}).get("tool_call_id") or "")
+            if tool_call_id:
+                completed.add(tool_call_id)
+        return completed
+
+    def _parallel_safe_batch(
+        self,
+        calls: list,
+        start_index: int,
+        config: AgentRunConfig,
+        completed_call_ids: Set[str],
+    ) -> list:
         limit = max(1, int(getattr(config, "max_parallel_tools", 1) or 1))
         if limit <= 1:
             return calls[start_index:start_index + 1]
         batch = []
+        concurrency_groups: Set[str] = set()
         for tool_call in calls[start_index:start_index + limit]:
             if not self._is_parallel_safe_read_call(tool_call):
                 break
+            call_id = str((tool_call or {}).get("id") or "")
+            dependencies = list((config.tool_call_dependencies or {}).get(call_id, []) or [])
+            if any(str(dependency) not in completed_call_ids for dependency in dependencies):
+                if batch:
+                    break
+                return calls[start_index:start_index + 1]
+            concurrency_group = self._concurrency_group(tool_call)
+            if concurrency_group and concurrency_group in concurrency_groups:
+                break
             batch.append(tool_call)
+            if concurrency_group:
+                concurrency_groups.add(concurrency_group)
         return batch if batch else calls[start_index:start_index + 1]
+
+    def _concurrency_group(self, tool_call: dict) -> str:
+        function = (tool_call or {}).get("function") or {}
+        spec = get_tool(str(function.get("name") or ""))
+        return str(getattr(spec, "concurrency_group", "") or "") if spec else ""
 
     def _is_parallel_safe_read_call(self, tool_call: dict) -> bool:
         function = (tool_call or {}).get("function") or {}

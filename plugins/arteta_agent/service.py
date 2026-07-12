@@ -4,6 +4,7 @@ from typing import List, Optional, Set
 from .context import ToolContext
 from .planning.execution import (
     initial_tool_calls_from_plan,
+    initial_tool_dependencies_from_plan,
     should_execute_initial_plan,
 )
 from .planning.plan_builder import build_plan
@@ -102,6 +103,7 @@ async def run_agent_request(request: AgentRequest) -> str:
         is_tool_available=is_tool_available,
     )
     planned_initial_calls = initial_tool_calls_from_plan(initial_plan, disabled_tools, is_tool_available)
+    planned_tool_dependencies = initial_tool_dependencies_from_plan(initial_plan, planned_initial_calls)
     if planned_initial_calls and should_execute_initial_plan(initial_plan, disabled_tools, is_tool_available):
         initial_result = await run_runtime_loop_from_state(
             state,
@@ -125,6 +127,7 @@ async def run_agent_request(request: AgentRequest) -> str:
                 initial_plan.constraints.get("direct_trace_response")
                 or initial_plan.constraints.get("direct_tool_response")
             ),
+            tool_call_dependencies=planned_tool_dependencies,
             chat_model_call=request.chat_model_call,
             emoji_enabled=mood_emoji_enabled,
         )

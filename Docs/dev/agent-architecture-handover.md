@@ -278,7 +278,7 @@ When adding new Agent behavior:
 
 ## 9. Residual Risks
 
-- The Windows local pytest warning is still present as known environment noise.
+- The prior Windows local pytest subprocess cleanup warning was closed during the final acceptance audit by isolating Grok snapshot browser side effects in tests.
 - Legacy non-Agent modules outside `plugins/arteta_agent` still contain historical direct HTTP clients. The architecture task acceptance boundary was the Agent stack, Provider, Activation, and Agent tools.
 - The local deployment archive clutter should be cleaned separately if desired; it was left untouched to avoid deleting unrelated operator artifacts.
 

@@ -30,6 +30,7 @@ class ToolSpec:
     category: str = "general"
     timeout_seconds: float = 20.0
     parallel_safe: bool = False
+    concurrency_group: Optional[str] = None
     idempotent: bool = False
     result_contains_untrusted_content: bool = True
 

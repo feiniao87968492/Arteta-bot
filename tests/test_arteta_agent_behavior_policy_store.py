@@ -3,6 +3,8 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
 
 def test_policy_service_owns_planner_policy_ttl_and_emoji_helpers():
     from pathlib import Path
@@ -204,3 +206,59 @@ def test_behavior_policy_sqlite_concurrent_turn_consumes_are_atomic(tmp_path, mo
         list(executor.map(lambda _: behavior_policy.consume_group_policy_turn("group-1"), range(2)))
 
     assert behavior_policy.get_group_policy("group-1", "emoji.enabled")["ttl_turns"] == 1
+
+
+@pytest.mark.parametrize(
+    ("scenario", "action", "expected_ttl"),
+    [
+        ("normal_text_reply", "finish", 1),
+        ("multi_tool_success", "finish", 1),
+        ("provider_timeout_degraded_reply", "finish", 1),
+        ("tool_timeout_degraded_reply", "finish", 1),
+        ("permission_required", "finish", 1),
+        ("pending_action_confirmation_round", "prepare_only", 2),
+        ("no_reply", "finish", 1),
+        ("runtime_loop_guard_stop", "finish", 1),
+        ("activation_rejected", "skip_agent", 2),
+    ],
+)
+def test_policy_ttl_boundary_scenarios(tmp_path, monkeypatch, scenario, action, expected_ttl):
+    from plugins.arteta_agent import behavior_policy
+    from plugins.arteta_agent.context import ToolContext
+    from plugins.arteta_agent.service import finish_agent_run, prepare_agent_run
+
+    monkeypatch.setenv("ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH", str(tmp_path / "{0}.db".format(scenario)))
+    monkeypatch.delenv("ARTETA_AGENT_BEHAVIOR_POLICY_PATH", raising=False)
+    monkeypatch.delenv("ARTETA_AGENT_UI_PREFS_PATH", raising=False)
+    monkeypatch.delenv("ARTETA_AGENT_TOOL_POLICY_PATH", raising=False)
+
+    behavior_policy.set_group_policy("group-1", "emoji.enabled", False, ttl_turns=2)
+
+    ctx = ToolContext(
+        bot=None,
+        event=None,
+        user_id="user-1",
+        group_id="group-1",
+        nickname="player",
+        raw_message=scenario,
+        is_group=True,
+        is_admin=False,
+        extra={},
+    )
+
+    if action in ("finish", "prepare_only"):
+        prepared = prepare_agent_run(
+            [{"role": "user", "content": scenario}],
+            ctx,
+            trace=None,
+            disabled_tools=set(),
+        )
+        if action == "finish":
+            finish_agent_run("[NO_REPLY]" if scenario == "no_reply" else scenario, ctx, prepared)
+    elif action == "skip_agent":
+        pass
+    else:
+        raise AssertionError("unknown action")
+
+    item = behavior_policy.get_group_policy("group-1", "emoji.enabled")
+    assert item["ttl_turns"] == expected_ttl

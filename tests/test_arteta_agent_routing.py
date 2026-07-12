@@ -56,6 +56,35 @@ def test_plan_builder_combines_group_memory_and_latest_web_verification():
     assert any(name in tool_names(plan) for name in ("grok_search", "verify_recent_claim", "web_search"))
 
 
+def test_plan_builder_marks_document_verification_dependency():
+    from plugins.arteta_agent.planning.execution import initial_tool_calls_from_plan, initial_tool_dependencies_from_plan
+    from plugins.arteta_agent.planning.plan_builder import build_plan
+    from plugins.arteta_agent.routing.models import Intent, PlannedToolCall, RouteDecision
+
+    decision = RouteDecision(
+        intents=[
+            Intent("document_read", 1.0, "read supplied PDF"),
+            Intent("public_current_fact", 0.95, "verify claim extracted from document"),
+        ],
+        required_tools=[
+            PlannedToolCall("read_document", {}, "read document", forced=True),
+            PlannedToolCall("verify_recent_claim", {"claim": "claim from document"}, "verify after document", forced=True),
+        ],
+    )
+
+    plan = build_plan(
+        decision,
+        make_context(),
+        is_tool_available=lambda name: True,
+    )
+    calls = initial_tool_calls_from_plan(plan)
+    dependencies = initial_tool_dependencies_from_plan(plan, calls)
+
+    assert plan.dependencies == {"grok_search": ["read_document"]}
+    assert [call["id"] for call in calls] == ["planned-read-document-1", "planned-grok-search-2"]
+    assert dependencies == {"planned-grok-search-2": ["planned-read-document-1"]}
+
+
 def test_plan_builder_keeps_memory_score_recall_out_of_forced_web():
     from plugins.arteta_agent.planning.plan_builder import build_plan
     from plugins.arteta_agent.routing.heuristic_router import route_message

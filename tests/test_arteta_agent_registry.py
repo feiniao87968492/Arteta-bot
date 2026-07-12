@@ -94,6 +94,25 @@ def assert_tool_observation_without_system_leak(messages, expected_text):
     assert expected_text in str(messages[-1].get("content") or "")
 
 
+def disable_grok_snapshot_side_effect(monkeypatch, web_access) -> None:
+    async def no_snapshot(_source_urls):
+        return ""
+
+    monkeypatch.setattr(web_access, "_grok_source_snapshot_marker", no_snapshot)
+
+
+@pytest.fixture(autouse=True)
+def avoid_real_grok_snapshot_browser(monkeypatch, request):
+    if request.node.name == "test_grok_snapshot_writes_playwright_screenshot_artifact":
+        return
+    from plugins.arteta_agent.tools import web_access
+
+    async def fake_write_snapshot_image(_page, _source_url):
+        return "artifacts/agent_tools/link_snapshots/test_grok_source.png"
+
+    monkeypatch.setattr(web_access, "_write_grok_snapshot_image", fake_write_snapshot_image)
+
+
 def test_planner_no_longer_defines_legacy_forced_tool_followup_helpers():
     from pathlib import Path
 
@@ -898,6 +917,66 @@ def test_executor_rejects_invalid_json_arguments_before_handler():
     assert result.startswith("[InvalidArguments]")
     assert "invalid JSON" in result
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("raw_arguments", "expected_fragment"),
+    [
+        (json.dumps({}), "arguments.message is required"),
+        (json.dumps({"message": 1}), "arguments.message must be string"),
+        (json.dumps({"message": "ok", "extra": True}), "arguments.extra is not allowed"),
+        (json.dumps({"message": "ok", "mode": "bad"}), "arguments.mode must be one of"),
+        (json.dumps({"message": "toolong"}), "arguments.message must contain at most"),
+        (json.dumps({"message": "ok", "tags": ["a", "b", "c"]}), "arguments.tags must contain at most"),
+        ("{bad", "invalid JSON"),
+        (json.dumps(["not-object"]), "tool arguments must be an object"),
+    ],
+)
+def test_executor_rejects_invalid_arguments_before_permission_or_handler(tmp_path, raw_arguments, expected_fragment):
+    from plugins.arteta_agent.executor import execute_tool_call_result
+    from plugins.arteta_agent.pending import PendingActionStore
+
+    clear_registry()
+    calls = []
+
+    async def handler(ctx: ToolContext, message: str, mode: str = "soft", tags=None):
+        calls.append((message, mode, tags))
+        return "ran"
+
+    register_tool(ToolSpec(
+        "confirm_with_schema",
+        "confirm with schema",
+        {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "maxLength": 4},
+                "mode": {"type": "string", "enum": ["soft", "hard"]},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 2,
+                },
+            },
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+        handler,
+        permission="confirm_write",
+    ))
+
+    db_path = tmp_path / "pending.db"
+    result = asyncio.run(execute_tool_call_result({
+        "id": "call-invalid-confirm-schema",
+        "function": {
+            "name": "confirm_with_schema",
+            "arguments": raw_arguments,
+        },
+    }, make_context(extra={"pending_action_db_path": str(db_path)})))
+
+    assert result.status == "invalid_arguments"
+    assert expected_fragment in result.content
+    assert calls == []
+    assert PendingActionStore(str(db_path)).list_actions("user-1", "group-1") == []
 
 
 def test_executor_rejects_missing_required_arguments_before_pending_action(tmp_path):
@@ -3752,6 +3831,7 @@ def test_web_search_reads_groksearch_env_lazily(monkeypatch):
     monkeypatch.setenv("ARTETA_GROKSEARCH_API_KEY", "sk-test")
     monkeypatch.setattr(web_access, "_groksearch_search", fake_grok_search)
     monkeypatch.setattr(web_access, "_duckduckgo_search", fail_legacy_search)
+    disable_grok_snapshot_side_effect(monkeypatch, web_access)
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
@@ -3780,6 +3860,7 @@ def test_grok_search_uses_only_groksearch_backend(monkeypatch):
     monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
     monkeypatch.setattr(web_access, "_groksearch_search", fake_grok_search)
     monkeypatch.setattr(web_access, "_duckduckgo_search", fail_legacy_search)
+    disable_grok_snapshot_side_effect(monkeypatch, web_access)
 
     result = asyncio.run(web_access.grok_search(
         make_context(),
@@ -4102,6 +4183,7 @@ def test_web_search_uses_groksearch_when_configured(monkeypatch):
     monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
     monkeypatch.setattr(web_access, "_groksearch_search", fake_grok_search)
     monkeypatch.setattr(web_access, "_duckduckgo_search", fail_legacy_search)
+    disable_grok_snapshot_side_effect(monkeypatch, web_access)
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
@@ -4214,6 +4296,7 @@ def test_web_search_reads_groksearch_sources_by_session(monkeypatch):
     monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
     monkeypatch.setattr(web_access, "_groksearch_post", fake_grok_post)
     monkeypatch.setattr(web_access, "_duckduckgo_search", fail_legacy_search)
+    disable_grok_snapshot_side_effect(monkeypatch, web_access)
 
     result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
 
@@ -4253,6 +4336,7 @@ def test_web_search_reads_groksearch_content_links(monkeypatch):
     monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
     monkeypatch.setattr(web_access, "_groksearch_post", fake_grok_post)
     monkeypatch.setattr(web_access, "_duckduckgo_search", fail_legacy_search)
+    disable_grok_snapshot_side_effect(monkeypatch, web_access)
 
     result = asyncio.run(web_access.web_search(make_context(), query="site:x.com Arsenal official news", max_results=2))
 
@@ -5221,6 +5305,56 @@ def test_executor_confirmed_action_can_only_be_consumed_once(tmp_path):
     assert second.startswith("[PermissionRequired]")
     assert "expired or already consumed" in second
     assert calls == ["once"]
+
+
+def test_executor_concurrent_pending_action_confirmation_consumes_once(tmp_path):
+    from plugins.arteta_agent.pending import PendingActionStore
+    from plugins.arteta_agent.runtime.confirmation import execute_explicit_pending_action_confirmation
+
+    clear_registry()
+    calls = []
+
+    async def handler(ctx: ToolContext, value: str):
+        calls.append(value)
+        await asyncio.sleep(0.03)
+        return "ran {0}".format(value)
+
+    register_tool(ToolSpec(
+        "needs_confirm",
+        "confirm",
+        {"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},
+        handler,
+        permission="confirm_write",
+    ))
+
+    db_path = tmp_path / "pending.db"
+    store = PendingActionStore(str(db_path))
+    action_id = store.create_action(
+        user_id="user-1",
+        group_id="group-1",
+        tool_name="needs_confirm",
+        arguments={"value": "once"},
+    )
+
+    async def confirm_once():
+        return await execute_explicit_pending_action_confirmation(
+            action_id,
+            make_context(extra={"pending_action_db_path": str(db_path)}),
+            trace=None,
+        )
+
+    async def run_both():
+        return await asyncio.gather(confirm_once(), confirm_once())
+
+    results = asyncio.run(run_both())
+
+    assert results.count("ran once") == 1
+    failures = [item for item in results if item != "ran once"]
+    assert len(failures) == 1
+    assert failures[0].startswith("[PermissionRequired]")
+    assert "expired or already consumed" in failures[0]
+    assert calls == ["once"]
+    assert store.get_action(action_id) is None
 
 
 def test_executor_ignores_legacy_confirmed_tool_bypass(tmp_path):

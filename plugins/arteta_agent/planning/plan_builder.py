@@ -133,13 +133,26 @@ def build_plan(
     ):
         constraints["execute_single_required_tool"] = True
         constraints["direct_tool_response"] = True
+    required_tools = _rewrite_public_current_fact_tools(
+        decision,
+        ctx,
+        disabled_tools=disabled_tools,
+        is_tool_available=is_tool_available,
+    )
+    dependencies = {}
+    if (
+        any(intent.name == "document_read" for intent in decision.intents or [])
+        and any(intent.name == "public_current_fact" for intent in decision.intents or [])
+        and any(planned.name == "read_document" for planned in required_tools)
+    ):
+        for planned in required_tools:
+            if planned.name in PUBLIC_CURRENT_FACT_TOOLS:
+                dependencies.setdefault(planned.name, [])
+                if "read_document" not in dependencies[planned.name]:
+                    dependencies[planned.name].append("read_document")
     return AgentPlan(
-        required_tools=_rewrite_public_current_fact_tools(
-            decision,
-            ctx,
-            disabled_tools=disabled_tools,
-            is_tool_available=is_tool_available,
-        ),
+        required_tools=required_tools,
         excluded_tools=set(decision.excluded_tools or set()),
         constraints=constraints,
+        dependencies=dependencies,
     )

@@ -3051,3 +3051,95 @@ Verification after the fix:
   - Result: passed on ECS.
 - `./venv/bin/python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Final Acceptance Audit: PendingAction, Validation, Provider Fallback, Plan Dependencies
+
+### Scope
+
+- Performed final acceptance audit without adding new product behavior.
+- Checked commit/deploy consistency, PendingAction atomicity, handler-before-validation safety, provider fallback prompt-injection safety, explicit plan dependencies, concurrency metadata, TTL boundaries, and local warning cleanliness.
+
+### Findings And Fixes
+
+- PendingAction consumption already used `BEGIN IMMEDIATE` with SELECT and DELETE in a single SQLite transaction; added a concurrent confirmation regression test.
+- Tool argument validation already ran before permission checks and handler execution; added parameterized coverage for required fields, types, extra fields, enum, length, array size, invalid JSON, and non-object roots.
+- Provider fallback for models without standard tool-role history already kept tool data out of `system`; added a prompt-injection regression test for untrusted tool-result wrapping.
+- Found a real gap: plans had only ordered required tools, so Runtime could parallelize a web verification call before its document-read dependency completed. Added `AgentPlan.dependencies`, `initial_tool_dependencies_from_plan(...)`, `AgentRunConfig.tool_call_dependencies`, and Runtime batching checks.
+- Found a metadata gap: parallel execution had no explicit shared-resource grouping. Added `ToolSpec.concurrency_group`, defaulting to serial-safe behavior unless tools explicitly opt into parallel execution.
+- Found local test cleanup noise: Grok search-path tests could indirectly start Playwright snapshot capture and leave Windows asyncio subprocess cleanup warnings. Isolated snapshot side effects in tests while keeping dedicated snapshot tests intact.
+
+### Design Decisions
+
+- Dependencies are expressed at planning level by tool name and converted to concrete `tool_call_id` dependencies at runtime entry. Runtime remains routing-agnostic.
+- Current-fact routing still defaults to `grok_search`; document + current-fact plans attach the dependency to the actual rewritten public-current-fact tool.
+- Runtime parallel batches require safe-read permission, explicit `parallel_safe=True`, `idempotent=True`, no unmet dependency, and no duplicate non-empty `concurrency_group` within the batch.
+- Test isolation avoids real browser startup in non-snapshot tests; production browser reuse and shutdown behavior are unchanged.
+
+### Compatibility And Safety
+
+- Public entrypoint `run_agent_loop` remains unchanged.
+- Tool names, schemas, permissions, PendingAction binding, Provider behavior, response composition, and ECS deployment flow are unchanged.
+- No dynamic system-message path was added.
+- The new `ToolSpec.concurrency_group` field is optional and defaults to `None`, preserving existing registrations.
+
+### Verification
+
+- Required audit commands:
+  - `git log --oneline --decorate -15`
+    - Top deployed code lineage before this fix included `ace82b8 refactor: reuse shared client in agent tools`, with docs-only commits after it.
+  - `git diff ace82b8..HEAD -- plugins/arteta_agent tests`
+    - Before this audit fix: empty, proving docs-only HEAD after `ace82b8` had no extra Agent/test code.
+  - `git merge-base --is-ancestor 4a4e210 ace82b8`
+    - Result: true; `4a4e210` is an ancestor of `ace82b8`, so the `ace82b8` deployment included the legacy-wrapper removal commit.
+- RED checks before implementation:
+  - Dependent tools could be batched because `AgentRunConfig.tool_call_dependencies` did not exist.
+  - Same-resource tools could not declare a `concurrency_group`.
+  - Plan dependencies could not be converted into runtime `tool_call_id` dependencies.
+- `python -m pytest tests/test_arteta_agent_registry.py::test_executor_concurrent_pending_action_confirmation_consumes_once tests/test_arteta_agent_registry.py::test_executor_rejects_invalid_arguments_before_permission_or_handler tests/test_arteta_agent_provider.py::test_limited_provider_tool_history_wraps_prompt_injection_as_untrusted_data tests/test_arteta_agent_behavior_policy_store.py::test_policy_ttl_boundary_scenarios tests/test_arteta_agent_runtime.py::test_runtime_runner_does_not_parallelize_dependent_tool_calls tests/test_arteta_agent_runtime.py::test_runtime_runner_does_not_parallelize_same_concurrency_group tests/test_arteta_agent_routing.py::test_plan_builder_marks_document_verification_dependency -q`
+  - Result: `22 passed`.
+- `python -m pytest tests/test_arteta_agent_runtime.py tests/test_arteta_agent_routing.py tests/test_arteta_agent_provider.py tests/test_arteta_agent_behavior_policy_store.py -q`
+  - Result: `84 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q -W error::pytest.PytestUnraisableExceptionWarning`
+  - Result: `192 passed`.
+- `python -m pytest tests -q`
+  - Result: `559 passed`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python tools\\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+
+### Risk Notes
+
+- No configured ruff/mypy/pyright/flake8 entry was found in `pyproject.toml`, `setup.cfg`, `tox.ini`, or `.github`; `compileall` is the available static syntax check.
+- Legacy non-Agent modules remain outside this acceptance boundary.
+
+### Remaining
+
+- No remaining work for this final acceptance audit slice.
+
+### ECS Deployment
+
+- Final audit fix commit deployed to ECS from a focused local archive; see `git log` and the final acceptance report for the exact hash.
+- Deployment archive pattern: `/tmp/arteta_final_acceptance_<commit>.tar.gz` on ECS.
+- Remote backup directory pattern: `/opt/arteta_bot/backups/agent_final_acceptance_<commit>_<timestamp>`.
+- Remote `compileall` passed for:
+  - `plugins/arteta_agent`;
+  - updated Agent architecture tests.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+- Remote source check confirmed deployed files contain:
+  - `ToolSpec.concurrency_group`;
+  - Runtime `concurrency_groups` batching guard;
+  - `test_runtime_runner_does_not_parallelize_same_concurrency_group`.
+
+### ECS Smoke After Final Audit Deploy
+
+- `./venv/bin/python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `./venv/bin/python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `./venv/bin/python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.

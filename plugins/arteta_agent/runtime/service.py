@@ -110,6 +110,7 @@ async def run_runtime_loop_from_state(
     max_total_observation_chars: int = 80000,
     initial_tool_calls=None,
     stop_after_initial_tools: bool = False,
+    tool_call_dependencies=None,
 ) -> str:
     runtime_state = build_runtime_state(
         state,
@@ -147,6 +148,7 @@ async def run_runtime_loop_from_state(
             max_total_observation_chars=max_total_observation_chars,
             request_timeout_seconds=request_timeout,
             stop_after_initial_tools=stop_after_initial_tools,
+            tool_call_dependencies=dict(tool_call_dependencies or {}),
         ),
         initial_tool_calls=initial_tool_calls,
     )

@@ -1,5 +1,5 @@
 import json
-from typing import Callable, List, Set
+from typing import Callable, Dict, List, Set
 
 
 def tool_call_from_planned(index: int, planned) -> dict:
@@ -31,6 +31,33 @@ def initial_tool_calls_from_plan(plan, disabled_tools=None, is_tool_available: C
     for planned in available_planned_calls(plan, disabled_tools, is_tool_available):
         calls.append(tool_call_from_planned(len(calls) + 1, planned))
     return calls
+
+
+def initial_tool_dependencies_from_plan(plan, calls: List[dict]) -> Dict[str, List[str]]:
+    ids_by_name: Dict[str, List[str]] = {}
+    for call in calls:
+        function = (call or {}).get("function") or {}
+        name = str(function.get("name") or "")
+        if not name:
+            continue
+        ids_by_name.setdefault(name, []).append(str(call.get("id") or ""))
+
+    result: Dict[str, List[str]] = {}
+    for tool_name, dependency_names in dict(getattr(plan, "dependencies", {}) or {}).items():
+        target_ids = ids_by_name.get(str(tool_name), [])
+        if not target_ids:
+            continue
+        dependency_ids = []
+        for dependency_name in list(dependency_names or []):
+            dependency_ids.extend([
+                item for item in ids_by_name.get(str(dependency_name), []) if item
+            ])
+        if not dependency_ids:
+            continue
+        for target_id in target_ids:
+            if target_id:
+                result[target_id] = list(dependency_ids)
+    return result
 
 
 def should_execute_initial_plan(plan, disabled_tools=None, is_tool_available: Callable[[str], bool] = None) -> bool:
