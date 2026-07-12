@@ -54,3 +54,16 @@ def test_search_web_uses_search_backend_abstraction(monkeypatch):
         "body": "Backend abstraction result.",
         "_backend": "fake",
     }]
+
+
+def test_x_reader_helpers_are_extracted_but_compatibly_exported():
+    from plugins.arteta_agent.tools.web import handlers, x_reader
+
+    assert handlers._x_status_id is x_reader._x_status_id
+    assert handlers._x_username is x_reader._x_username
+    assert handlers._is_x_status_url is x_reader._is_x_status_url
+    assert handlers._extract_x_text is x_reader._extract_x_text
+    assert handlers._extract_x_author is x_reader._extract_x_author
+    assert handlers._x_mirror_urls is x_reader._x_mirror_urls
+    assert handlers._format_x_mirror_page is x_reader._format_x_mirror_page
+    assert handlers._format_x_post is x_reader._format_x_post

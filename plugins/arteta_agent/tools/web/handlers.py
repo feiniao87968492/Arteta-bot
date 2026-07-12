@@ -50,6 +50,17 @@ from .security import (
     _unsafe_url_message,
     _validate_public_http_url,
 )
+from .x_reader import (
+    MetaExtractor,
+    _extract_x_author,
+    _extract_x_text,
+    _format_x_mirror_page,
+    _format_x_post,
+    _is_x_status_url,
+    _x_mirror_urls,
+    _x_status_id,
+    _x_username,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -255,31 +266,6 @@ class PageExtractor(HTMLParser):
 
 
 # ===================================================================
-# HTML 解析器：MetaExtractor —— 仅提取所有 <meta> 键值对
-# ===================================================================
-
-class MetaExtractor(HTMLParser):
-    """
-    轻量解析器，只收集页面中所有 <meta> 标签的 name/property → content 映射。
-
-    用于 fx/vx Twitter 镜像页面的 og/twitter card 元数据提取。
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.values = {}
-
-    def handle_starttag(self, tag, attrs):
-        if tag.lower() != "meta":
-            return
-        attrs_dict = {str(k).lower(): str(v or "") for k, v in attrs}
-        key = (attrs_dict.get("property") or attrs_dict.get("name") or "").lower()
-        content = attrs_dict.get("content", "").strip()
-        if key and content:
-            self.values[key] = content
-
-
-# ---------------------------------------------------------------------------
 # 文本清洗 & 安全校验
 # ---------------------------------------------------------------------------
 
@@ -543,49 +529,6 @@ def _is_grok_result(item: dict) -> bool:
 # X/Twitter URL 解析工具
 # ---------------------------------------------------------------------------
 
-def _x_status_id(url: str) -> str:
-    """
-    从 x.com/twitter.com URL 提取推文 status ID。
-
-    示例：
-    "https://x.com/Arsenal/status/1812345678901234567" → "1812345678901234567"
-    非 X/Twitter 域名返回空字符串。
-    """
-    parsed = urlparse(str(url or "").strip())
-    domain = parsed.netloc.lower()
-    if domain.startswith("www."):
-        domain = domain[4:]
-    if domain not in {"x.com", "twitter.com", "mobile.twitter.com"}:
-        return ""
-    match = re.search(r"/status(?:es)?/(\d+)", parsed.path)
-    return match.group(1) if match else ""
-
-
-def _x_username(url: str) -> str:
-    """
-    从 x.com/twitter.com URL 提取发推用户名。
-
-    示例：
-    "https://x.com/Arsenal/status/123" → "arsenal"
-    """
-    parsed = urlparse(str(url or "").strip())
-    domain = parsed.netloc.lower()
-    if domain.startswith("www."):
-        domain = domain[4:]
-    if domain not in {"x.com", "twitter.com", "mobile.twitter.com"}:
-        return ""
-    parts = [part for part in parsed.path.split("/") if part]
-    if len(parts) >= 3 and parts[1].lower() in {"status", "statuses"}:
-        return parts[0].lower()
-    return ""
-
-
-def _is_x_status_url(url: str) -> bool:
-    """判断 URL 是否为 X/Twitter 推文链接。"""
-    return bool(_x_status_id(url))
-
-
-# ---------------------------------------------------------------------------
 # 搜索引擎结果 URL 规范化
 # ---------------------------------------------------------------------------
 
@@ -1155,62 +1098,6 @@ async def _fetch_x_syndication(tweet_id: str) -> dict:
     return response.json()
 
 
-def _extract_x_text(data: dict) -> str:
-    """
-    从推文 JSON 中提取正文文本。
-
-    兼容多种 API 返回的字段名：
-    - text / full_text / tweetText / content
-    - 嵌套在 data.legacy 中（Twitter API v1.1 格式）
-    """
-    if not isinstance(data, dict):
-        return ""
-    for key in ("text", "full_text", "tweetText", "content"):
-        value = data.get(key)
-        if isinstance(value, str) and value.strip():
-            return _clean_text(value)
-    legacy = data.get("legacy")
-    if isinstance(legacy, dict):
-        return _extract_x_text(legacy)
-    return ""
-
-
-def _extract_x_author(data: dict) -> tuple:
-    """
-    从推文 JSON 中提取作者信息，返回 (显示名称, 用户名)。
-
-    兼容多种字段名格式和嵌套结构。
-    """
-    if not isinstance(data, dict):
-        return "", ""
-    name = _clean_text(data.get("author_name") or data.get("name") or "")
-    username = _clean_text(data.get("author_username") or data.get("screen_name") or data.get("username") or "")
-    # 尝试从嵌套的 user 对象中提取
-    user = data.get("user")
-    if isinstance(user, dict):
-        name = name or _clean_text(user.get("name") or "")
-        username = username or _clean_text(user.get("screen_name") or user.get("username") or "")
-    if username.startswith("@"):
-        username = username[1:]
-    return name, username
-
-
-def _x_mirror_urls(source_url: str) -> list:
-    """
-    生成 X/Twitter 推文的镜像站点 URL。
-
-    使用 fxtwitter.com 和 vxtwitter.com 镜像，
-    这些镜像会渲染 Open Graph / Twitter Card meta 标签，
-    可以直接从 HTML 中提取推文内容而无需 JS 执行。
-    """
-    parsed = urlparse(str(source_url or ""))
-    path = parsed.path or ""
-    return [
-        "https://fxtwitter.com{0}".format(path),
-        "https://vxtwitter.com{0}".format(path),
-    ]
-
-
 async def _fetch_x_mirror(url: str) -> dict:
     """抓取 X/Twitter 镜像站点的 HTML 页面。"""
     headers = {
@@ -1232,94 +1119,6 @@ async def _fetch_x_mirror(url: str) -> dict:
     }
 
 
-def _format_x_mirror_page(fetched: dict, source_url: str) -> str:
-    """
-    从 fx/vx Twitter 镜像页面的 HTML meta 标签中提取推文内容并格式化。
-
-    验证逻辑：
-    - 提取 og:description / twitter:description 作为正文
-    - 从 og:title / twitter:title 提取作者
-    - 校验推文用户名与源 URL 中的用户名一致（防止镜像返回错误内容）
-    """
-    parser = MetaExtractor()
-    parser.feed(str(fetched.get("text") or ""))
-    values = parser.values
-
-    # 从 meta 标签提取推文正文
-    text = _clean_text(
-        values.get("twitter:description")
-        or values.get("og:description")
-        or values.get("description")
-        or ""
-    )
-    if not text:
-        return ""
-
-    # 从 title meta 提取作者信息
-    title = _clean_text(values.get("twitter:title") or values.get("og:title") or "")
-    author_name = ""
-    username = ""
-    if title:
-        # 去掉末尾的 " on X" / " on Twitter" 后缀
-        title = re.sub(r"\s+on\s+X\s*$", "", title, flags=re.I).strip()
-        title = re.sub(r"\s+on\s+Twitter\s*$", "", title, flags=re.I).strip()
-        author_name = title
-        username_match = re.search(r"@([A-Za-z0-9_]{1,20})", title)
-        if username_match:
-            username = username_match.group(1)
-
-    # 安全校验：镜像返回的用户名必须与源 URL 一致
-    expected_username = _x_username(source_url)
-    if expected_username and username and username.lower() != expected_username:
-        return ""
-
-    page = {
-        "url": fetched.get("final_url") or fetched.get("url") or source_url,
-        "author_name": author_name,
-        "author_username": username,
-        "created_at": "",
-        "text": text,
-    }
-    return _format_x_post(page, source_url)
-
-
-def _format_x_post(data: dict, source_url: str) -> str:
-    """
-    将推文数据格式化为统一的 X 原帖证据文本。
-
-    输出格式：
-    [x-post]
-    X 原帖证据：
-    作者：Name (@username)
-    发布时间：...
-    链接：...
-    正文：...
-    """
-    text = _extract_x_text(data)
-    if not text:
-        return ""
-
-    author_name, username = _extract_x_author(data)
-    created_at = _clean_text(data.get("created_at") or data.get("date") or "")
-
-    lines = [
-        "[x-post]",
-        "X 原帖证据：",
-    ]
-    if author_name or username:
-        author = author_name
-        if username:
-            author = "{0} (@{1})".format(author_name or username, username)
-        lines.append("作者：{0}".format(author))
-    if created_at:
-        lines.append("发布时间：{0}".format(created_at))
-    lines.append("链接：{0}".format(_safe_url(data.get("url") or source_url) or source_url))
-    lines.append("正文：{0}".format(text[:MAX_EXCERPT_CHARS]))
-
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
 # 搜索结果格式化
 # ---------------------------------------------------------------------------
 

@@ -3724,3 +3724,52 @@ Verification after the fix:
 
 - Extract fetch/page parsing and formatting helpers.
 - Extract X reader and verification helpers while keeping public tool names unchanged.
+
+## 2026-07-12 Web Access Round 3 X Reader Extraction
+
+### Scope
+
+- Extracted pure X/Twitter URL parsing and formatting helpers from `handlers.py` to `x_reader.py`.
+- Kept network channel functions in `handlers.py` so existing tests and monkeypatch paths for `_fetch_x_syndication`, `_fetch_x_mirror`, and `_x_fetch_bridge_fetch` remain compatible.
+- Public tool name `fetch_x_post` and its behavior are unchanged.
+
+### Changes
+
+- Added `plugins/arteta_agent/tools/web/x_reader.py` with:
+  - `MetaExtractor`;
+  - `_x_status_id`, `_x_username`, `_is_x_status_url`;
+  - `_extract_x_text`, `_extract_x_author`;
+  - `_x_mirror_urls`;
+  - `_format_x_mirror_page`, `_format_x_post`.
+- Imported these helpers back into `handlers.py`, preserving old private helper access through `web_access`.
+- Extended module tests to assert compatibility exports point at `x_reader.py`.
+
+### RED Checks Before Implementation
+
+- `test_x_reader_helpers_are_extracted_but_compatibly_exported` failed because `plugins.arteta_agent.tools.web.x_reader` did not exist.
+- Initial extraction removed `_fetch_x_mirror` too broadly; targeted X tests caught the missing monkeypatch-compatible network function, and it was restored in `handlers.py`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_registry.py::test_fetch_x_post_reads_public_syndication_payload tests/test_arteta_agent_registry.py::test_fetch_x_post_prefers_authenticated_x_bridge tests/test_arteta_agent_registry.py::test_fetch_x_post_reads_public_mirror_metadata tests/test_arteta_agent_registry.py::test_fetch_x_post_rejects_mirror_metadata_for_different_author tests/test_arteta_agent_tool_result_protocol.py::test_fetch_x_post_returns_structured_tool_result tests/test_arteta_agent_tool_result_protocol.py::test_fetch_x_post_skips_x_bridge_for_sensitive_query -q`
+  - First result after extraction: `2 failed, 8 passed`.
+  - Final result after restoring `_fetch_x_mirror`: `10 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_web_modules.py -q`
+  - Result: `219 passed`.
+- `python -m pytest tests -q`
+  - Result: `586 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- `x_reader.py` currently owns pure parsing/formatting only. Network provenance (`configured_bridge`, public syndication, third-party mirror, Grok extraction) is still represented by the handler control flow rather than a dedicated provenance model.
+
+### Remaining
+
+- Extract fetch/page parsing and formatting helpers.
+- Extract verification helpers while keeping public tool names unchanged.
