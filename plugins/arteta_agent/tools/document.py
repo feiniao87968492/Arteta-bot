@@ -8,9 +8,8 @@ from typing import Optional
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-import httpx
-
 from ..context import ToolContext
+from ..providers.http_client import get_shared_async_client
 from ..registry import ToolSpec, ensure_tool
 from . import web_access
 
@@ -20,6 +19,10 @@ MAX_DOCUMENT_CHARS = 4000
 USER_AGENT = "ArtetaBot/1.0 (+https://github.com/arteta-bot; document reader)"
 DOCUMENT_DIR = os.path.join("artifacts", "agent_tools", "documents")
 DOCUMENT_FALLBACK_DIR = os.path.join(tempfile.gettempdir(), "arteta_agent_tools", "documents")
+
+
+def _http_client():
+    return get_shared_async_client()
 
 
 def _clean_text(text: str) -> str:
@@ -69,16 +72,21 @@ def _document_type_from_content(content: bytes) -> str:
 async def _fetch_binary(url: str, timeout_seconds: float = 20.0, max_bytes: int = MAX_DOCUMENT_BYTES) -> dict:
     url = web_access._ensure_safe_fetch_url(url)
     headers = {"User-Agent": USER_AGENT, "Accept": "application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*;q=0.5"}
-    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True, headers=headers) as client:
-        async with client.stream("GET", url) as response:
-            response.raise_for_status()
-            final_url = web_access._ensure_safe_fetch_url(str(response.url))
-            return {
-                "url": url,
-                "final_url": final_url,
-                "content_type": response.headers.get("content-type", ""),
-                "content": await web_access._read_limited_response(response, max_bytes),
-            }
+    async with _http_client().stream(
+        "GET",
+        url,
+        headers=headers,
+        timeout=timeout_seconds,
+        follow_redirects=True,
+    ) as response:
+        response.raise_for_status()
+        final_url = web_access._ensure_safe_fetch_url(str(response.url))
+        return {
+            "url": url,
+            "final_url": final_url,
+            "content_type": response.headers.get("content-type", ""),
+            "content": await web_access._read_limited_response(response, max_bytes),
+        }
 
 
 def _write_document_file_to_dir(directory: str, name: str, content: bytes) -> str:

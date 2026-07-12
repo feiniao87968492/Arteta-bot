@@ -5661,10 +5661,10 @@ def test_fetch_url_rechecks_final_redirect_url(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
-        def stream(self, method, url):
+        def stream(self, method, url, **kwargs):
             return FakeStream()
 
-    monkeypatch.setattr(web_access.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(web_access, "_http_client", lambda: FakeAsyncClient())
 
     try:
         asyncio.run(web_access._fetch_url("https://public.example/redirect"))
@@ -5709,10 +5709,10 @@ def test_fetch_url_stops_streaming_at_byte_limit(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
-        def stream(self, method, url):
+        def stream(self, method, url, **kwargs):
             return FakeStream()
 
-    monkeypatch.setattr(web_access.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(web_access, "_http_client", lambda: FakeAsyncClient())
 
     fetched = asyncio.run(web_access._fetch_url("https://public.example/large", max_bytes=5))
 
@@ -5750,10 +5750,10 @@ def test_fetch_binary_rechecks_final_redirect_url(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
-        def stream(self, method, url):
+        def stream(self, method, url, **kwargs):
             return FakeStream()
 
-    monkeypatch.setattr(document.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(document, "_http_client", lambda: FakeAsyncClient())
 
     try:
         asyncio.run(document._fetch_binary("https://files.example/redirect.pdf"))
@@ -5797,10 +5797,10 @@ def test_fetch_binary_stops_streaming_at_byte_limit(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
-        def stream(self, method, url):
+        def stream(self, method, url, **kwargs):
             return FakeStream()
 
-    monkeypatch.setattr(document.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(document, "_http_client", lambda: FakeAsyncClient())
 
     fetched = asyncio.run(document._fetch_binary("https://files.example/large.pdf", max_bytes=5))
 

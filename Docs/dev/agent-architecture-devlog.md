@@ -2969,3 +2969,61 @@ Verification after the fix:
   - Result: passed on ECS.
 - `python tools/verify_features.py --suite agent_loop`
   - Result: passed on ECS.
+
+## 2026-07-12 - Provider Cleanup: Reuse Shared HTTP Client In Agent Tools
+
+### Scope
+
+- Closed the remaining Agent-tool HTTP lifecycle gap found during final acceptance audit.
+- Kept the slice limited to `plugins/arteta_agent/tools/web_access.py`, `document.py`, and `image.py`.
+
+### Changes
+
+- Replaced direct `httpx.AsyncClient(...)` creation in Agent web/document/image tools with the shared provider client lifecycle:
+  - `web_access` search/fetch/Grok/X helpers now call `get_shared_async_client()` through a local `_http_client()` boundary.
+  - `document._fetch_binary(...)` now streams through the shared client while preserving per-request headers, redirects, timeout, and byte limits.
+  - `image._request_generated_image(...)` now uses the shared client for both image-generation POST and returned-image GET.
+- Updated redirect and byte-limit tests to monkeypatch the tool `_http_client()` dependency instead of patching `httpx.AsyncClient`.
+- Added provider tests proving:
+  - Agent HTTP tools no longer directly instantiate `httpx.AsyncClient`;
+  - web fetch helpers reuse the same shared client instance across calls.
+
+### Design Decision
+
+- The application-level shared client remains the single place that creates `httpx.AsyncClient`.
+- Tool-specific timeout, headers, redirects, and streaming behavior stay on each request call, so behavior is preserved while connection lifecycle is centralized.
+- Local `_http_client()` wrappers keep tests and future dependency injection explicit without coupling tools to provider internals beyond the shared lifecycle API.
+
+### Compatibility and Safety
+
+- Public tool names, schemas, permissions, artifact behavior, URL safety checks, final redirect checks, and byte-limit streaming behavior are unchanged.
+- Shutdown still uses the existing `driver.on_shutdown(close_shared_async_client)` hook.
+- No dynamic system-message path was introduced; static scan still shows only `plugins/arteta_agent/providers/http_client.py` creates `httpx.AsyncClient`.
+
+### Verification
+
+- `python -m py_compile plugins\\arteta_agent\\tools\\web_access.py plugins\\arteta_agent\\tools\\document.py plugins\\arteta_agent\\tools\\image.py tests\\test_arteta_agent_provider.py tests\\test_arteta_agent_registry.py`
+  - Result: passed.
+- `python -m pytest tests/test_arteta_agent_provider.py -q`
+  - Result: `15 passed`.
+- `python -m pytest tests/test_arteta_agent_runtime.py tests/test_arteta_agent_provider.py -q`
+  - Result: `30 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `183 passed, 3 warnings`.
+- `python tools\\verify_features.py --suite agent_loop`
+  - Result: passed.
+- `python tools\\verify_features.py --suite chat`
+  - Result: passed.
+- `python tools\\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+- `python -m pytest tests -q`
+  - Result: `537 passed, 1 warning`.
+
+### Risk Notes
+
+- The remaining local warning is the pre-existing Windows asyncio/proactor cleanup warning family; this slice reduced rather than added warning count in the full test run.
+- Non-Agent legacy modules still have their own historical HTTP clients. This slice only closes the Agent architecture acceptance boundary for Provider/Activation/Agent tools.
+
+### Remaining
+
+- Deploy this final HTTP-client lifecycle slice to ECS and run the standard smoke suites.

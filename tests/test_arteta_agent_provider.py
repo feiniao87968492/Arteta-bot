@@ -391,3 +391,60 @@ def test_planner_provider_call_uses_fixed_adapter_protocol():
     source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
 
     assert "inspect.signature(call_llm_with_tools)" not in source
+
+
+def test_agent_http_tools_use_shared_client_lifecycle():
+    tool_paths = [
+        Path("plugins/arteta_agent/tools/web_access.py"),
+        Path("plugins/arteta_agent/tools/document.py"),
+        Path("plugins/arteta_agent/tools/image.py"),
+    ]
+
+    for path in tool_paths:
+        source = path.read_text(encoding="utf-8")
+        assert "httpx.AsyncClient" not in source
+        assert "get_shared_async_client" in source
+
+
+def test_web_access_fetch_helpers_reuse_shared_client():
+    from plugins.arteta_agent.tools import web_access
+
+    class FakeWebResponse:
+        text = "<html></html>"
+
+        def raise_for_status(self):
+            return None
+
+    class FakeWebClient:
+        def __init__(self):
+            self.calls = []
+            self.closed = False
+
+        async def get(self, url, params=None, headers=None, timeout=None, follow_redirects=None):
+            self.calls.append((url, params or {}, headers or {}, timeout, follow_redirects))
+            return FakeWebResponse()
+
+        async def aclose(self):
+            self.closed = True
+
+    created = []
+
+    def factory():
+        client = FakeWebClient()
+        created.append(client)
+        return client
+
+    set_shared_async_client_factory(factory)
+    try:
+        asyncio.run(web_access._fetch_bing_html("arsenal", 1))
+        asyncio.run(web_access._fetch_duckduckgo_html("arsenal", 1))
+
+        assert len(created) == 1
+        assert len(created[0].calls) == 2
+        assert created[0].calls[0][0] == "https://www.bing.com/search"
+        assert created[0].calls[1][0] == "https://html.duckduckgo.com/html/"
+        assert created[0].calls[0][4] is True
+        assert created[0].calls[1][4] is True
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)

@@ -2,13 +2,16 @@ import base64
 import os
 import time
 
-import httpx
-
 from ..context import ToolContext
+from ..providers.http_client import get_shared_async_client
 from ..registry import ToolSpec, ensure_tool
 
 
 ARTIFACT_DIR = os.path.join("artifacts", "agent_tools")
+
+
+def _http_client():
+    return get_shared_async_client()
 
 
 def _get_arteta_image():
@@ -25,26 +28,27 @@ def _get_arteta_chat():
 
 async def _request_generated_image(prompt: str, size: str = "1024x1024") -> bytes:
     arteta_image = _get_arteta_image()
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        resp = await client.post(
-            "{0}/v1/images/generations".format(arteta_image.IMAGE_API_URL),
-            headers={"Authorization": "Bearer {0}".format(arteta_image.IMAGE_API_KEY)},
-            json={
-                "model": arteta_image.IMAGE_MODEL,
-                "prompt": prompt,
-                "n": 1,
-                "size": size,
-            },
-        )
-        resp.raise_for_status()
-        item = resp.json()["data"][0]
-        if "b64_json" in item:
-            return base64.b64decode(item["b64_json"])
-        if "url" in item:
-            image_resp = await client.get(item["url"])
-            image_resp.raise_for_status()
-            return image_resp.content
-        raise RuntimeError("image API response did not include b64_json or url")
+    client = _http_client()
+    resp = await client.post(
+        "{0}/v1/images/generations".format(arteta_image.IMAGE_API_URL),
+        headers={"Authorization": "Bearer {0}".format(arteta_image.IMAGE_API_KEY)},
+        json={
+            "model": arteta_image.IMAGE_MODEL,
+            "prompt": prompt,
+            "n": 1,
+            "size": size,
+        },
+        timeout=180.0,
+    )
+    resp.raise_for_status()
+    item = resp.json()["data"][0]
+    if "b64_json" in item:
+        return base64.b64decode(item["b64_json"])
+    if "url" in item:
+        image_resp = await client.get(item["url"], timeout=180.0)
+        image_resp.raise_for_status()
+        return image_resp.content
+    raise RuntimeError("image API response did not include b64_json or url")
 
 
 def _write_image(content: bytes) -> str:

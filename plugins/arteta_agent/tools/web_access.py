@@ -11,9 +11,8 @@ from html.parser import HTMLParser
 from typing import Optional
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-import httpx
-
 from ..context import ToolContext
+from ..providers.http_client import get_shared_async_client
 from ..registry import ToolSpec, ensure_tool
 
 
@@ -41,6 +40,10 @@ FRESHNESS_TO_DDG = {
     "year": "y",
     "recent": "m",
 }
+
+
+def _http_client():
+    return get_shared_async_client()
 
 PRIMARY_DOMAINS = (
     "arsenal.com",
@@ -359,26 +362,41 @@ def _parse_duckduckgo_html(html_text: str, max_results: int) -> list:
 
 async def _fetch_duckduckgo_html(query: str, max_results: int) -> str:
     headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
-    async with httpx.AsyncClient(timeout=12.0, headers=headers, follow_redirects=True) as client:
-        response = await client.get("https://html.duckduckgo.com/html/", params={"q": query})
-        response.raise_for_status()
-        return response.text
+    response = await _http_client().get(
+        "https://html.duckduckgo.com/html/",
+        params={"q": query},
+        headers=headers,
+        timeout=12.0,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.text
 
 
 async def _fetch_bing_html(query: str, max_results: int) -> str:
     headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
-    async with httpx.AsyncClient(timeout=10.0, headers=headers, follow_redirects=True) as client:
-        response = await client.get("https://www.bing.com/search", params={"q": query})
-        response.raise_for_status()
-        return response.text
+    response = await _http_client().get(
+        "https://www.bing.com/search",
+        params={"q": query},
+        headers=headers,
+        timeout=10.0,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.text
 
 
 async def _fetch_jina_duckduckgo_markdown(query: str, max_results: int) -> str:
     headers = {"User-Agent": USER_AGENT, "Accept": "text/plain, text/markdown"}
-    async with httpx.AsyncClient(timeout=18.0, headers=headers, follow_redirects=True) as client:
-        response = await client.get("https://r.jina.ai/http://duckduckgo.com/html/", params={"q": query})
-        response.raise_for_status()
-        return response.text
+    response = await _http_client().get(
+        "https://r.jina.ai/http://duckduckgo.com/html/",
+        params={"q": query},
+        headers=headers,
+        timeout=18.0,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.text
 
 
 def _parse_markdown_search_results(markdown_text: str, max_results: int) -> list:
@@ -565,20 +583,30 @@ def _x_fetch_bridge_enabled() -> bool:
 async def _x_fetch_bridge_fetch(url: str) -> dict:
     api_url, key = _x_fetch_bridge_config()
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    async with httpx.AsyncClient(timeout=35.0, follow_redirects=True, headers=headers) as client:
-        response = await client.post(f"{api_url.rstrip('/')}/fetch", json={"url": url})
-        response.raise_for_status()
-        data = response.json()
+    response = await _http_client().post(
+        f"{api_url.rstrip('/')}/fetch",
+        json={"url": url},
+        headers=headers,
+        timeout=35.0,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    data = response.json()
     return data if isinstance(data, dict) else {}
 
 
 async def _groksearch_post(tool_name: str, payload: dict) -> dict:
     url, key, _model = _groksearch_config()
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    async with httpx.AsyncClient(timeout=_groksearch_timeout(), follow_redirects=True, headers=headers) as client:
-        response = await client.post(f"{url.rstrip('/')}/{tool_name}", json=payload)
-        response.raise_for_status()
-        return response.json()
+    response = await _http_client().post(
+        f"{url.rstrip('/')}/{tool_name}",
+        json=payload,
+        headers=headers,
+        timeout=_groksearch_timeout(),
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 async def _groksearch_search(query: str, max_results: int, freshness: str = "recent") -> list:
@@ -629,10 +657,15 @@ async def _fetch_x_syndication(tweet_id: str) -> dict:
         "Accept": "application/json,text/plain,*/*",
     }
     endpoint = "https://cdn.syndication.twimg.com/tweet-result"
-    async with httpx.AsyncClient(timeout=18.0, follow_redirects=True, headers=headers) as client:
-        response = await client.get(endpoint, params={"id": tweet_id, "lang": "en"})
-        response.raise_for_status()
-        return response.json()
+    response = await _http_client().get(
+        endpoint,
+        params={"id": tweet_id, "lang": "en"},
+        headers=headers,
+        timeout=18.0,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def _extract_x_text(data: dict) -> str:
@@ -676,15 +709,19 @@ async def _fetch_x_mirror(url: str) -> dict:
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
     }
-    async with httpx.AsyncClient(timeout=18.0, follow_redirects=True, headers=headers) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return {
-            "url": url,
-            "final_url": str(response.url),
-            "content_type": response.headers.get("content-type", ""),
-            "text": response.text,
-        }
+    response = await _http_client().get(
+        url,
+        headers=headers,
+        timeout=18.0,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    return {
+        "url": url,
+        "final_url": str(response.url),
+        "content_type": response.headers.get("content-type", ""),
+        "text": response.text,
+    }
 
 
 def _format_x_mirror_page(fetched: dict, source_url: str) -> str:
@@ -892,18 +929,23 @@ async def _duckduckgo_search(query: str, max_results: int = 5, timelimit=None) -
 async def _fetch_url(url: str, timeout_seconds: float = 10.0, max_bytes: int = MAX_FETCH_BYTES) -> dict:
     url = _ensure_safe_fetch_url(url)
     headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"}
-    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True, headers=headers) as client:
-        async with client.stream("GET", url) as response:
-            response.raise_for_status()
-            final_url = _ensure_safe_fetch_url(str(response.url))
-            content = await _read_limited_response(response, max_bytes)
-            encoding = response.encoding or "utf-8"
-            return {
-                "url": url,
-                "final_url": final_url,
-                "content_type": response.headers.get("content-type", ""),
-                "text": content.decode(encoding, errors="replace"),
-            }
+    async with _http_client().stream(
+        "GET",
+        url,
+        headers=headers,
+        timeout=timeout_seconds,
+        follow_redirects=True,
+    ) as response:
+        response.raise_for_status()
+        final_url = _ensure_safe_fetch_url(str(response.url))
+        content = await _read_limited_response(response, max_bytes)
+        encoding = response.encoding or "utf-8"
+        return {
+            "url": url,
+            "final_url": final_url,
+            "content_type": response.headers.get("content-type", ""),
+            "text": content.decode(encoding, errors="replace"),
+        }
 
 
 async def _read_limited_response(response, max_bytes: int) -> bytes:
