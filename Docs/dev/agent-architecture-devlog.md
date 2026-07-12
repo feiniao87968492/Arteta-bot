@@ -4235,3 +4235,50 @@ Verification after the fix:
 ### Remaining
 
 - ECS deployment and smoke test are still pending until deployment credentials or the manual target are available.
+
+## 2026-07-12 Web Access ECS Rollout
+
+### Scope
+
+- Deployed the completed Web Access Round 1/2/3 package to ECS.
+- Synced the current verifier entrypoint after remote smoke exposed that the server-side verifier was stale and still expected web tool results to be plain strings.
+- Did not add new runtime behavior in this step.
+
+### Deployment
+
+- Deployed commit: `b02c2dc`.
+- Remote path: `/opt/arteta_bot`.
+- Web Access backup directory: `/opt/arteta_bot/backups/web_access_round123_b02c2dc_20260712193933`.
+- Verifier backup directory: `/opt/arteta_bot/backups/verify_features_round123_b02c2dc_20260712194054`.
+- Uploaded:
+  - `plugins/arteta_agent/tools/web_access.py`;
+  - `plugins/arteta_agent/tools/web/**/*.py`;
+  - `tools/verify_features.py`.
+- Restarted `arteta_bot` with `supervisorctl restart arteta_bot`.
+
+### Verification
+
+- Remote Python version:
+  - `/opt/arteta_bot/venv/bin/python --version`: `Python 3.8.10`.
+- Remote Python 3.8 compile:
+  - `py_compile plugins/arteta_agent/tools/web_access.py plugins/arteta_agent/tools/web/*.py plugins/arteta_agent/tools/web/parsers/*.py`: passed.
+- Initial remote smoke:
+  - `./venv/bin/python tools/verify_features.py --suite chat`: passed.
+  - `./venv/bin/python tools/verify_features.py --suite agent_registry --suite agent_permissions`: failed before verifier sync because the stale remote verifier treated a `ToolResult` as iterable.
+- Remote smoke after verifier sync:
+  - `./venv/bin/python tools/verify_features.py --suite agent_registry --suite agent_permissions`: passed.
+  - `./venv/bin/python tools/verify_features.py --suite agent_loop`: passed.
+  - `./venv/bin/python tools/verify_features.py --suite chat --suite agent_registry --suite agent_permissions --suite agent_loop`: passed.
+- Supervisor status:
+  - `arteta_bot RUNNING`, pid `705002`, uptime observed after restart.
+- Log health check:
+  - Last 80 log lines had no `ERROR`, `CRITICAL`, or `Traceback` matches.
+
+### Risk Notes
+
+- The verifier sync was required only for smoke compatibility with the current structured `ToolResult` behavior; production Web Access code had already been deployed before that sync.
+- Local Python 3.8 is not installed on the Windows workstation, so Python 3.8 syntax validation was performed on ECS with the production virtualenv.
+
+### Remaining
+
+- No Web Access Round 1/2/3 acceptance item remains open from this rollout.
