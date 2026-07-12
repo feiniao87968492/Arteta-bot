@@ -3521,3 +3521,49 @@ Verification after the fix:
 
 - Decide whether a minimal `ToolResult.data` field is needed after all Web tools now return structured status/content/markers.
 - Move search, X, and verification helpers out of `web_access.py` during Round 3 without changing behavior.
+
+## 2026-07-12 Web Access Round 2 Remote Proxy Sensitive URL Guard
+
+### Scope
+
+- Closed the remaining Round 2 remote fetch privacy boundary.
+- Kept local fetch behavior unchanged.
+- Did not introduce `ToolResult.data`; current Web consumers only require structured `status`, `content`, `markers`, `artifacts`, and `error_code`.
+
+### Changes
+
+- Added `_has_sensitive_remote_query()` for query keys containing credential-like terms such as `token`, `key`, `signature`, `auth`, `secret`, `password`, `session`, and related forms.
+- `web_fetch()` no longer sends URLs with sensitive query keys to the optional Grok remote fetch proxy, even when `ARTETA_ALLOW_REMOTE_FETCH_PROXY=1`.
+- `fetch_x_post()` no longer sends URLs with sensitive query keys to the configured X Fetch Bridge.
+- X public syndication and mirror fallback may still run because they use the tweet id/path rather than forwarding the full sensitive query URL to a remote proxy.
+
+### RED Checks Before Implementation
+
+- `test_web_fetch_does_not_send_sensitive_query_to_remote_proxy` failed because `web_fetch()` still validated and forwarded a URL containing `access_token` to the remote fetch proxy path.
+- `test_fetch_x_post_skips_x_bridge_for_sensitive_query` failed because `fetch_x_post()` still sent a URL containing `auth` to the X Fetch Bridge.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_tool_result_protocol.py -q`
+  - RED result before implementation: `2 failed, 9 passed`.
+  - GREEN result after implementation: `11 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py -q`
+  - Result: `204 passed`.
+- `python -m pytest tests -q`
+  - Result: `582 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web_access.py tests/test_arteta_agent_tool_result_protocol.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- The sensitive-query detector is conservative and can skip remote proxy assistance for benign query keys ending in credential-like words. This is intentional; remote proxy use is optional and local fetch remains the primary path.
+- Remote services still need their own URL validation and network egress restrictions.
+
+### Remaining
+
+- Round 2 is functionally closed for current scope: Web tools return structured results, factual verification has conservative verdicts, remote proxy default/SSRF/sensitive-query boundaries are covered.
+- Round 3 remains: split `web_access.py` into focused modules and add search backend abstractions without changing public tool behavior.

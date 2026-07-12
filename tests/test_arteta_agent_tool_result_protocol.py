@@ -279,3 +279,74 @@ def test_web_fetch_revalidates_url_before_remote_fetch_proxy(monkeypatch):
     assert result.status == TOOL_STATUS_ERROR
     assert result.error_code == "ValueError"
     assert "[UnsafeURL]" in result.content
+
+
+def test_web_fetch_does_not_send_sensitive_query_to_remote_proxy(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    validate_calls = []
+    remote_calls = []
+
+    async def fail_local_fetch(url, timeout_seconds=10.0, max_bytes=500000):
+        raise RuntimeError("local fetch failed")
+
+    def accept_proxy_url(url):
+        validate_calls.append(url)
+        return object()
+
+    async def forbidden_grok_fetch(url):
+        remote_calls.append(url)
+        return "Remote proxy text should not be used."
+
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_URL", "https://grok.example")
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
+    monkeypatch.setenv("ARTETA_ALLOW_REMOTE_FETCH_PROXY", "1")
+    monkeypatch.setattr(web_access, "_fetch_url", fail_local_fetch)
+    monkeypatch.setattr(web_access, "_validate_public_http_url", accept_proxy_url)
+    monkeypatch.setattr(web_access, "_groksearch_fetch", forbidden_grok_fetch)
+
+    result = asyncio.run(web_access.web_fetch(
+        make_context(),
+        url="https://www.arsenal.com/news/proxy-check?access_token=secret",
+    ))
+
+    assert validate_calls == []
+    assert remote_calls == []
+    assert result.status == TOOL_STATUS_ERROR
+    assert result.error_code == "RuntimeError"
+
+
+def test_fetch_x_post_skips_x_bridge_for_sensitive_query(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    bridge_calls = []
+    syndication_calls = []
+
+    async def forbidden_x_bridge(url):
+        bridge_calls.append(url)
+        return {"text": "Bridge text should not be used."}
+
+    async def fake_x_syndication(tweet_id):
+        syndication_calls.append(tweet_id)
+        return {
+            "id": tweet_id,
+            "url": "https://x.com/David_Ornstein/status/2074251813545742720",
+            "author_name": "David Ornstein",
+            "author_username": "David_Ornstein",
+            "created_at": "2026-07-07T10:00:00Z",
+            "text": "Public syndication text.",
+        }
+
+    monkeypatch.setattr(web_access, "_x_fetch_bridge_enabled", lambda: True)
+    monkeypatch.setattr(web_access, "_x_fetch_bridge_fetch", forbidden_x_bridge)
+    monkeypatch.setattr(web_access, "_fetch_x_syndication", fake_x_syndication)
+
+    result = asyncio.run(web_access.fetch_x_post(
+        make_context(),
+        url="https://x.com/David_Ornstein/status/2074251813545742720?auth=secret",
+    ))
+
+    assert bridge_calls == []
+    assert syndication_calls == ["2074251813545742720"]
+    assert result.status == TOOL_STATUS_OK
+    assert "Public syndication text." in result.content

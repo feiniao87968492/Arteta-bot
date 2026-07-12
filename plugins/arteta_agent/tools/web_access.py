@@ -65,6 +65,22 @@ ALLOWED_TEXT_CONTENT_TYPES = (
     "application/json",
 )
 
+SENSITIVE_REMOTE_QUERY_KEYWORDS = set([
+    "access",
+    "apikey",
+    "auth",
+    "authorization",
+    "credential",
+    "jwt",
+    "key",
+    "password",
+    "secret",
+    "session",
+    "signature",
+    "sig",
+    "token",
+])
+
 # 正文摘录最大字符数（返回给 LLM 的片段长度）
 MAX_EXCERPT_CHARS = 1800
 
@@ -352,6 +368,23 @@ def _safe_url(url: str) -> str:
 def _unsafe_url_message() -> str:
     """不安全 URL 的统一错误提示。"""
     return "[UnsafeURL] URL 不安全：只支持 http/https 公网链接。"
+
+
+def _has_sensitive_remote_query(url: str) -> bool:
+    parsed = urlparse(str(url or ""))
+    if not parsed.query:
+        return False
+    for key in parse_qs(parsed.query, keep_blank_values=True).keys():
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(key or "").lower()).strip("_")
+        if not normalized:
+            continue
+        parts = [part for part in normalized.split("_") if part]
+        if any(part in SENSITIVE_REMOTE_QUERY_KEYWORDS for part in parts):
+            return True
+        compact = normalized.replace("_", "")
+        if any(compact.endswith(keyword) for keyword in SENSITIVE_REMOTE_QUERY_KEYWORDS):
+            return True
+    return False
 
 
 def _is_private_netloc(hostname: str) -> bool:
@@ -1908,7 +1941,7 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
         return _web_tool_result("fetch_x_post", TOOL_STATUS_ERROR, "请提供 x.com/twitter.com 的 status 链接。", "InvalidXStatusURL")
 
     # 通道 1：X Fetch Bridge
-    if _x_fetch_bridge_enabled():
+    if _x_fetch_bridge_enabled() and not _has_sensitive_remote_query(safe_url):
         try:
             data = await asyncio.wait_for(_x_fetch_bridge_fetch(safe_url), timeout=40.0)
             formatted = _format_x_post(data, safe_url)
@@ -1940,7 +1973,7 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
             pass
 
     # 通道 4：GrokSearch 抓取
-    if _groksearch_enabled():
+    if _groksearch_enabled() and not _has_sensitive_remote_query(safe_url):
         try:
             grok_text = await asyncio.wait_for(_groksearch_fetch(safe_url), timeout=_groksearch_timeout() + 2.0)
             if grok_text:
@@ -2012,7 +2045,7 @@ async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHA
         local_error = "[WebFetchError] 抓取失败：{0}: {1}".format(exc.__class__.__name__, exc)
         local_error_code = exc.__class__.__name__
 
-    if _remote_fetch_proxy_enabled() and _groksearch_enabled():
+    if _remote_fetch_proxy_enabled() and _groksearch_enabled() and not _has_sensitive_remote_query(safe_url):
         try:
             _validate_public_http_url(safe_url)
             grok_text = await asyncio.wait_for(_groksearch_fetch(safe_url), timeout=_groksearch_timeout() + 2.0)
