@@ -4393,3 +4393,84 @@ Verification after the fix:
   - `arteta_dashboard RUNNING`.
 - Restart log health:
   - Last 120 `logs/arteta_bot.log` lines after the final restart had no `ERROR`, `CRITICAL`, or `Traceback` matches.
+
+## 2026-07-12 Football Freshness Real Chat Calibration
+
+### Scope
+
+- Calibrated the deterministic football freshness rules against a private real group-chat evaluation set.
+- Kept the change inside `plugins/arteta_agent/routing/freshness.py` and focused routing tests.
+- Did not add a classifier, cache, new football API, new Web Access behavior, or planner.py forced branches.
+- Raw private group messages remain under `artifacts/private/` and are intentionally not committed.
+
+### Label Policy
+
+- `WEB_REQUIRED`: answering would require current football facts because the message is a question, verification request, source/news follow-up, fixture/status question, or live-match factual follow-up.
+- `WEB_OPTIONAL`: current football facts could improve a reply, but the message is mainly a statement, reaction, opinion, or fragment where the bot is not required to answer a current fact.
+- `WEB_NOT_NEEDED`: ordinary chatter, stable history, general football talk, insults/reactions, non-football content, or messages where a reply should not require fresh web evidence.
+
+This policy aligns the offline labels with Activation scope: pure current-football statements are not treated as required unless replying would require a current factual answer.
+
+### Changes
+
+- Expanded current-football markers for fixtures, match timing, live-match review, VAR/penalty/added-time, selection, lineup, relegation, transfer, buyback, and scoreline-like cases.
+- Added aliases seen in real chat, including Trossard, Joao Pedro, Merino, Lewis-Skelly, Tierney, Gyokeres, England, Chelsea aliases, and Aston Villa aliases.
+- Removed bare `他` as a generic follow-up marker to avoid false positives such as profanity and plain reactions.
+- Added explicit question/verification/source signal detection so current football fragments do not become `required` merely because recent context is football-heavy.
+- Required mode now needs enough current-football score plus a current question, verification, source/news, official/press signal, or short contextual time follow-up.
+- Recent/reply context can promote only when the current message indicates that a current factual answer is being requested.
+
+### Private Real-Message Evaluation
+
+- Private dataset path: `artifacts/private/football_freshness_real_eval_20260712_activation_scope.json`.
+- Private report path: `artifacts/private/football_freshness_real_eval_report_20260712_activation_scope.json`.
+- Source pool:
+  - `daily_messages`: 7,265 rows;
+  - `messages`: 1,459 rows.
+- Sampling seed: `20260712`.
+- Final sample count: `120`.
+- Label distribution:
+  - `WEB_REQUIRED`: `9`;
+  - `WEB_OPTIONAL`: `30`;
+  - `WEB_NOT_NEEDED`: `81`.
+- Confusion matrix:
+  - `WEB_REQUIRED`: `9 required / 0 optional / 0 not_needed`;
+  - `WEB_OPTIONAL`: `0 required / 8 optional / 22 not_needed`;
+  - `WEB_NOT_NEEDED`: `0 required / 0 optional / 81 not_needed`.
+- Required metrics:
+  - `required_recall=1.0`;
+  - `required_precision=1.0`.
+- Required safety gate:
+  - no `WEB_REQUIRED` sample was missed;
+  - no `WEB_NOT_NEEDED` sample was forced to required.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_agent_football_freshness.py tests\test_arteta_agent_football_freshness_eval.py -q`
+  - Result: `17 passed`.
+- `python tools\evaluate_football_freshness.py --output artifacts\football_freshness_eval_report.json`
+  - Result: `30` repo-safe seed records, `required_recall=1.0`, `required_precision=1.0`, `mismatches=[]`.
+- `python tools\evaluate_football_freshness.py --dataset artifacts\private\football_freshness_real_eval_20260712_activation_scope.json --output artifacts\private\football_freshness_real_eval_report_20260712_activation_scope.json`
+  - Result: `120` private real-message records, `required_recall=1.0`, `required_precision=1.0`.
+- `python -m pytest tests\test_arteta_agent_routing.py tests\test_arteta_agent_planning.py tests\test_arteta_agent_football_freshness.py tests\test_arteta_agent_football_freshness_eval.py -q`
+  - Result: `57 passed`.
+- `python -m pytest tests\test_arteta_agent_runtime.py tests\test_arteta_agent_provider.py tests\test_arteta_agent_registry.py -q`
+  - Result: `225 passed`.
+- `python -m pytest tests -q`
+  - Result: `625 passed`.
+- `python -m compileall -q bot.py plugins tests tools dashboard`
+  - Result: passed.
+- `python tools\verify_features.py --suite agent_loop --suite chat --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- The real-message eval intentionally optimizes required recall and no false required on non-needed chat. Optional-to-not-needed differences remain acceptable because optional mode only controls additional tool availability, not stale-answer safety.
+- The rule set remains deterministic. Future calibration should add more private samples before adding an LLM classifier or cache.
+- Raw private eval data must not be committed; only summarized metrics and repo-safe seed reports should be tracked.
+
+### Remaining
+
+- Commit and push this calibration slice.
+- Deploy the updated freshness routing to ECS.
+- Run remote Python 3.8 compile, remote seed evaluation, and smoke suites.

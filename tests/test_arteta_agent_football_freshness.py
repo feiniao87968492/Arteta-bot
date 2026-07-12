@@ -111,6 +111,72 @@ def test_followup_question_uses_recent_football_context():
     assert any(name in WEB_TOOLS for name in _tool_names(plan))
 
 
+def test_real_chat_current_fixture_and_prediction_questions_require_web():
+    examples = [
+        ("欧冠决赛是哪一天", "current_fixture"),
+        ("车子主场能不能赢", "current_team_evaluation"),
+    ]
+
+    for text, expected_intent in examples:
+        decision, plan = _decision_and_plan(text)
+
+        assert decision.freshness.mode == "required", text
+        assert decision.freshness.intent == expected_intent
+        assert any(name in WEB_TOOLS for name in _tool_names(plan))
+
+
+def test_live_match_followup_question_uses_recent_context_without_false_positive():
+    ctx = make_context(
+        raw_message="为什么不看VAR",
+        extra={
+            "recent_messages": [
+                {"message": "刚刚传球太随意"},
+                {"message": "现在给这么好的机会又浪费"},
+            ]
+        },
+    )
+
+    decision, plan = _decision_and_plan("为什么不看VAR", ctx)
+
+    assert decision.freshness.mode == "required"
+    assert any(name in WEB_TOOLS for name in _tool_names(plan))
+
+
+def test_recent_football_context_does_not_force_plain_reaction_messages():
+    ctx = make_context(
+        raw_message="烦死了",
+        extra={
+            "recent_messages": [
+                {"message": "换人吧"},
+                {"message": "哈弗茨牛逼"},
+                {"message": "一直不换人"},
+            ]
+        },
+    )
+
+    decision, plan = _decision_and_plan("烦死了", ctx)
+
+    assert decision.freshness.mode == "none"
+    assert all(name not in WEB_TOOLS for name in _tool_names(plan))
+
+
+def test_recent_context_does_not_force_non_question_future_hope():
+    ctx = make_context(
+        raw_message="希望欧冠决赛也进关键球",
+        extra={
+            "recent_messages": [
+                {"message": "哈弗茨这赛季进球"},
+                {"message": "基本都是关键球"},
+            ]
+        },
+    )
+
+    decision, plan = _decision_and_plan("希望欧冠决赛也进关键球", ctx)
+
+    assert decision.freshness.mode in {"none", "optional"}
+    assert all(name not in WEB_TOOLS for name in _tool_names(plan))
+
+
 def test_x_status_url_requires_fetch_x_post_plan():
     ctx = make_context(
         raw_message="罗马诺这个是真的吗 https://x.com/FabrizioRomano/status/123456789",

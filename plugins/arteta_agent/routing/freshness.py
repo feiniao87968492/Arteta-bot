@@ -61,6 +61,7 @@ CURRENT_FACT_MARKERS = (
     "排名",
     "大名单",
     "名单",
+    "国家队",
     "状态",
     "没上",
     "不上",
@@ -72,6 +73,32 @@ CURRENT_FACT_MARKERS = (
     "上一场",
     "结果",
     "赛果",
+    "哪一天",
+    "什么时候",
+    "几点",
+    "能不能赢",
+    "谁能赢",
+    "会不会赢",
+    "能赢",
+    "var",
+    "VAR",
+    "vr",
+    "VR",
+    "点球",
+    "不是点",
+    "补时",
+    "分钟",
+    "几分钟",
+    "入选",
+    "落选",
+    "列队",
+    "致敬",
+    "降级",
+    "最后一轮",
+    "卖",
+    "回购",
+    "进一个",
+    "不进",
     "transfer",
     "injury",
     "fixture",
@@ -108,6 +135,7 @@ STABLE_HISTORY_MARKERS = (
     "为什么离开",
     "职业生涯",
     "温格时代",
+    "亨利回归",
     "规则",
     "战术原理",
 )
@@ -124,15 +152,26 @@ STABLE_TACTIC_MARKERS = (
 
 FOOTBALL_MARKERS = (
     "阿森纳",
+    "我厂",
+    "枪手",
     "英超",
     "欧冠",
+    "欧冠决赛",
     "西甲",
     "比利时",
     "西班牙",
+    "英格兰",
     "罗马诺",
     "球队",
     "球员",
     "比赛",
+    "VAR",
+    "var",
+    "VR",
+    "vr",
+    "点球",
+    "单刀",
+    "补时",
     "转会",
     "伤病",
     "赛程",
@@ -149,7 +188,6 @@ FOOTBALL_MARKERS = (
 )
 
 PRONOUN_OR_FOLLOWUP_MARKERS = (
-    "他",
     "这场",
     "这个",
     "这笔",
@@ -173,6 +211,16 @@ PLAYER_ALIASES = {
     "jesus": "Gabriel Jesus",
     "马丁内利": "Gabriel Martinelli",
     "martinelli": "Gabriel Martinelli",
+    "特罗萨德": "Leandro Trossard",
+    "特罗": "Leandro Trossard",
+    "戳萨": "Leandro Trossard",
+    "若昂佩德罗": "Joao Pedro",
+    "佩德罗": "Joao Pedro",
+    "美丽诺": "Mikel Merino",
+    "斯凯利": "Myles Lewis-Skelly",
+    "蒂尔尼": "Kieran Tierney",
+    "哲凯": "Viktor Gyokeres",
+    "约克雷斯": "Viktor Gyokeres",
 }
 
 TEAM_ALIASES = {
@@ -183,17 +231,75 @@ TEAM_ALIASES = {
     "spain": "Spain",
     "比利时": "Belgium",
     "belgium": "Belgium",
+    "英格兰": "England",
     "热刺": "Tottenham",
     "tottenham": "Tottenham",
     "曼城": "Manchester City",
     "利物浦": "Liverpool",
     "切尔西": "Chelsea",
+    "车子": "Chelsea",
+    "维拉": "Aston Villa",
+    "villa": "Aston Villa",
 }
+
+QUESTION_OR_VERIFICATION_MARKERS = (
+    "?",
+    "？",
+    "吗",
+    "么",
+    "谁",
+    "哪",
+    "几",
+    "怎么",
+    "呢",
+    "为啥",
+    "为什么",
+    "啥意思",
+    "能不能",
+    "是否",
+    "到底",
+    "真的假的",
+    "成没成",
+    "多少",
+    "查",
+    "核实",
+    "验证",
+    "发了",
+    "新闻",
+    "官宣",
+    "官方",
+    "do",
+    "miguel",
+    "delaney",
+)
 
 
 def _has_any(text: str, markers: Iterable[str]) -> bool:
     lowered = str(text or "").lower()
     return any(str(marker).lower() in lowered for marker in markers)
+
+
+def _has_question_or_verification_signal(text: str) -> bool:
+    return _has_any(text, QUESTION_OR_VERIFICATION_MARKERS)
+
+
+def _has_pronoun_followup_signal(text: str) -> bool:
+    value = str(text or "")
+    if _has_any(value, PRONOUN_OR_FOLLOWUP_MARKERS):
+        return True
+    return bool(re.search(r"他(?:怎么|为啥|为什么|没上|不上|上了吗|呢|伤|复出)", value))
+
+
+def _has_scoreline(text: str) -> bool:
+    return bool(re.search(r"\b\d+\s*(?:-|:|：|比)\s*\d+\b", str(text or "")))
+
+
+def _has_known_football_entity(text: str) -> bool:
+    value = str(text or "").lower()
+    for alias in list(PLAYER_ALIASES.keys()) + list(TEAM_ALIASES.keys()):
+        if str(alias).lower() in value:
+            return True
+    return False
 
 
 def _extract_x_status_url(text: str, urls: Optional[List[str]] = None) -> str:
@@ -265,6 +371,8 @@ def _intent_for_current_text(text: str, context_text: str) -> str:
         return "breaking_football_news"
     if _has_any(combined, ("下一场", "赛程", "打谁", "对谁", "next match", "fixture")):
         return "current_fixture"
+    if _has_any(combined, ("哪一天", "什么时候", "几点")) and _has_any(combined, ("欧冠决赛", "决赛", "比赛")):
+        return "current_fixture"
     if _has_any(combined, ("积分榜", "排名", "standings", "table")):
         return "current_standings"
     if _has_any(combined, ("最近状态", "状态怎么样", "状态如何", "recent form")):
@@ -280,7 +388,7 @@ def _query_hint(text: str, intent: str, entities: ConversationEntities) -> str:
     raw_text = str(text or "").strip()
     if raw_text and raw_text.isascii():
         return raw_text
-    needs_context_expansion = _has_any(raw_text, PRONOUN_OR_FOLLOWUP_MARKERS)
+    needs_context_expansion = _has_pronoun_followup_signal(raw_text)
     parts = []
     if needs_context_expansion:
         parts.extend(entities.players)
@@ -351,28 +459,61 @@ def detect_football_freshness(
         or bool(entities.players)
         or bool(entities.teams)
     )
-    pronoun_followup = _has_any(text, PRONOUN_OR_FOLLOWUP_MARKERS) and has_football_context
+    text_has_football_context = _has_any(text, FOOTBALL_MARKERS) or _has_known_football_entity(text)
+    text_has_question_signal = _has_question_or_verification_signal(text)
+    text_has_relative_time = _has_any(text, RELATIVE_TIME_MARKERS)
+    text_has_current_fact = _has_any(text, CURRENT_FACT_MARKERS) or _has_scoreline(text)
+    text_has_news_source = _has_any(text, NEWS_OR_X_MARKERS)
+    context_has_current_fact = _has_any(context_text, CURRENT_FACT_MARKERS)
+    context_has_news_source = _has_any(context_text, NEWS_OR_X_MARKERS)
+    pronoun_followup = _has_pronoun_followup_signal(text) and has_football_context
+    context_can_promote = (
+        text_has_relative_time
+        or (text_has_current_fact and text_has_question_signal)
+        or text_has_news_source
+        or pronoun_followup
+        or (text_has_question_signal and text_has_football_context)
+    )
 
     score = 0
     reason_codes = []
-    if _has_any(text, RELATIVE_TIME_MARKERS):
+    if text_has_relative_time:
         score += 3
         reason_codes.append("relative_time")
-    if _has_any(combined, CURRENT_FACT_MARKERS):
+    current_fact_promotes = (
+        text_has_current_fact
+        and (
+            text_has_question_signal
+            or text_has_news_source
+            or _has_any(text, ("官宣", "官方", "罗马诺", "记者", "发布会"))
+        )
+    )
+    if current_fact_promotes:
         score += 5
+        reason_codes.append("current_fact_marker")
+    elif text_has_current_fact:
+        score += 2
         reason_codes.append("current_fact_marker")
     if has_football_context:
         score += 2
         reason_codes.append("football_context")
     if reply_text and _has_any(reply_text, FOOTBALL_MARKERS + CURRENT_FACT_MARKERS):
-        score += 3
-        reason_codes.append("reply_context")
+        if context_can_promote:
+            score += 3
+            reason_codes.append("reply_context")
     if recent_messages and _has_any(context_text, FOOTBALL_MARKERS + CURRENT_FACT_MARKERS):
-        score += 3
-        reason_codes.append("recent_context")
-    if _has_any(combined, NEWS_OR_X_MARKERS):
+        if context_can_promote:
+            score += 3
+            reason_codes.append("recent_context")
+    if text_has_news_source:
         score += 4
         reason_codes.append("news_or_x_source")
+    elif context_can_promote and context_has_news_source:
+        score += 2
+        reason_codes.append("context_news_or_x_source")
+    if context_can_promote and context_has_current_fact and not text_has_current_fact:
+        score += 1
+        reason_codes.append("context_current_fact")
     if pronoun_followup:
         score += 3
         reason_codes.append("contextual_followup")
@@ -381,7 +522,13 @@ def detect_football_freshness(
         return FreshnessDecision()
 
     intent_name = _intent_for_current_text(text, context_text)
-    mode = "required" if score >= 6 else "optional" if score >= 3 else "none"
+    can_require_current_information = (
+        text_has_question_signal
+        or text_has_news_source
+        or _has_any(text, ("官宣", "官方", "罗马诺", "记者", "发布会"))
+        or (bool(recent_messages) and len(text) <= 8 and text_has_relative_time)
+    )
+    mode = "required" if score >= 6 and can_require_current_information else "optional" if score >= 3 else "none"
     confidence = min(0.99, max(0.0, float(score) / 10.0))
     preferred = ["grok_search"]
     if intent_name in {"current_fixture", "current_standings", "recent_match_result", "current_team_evaluation"}:
