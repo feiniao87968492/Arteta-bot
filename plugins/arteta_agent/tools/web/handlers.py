@@ -21,7 +21,6 @@ import os
 import re
 import time
 import warnings
-from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
 from typing import Optional
@@ -60,6 +59,26 @@ from .x_reader import (
     _x_mirror_urls,
     _x_status_id,
     _x_username,
+)
+from .verification import (
+    AUTHORITATIVE_MEDIA_DOMAINS,
+    PRIMARY_DOMAINS,
+    _VerificationEvidence,
+    _claim_result_score,
+    _claim_tokens,
+    _classify_evidence_stance,
+    _clean_text,
+    _contains_negation_near_claim,
+    _domain,
+    _domain_matches,
+    _format_verification_result,
+    _is_authoritative_source_level,
+    _is_strong_match_result,
+    _select_verification_verdict,
+    _source_level,
+    _stance_label,
+    _token_overlap_ratio,
+    _verdict_marker,
 )
 
 
@@ -117,16 +136,6 @@ FRESHNESS_TO_DDG = {
 # 工具函数
 # ---------------------------------------------------------------------------
 
-@dataclass
-class _VerificationEvidence(object):
-    url: str
-    title: str
-    source_level: str
-    stance: str
-    excerpt: str
-    fetched: bool = True
-
-
 def _http_client():
     """获取共享的异步 HTTP 客户端（复用连接池）。"""
     return get_shared_async_client()
@@ -149,133 +158,10 @@ def _web_tool_result(
     )
 
 
-# 一手 / 官方来源域名（精确匹配或后缀匹配）
-PRIMARY_DOMAINS = (
-    "arsenal.com",
-    "premierleague.com",
-    "uefa.com",
-    "fifa.com",
-    "thefa.com",
-    "gov.uk",
-    ".gov",
-    ".edu",
-    ".ac.uk",
-)
-
-# 权威媒体域名
-AUTHORITATIVE_MEDIA_DOMAINS = (
-    "reuters.com",
-    "apnews.com",
-    "bbc.com",
-    "bbc.co.uk",
-    "theguardian.com",
-    "theathletic.com",
-    "skysports.com",
-    "espn.com",
-)
-
-
-# ===================================================================
-# HTML 解析器：PageExtractor —— 提取标题、正文、发布时间、canonical URL
-# ===================================================================
-
-class PageExtractor(HTMLParser):
-    """
-    流式 HTML 解析器，提取页面结构化信息。
-
-    产出字段：
-    - title          : <title> 标签内容
-    - canonical_url  : <link rel="canonical"> 指向的规范 URL
-    - published_time : meta 标签中的发布时间
-    - body_text      : 去除 script/style/nav/footer 等噪声后的可见文本
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.title = ""
-        self.canonical_url = ""
-        self.published_time = ""
-        self._tag_stack = []       # 标签栈（用于跟踪嵌套层级）
-        self._skip_depth = 0       # 当前处于需跳过的标签内的深度（>0 表示正在跳过）
-        self._in_title = False     # 是否正在解析 <title> 内文本
-        self._text_parts = []      # 正文片段缓冲区
-
-    def handle_starttag(self, tag, attrs):
-        """遇到开始标签时：
-        - 追踪标签栈
-        - 识别并跳过 script/style/noscript/svg/nav/footer（不计入正文）
-        - 提取 <title>、canonical link、发布时间 meta
-        """
-        tag = tag.lower()
-        attrs_dict = {str(k).lower(): str(v or "") for k, v in attrs}
-        self._tag_stack.append(tag)
-
-        # 进入需跳过的噪声标签，增加跳过深度
-        if tag in {"script", "style", "noscript", "svg", "nav", "footer"}:
-            self._skip_depth += 1
-
-        if tag == "title":
-            self._in_title = True
-
-        # <link rel="canonical" href="...">
-        if tag == "link" and attrs_dict.get("rel", "").lower() == "canonical":
-            self.canonical_url = attrs_dict.get("href", "").strip()
-
-        # <meta property/article:published_time content="...">
-        if tag == "meta":
-            key = (attrs_dict.get("property") or attrs_dict.get("name") or "").lower()
-            if key in {"article:published_time", "date", "pubdate", "publishdate", "publish_date", "datepublished"}:
-                self.published_time = attrs_dict.get("content", "").strip()
-
-    def handle_endtag(self, tag):
-        """遇到结束标签时恢复状态（退出标题区、减少跳过深度、弹出标签栈）。"""
-        tag = tag.lower()
-
-        if tag == "title":
-            self._in_title = False
-
-        if tag in {"script", "style", "noscript", "svg", "nav", "footer"} and self._skip_depth > 0:
-            self._skip_depth -= 1
-
-        if self._tag_stack:
-            self._tag_stack.pop()
-
-    def handle_data(self, data):
-        """处理标签间的文本数据：
-        - <title> 内文本 → 累积到 title
-        - 跳过深度 > 0 → 丢弃（噪声区）
-        - 否则 → 累积到正文缓冲区
-        """
-        text = _clean_text(data)
-        if not text:
-            return
-
-        if self._in_title:
-            self.title = (self.title + " " + text).strip()
-            return
-
-        if self._skip_depth:
-            return
-
-        self._text_parts.append(text)
-
-    @property
-    def body_text(self) -> str:
-        """将所有正文片段合并为一个字符串并清洗。"""
-        return _clean_text(" ".join(self._text_parts))
-
-
-# ===================================================================
-# 文本清洗 & 安全校验
+# 搜索结果数据结构工具
 # ---------------------------------------------------------------------------
 
-def _clean_text(text: str) -> str:
-    """压缩连续空白、反转 HTML 实体、去除首尾空格。"""
-    return re.sub(r"\s+", " ", unescape(str(text or ""))).strip()
-
-
 def _safe_int(value, default: int, low: int, high: int) -> int:
-    """安全整数转换，失败时用 default，且钳制在 [low, high] 区间。"""
     try:
         number = int(value)
     except (TypeError, ValueError):
@@ -284,236 +170,12 @@ def _safe_int(value, default: int, low: int, high: int) -> int:
 
 
 def _safe_float(value, default: float, low: float, high: float) -> float:
-    """安全浮点数转换，失败时用 default，且钳制在 [low, high] 区间。"""
     try:
         number = float(value)
     except (TypeError, ValueError):
         number = default
     return max(low, min(high, number))
 
-
-# ---------------------------------------------------------------------------
-# 域名与来源评级
-# ---------------------------------------------------------------------------
-
-def _domain(url: str) -> str:
-    """从 URL 提取域名（去除 www. 前缀，小写化）。"""
-    parsed = urlparse(str(url or ""))
-    domain = (parsed.hostname or parsed.netloc).lower()
-    return domain[4:] if domain.startswith("www.") else domain
-
-
-def _domain_matches(domain: str, item: str) -> bool:
-    """
-    域名匹配逻辑：
-    - item 以 "." 开头 → 后缀匹配（如 ".gov" 匹配 "www.example.gov"）
-    - 否则 → 精确匹配或子域名匹配
-    """
-    value = str(item or "").lower()
-    if value.startswith("."):
-        return domain.endswith(value)
-    return domain == value or domain.endswith("." + value)
-
-
-def _source_level(url: str) -> str:
-    """
-    对 URL 来源进行三级分类：
-
-    - "一手/官方来源"   : PRIMARY_DOMAINS 中的官方机构域名
-    - "权威媒体来源"     : AUTHORITATIVE_MEDIA_DOMAINS 中的知名媒体
-    - "普通网页来源"     : 其他
-    """
-    domain = _domain(url)
-    if any(_domain_matches(domain, item) for item in PRIMARY_DOMAINS):
-        return "一手/官方来源"
-    if any(domain == item or domain.endswith("." + item) for item in AUTHORITATIVE_MEDIA_DOMAINS):
-        return "权威媒体来源"
-    return "普通网页来源"
-
-
-# ---------------------------------------------------------------------------
-# 搜索结果评分（用于 verify_recent_claim 的"最佳来源"选取）
-# ---------------------------------------------------------------------------
-
-def _claim_result_score(claim: str, item: dict) -> int:
-    """
-    对搜索结果与待核实说法的相关性进行启发式打分。
-
-    评分维度：
-    - 来源等级加成：一手/官方 +6，权威媒体 +4，普通 +1
-    - 体育赛事相关 token 匹配 → 额外加分（比分格式、关键词等）
-    - 赛事/集锦/赛果关键词匹配 → 额外加分
-    - 团队/阵容页面 → 扣分（对赛事比分核实无帮助）
-    """
-    url = _search_result_url(item)
-    title = str(item.get("title") or item.get("name") or "")
-    snippet = str(item.get("body") or item.get("snippet") or item.get("description") or "")
-    haystack = (title + " " + snippet + " " + url).lower()
-    claim_text = str(claim or "").lower()
-
-    source_level = _source_level(url)
-    score = {"一手/官方来源": 6, "权威媒体来源": 4, "普通网页来源": 1}.get(source_level, 0)
-
-    # 判断是否为赛事/比分类问题
-    is_match_claim = any(token in claim_text for token in (
-        "比赛", "比分", "赛果", "赛程",
-        "match", "score", "result", "fixture",
-    ))
-
-    if is_match_claim:
-        # 含比分格式 "3-1" / "2:0" 的页面高度相关
-        if re.search(r"\d+\s*[-:]\s*\d+", haystack):
-            score += 8
-        if "比赛" in haystack or "比分" in haystack or "赛果" in haystack:
-            score += 2
-        if "match" in haystack or "score" in haystack or "result" in haystack:
-            score += 2
-        if "集锦" in haystack or "加时" in haystack or "战胜" in haystack or "决赛" in haystack:
-            score += 3
-
-        domain = _domain(url)
-        # 知名体育站点加分
-        if any(value in domain for value in ("sports.cctv.com", "espn.com", "flashscore.com", "sofascore.com")):
-            score += 3
-        # /teams/ 或 /squad 路径 → 扣分（阵容页而非赛果页）
-        if "/teams/" in url or "/squad" in url:
-            score -= 5
-
-    return score
-
-
-def _is_strong_match_result(claim: str, item: dict) -> bool:
-    """搜索结果与说法高度匹配（得分 ≥ 12）时视为强证据候选。"""
-    return _claim_result_score(claim, item) >= 12
-
-
-def _claim_tokens(text: str) -> list:
-    tokens = re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", str(text or "").lower())
-    stopwords = set([
-        "a", "an", "the", "to", "of", "and", "or", "in", "on", "for", "with",
-        "after", "before", "was", "were", "is", "are", "be", "been", "being",
-    ])
-    return [token for token in tokens if token not in stopwords and len(token) > 1]
-
-
-def _token_overlap_ratio(claim: str, text: str) -> float:
-    claim_tokens = set(_claim_tokens(claim))
-    if not claim_tokens:
-        return 0.0
-    text_tokens = set(_claim_tokens(text))
-    if not text_tokens:
-        return 0.0
-    return float(len(claim_tokens.intersection(text_tokens))) / float(len(claim_tokens))
-
-
-def _contains_negation_near_claim(claim: str, text: str) -> bool:
-    value = str(text or "").lower()
-    negations = (
-        "did not",
-        "has not",
-        "have not",
-        "not signed",
-        "not agree",
-        "not completed",
-        "false",
-        "denied",
-        "refuted",
-        "no agreement",
-        "未",
-        "没有",
-        "否认",
-        "不属实",
-        "辟谣",
-    )
-    if not any(term in value for term in negations):
-        return False
-    return _token_overlap_ratio(claim, value) >= 0.5
-
-
-def _classify_evidence_stance(claim: str, page_text: str) -> str:
-    normalized_claim = _clean_text(claim).lower()
-    normalized_text = _clean_text(page_text).lower()
-    if not normalized_text:
-        return "unclear"
-    if _contains_negation_near_claim(claim, normalized_text):
-        return "refute"
-    if normalized_claim and normalized_claim in normalized_text:
-        return "support"
-    if _token_overlap_ratio(claim, normalized_text) >= 0.75:
-        return "support"
-    return "unclear"
-
-
-def _stance_label(stance: str) -> str:
-    return {
-        "support": "支持",
-        "refute": "反驳",
-        "unclear": "不明确",
-    }.get(str(stance or ""), "不明确")
-
-
-def _verdict_marker(verdict: str) -> str:
-    return {
-        "support": "supported",
-        "refute": "refuted",
-        "unclear": "unclear",
-    }.get(str(verdict or ""), "unclear")
-
-
-def _is_authoritative_source_level(source_level: str) -> bool:
-    return source_level in ("一手/官方来源", "权威媒体来源")
-
-
-def _select_verification_verdict(evidence: list) -> tuple:
-    authoritative_support = [
-        item for item in evidence
-        if item.stance == "support" and _is_authoritative_source_level(item.source_level)
-    ]
-    authoritative_refute = [
-        item for item in evidence
-        if item.stance == "refute" and _is_authoritative_source_level(item.source_level)
-    ]
-    fetched_items = [item for item in evidence if item.fetched]
-    limitations = []
-    if authoritative_support and authoritative_refute:
-        limitations.append("来源冲突：权威来源之间存在支持和反驳。")
-        return "unclear", limitations
-    if authoritative_support:
-        return "support", limitations
-    if authoritative_refute:
-        return "refute", limitations
-    if not fetched_items and evidence:
-        limitations.append("搜索摘要不能单独确认该说法。")
-    elif any(item.stance in ("support", "refute") for item in evidence):
-        limitations.append("ordinary source only: 找到的支持/反驳线索不是官方或权威来源。")
-    else:
-        limitations.append("未找到足够明确的正文证据。")
-    return "unclear", limitations
-
-
-def _format_verification_result(claim: str, verdict: str, evidence: list, limitations: list) -> str:
-    lines = [
-        "核验结论：{0}".format(_stance_label(verdict)),
-        "待核实说法：{0}".format(_clean_text(claim)),
-        "证据：",
-    ]
-    for index, item in enumerate(evidence, start=1):
-        lines.append("{0}. {1}".format(index, item.title or "(无标题)"))
-        lines.append("   立场：{0}".format(_stance_label(item.stance)))
-        lines.append("   来源等级：{0}".format(item.source_level))
-        lines.append("   链接：{0}".format(item.url))
-        if item.excerpt:
-            lines.append("   摘录：{0}".format(_clean_text(item.excerpt)[:MAX_EXCERPT_CHARS]))
-    if limitations:
-        lines.append("局限：")
-        for limitation in limitations:
-            lines.append("- {0}".format(limitation))
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# 搜索结果数据结构工具
-# ---------------------------------------------------------------------------
 
 def _search_result_url(item: dict) -> str:
     """从不同引擎返回的 dict 中提取 URL（兼容 href/url/link 字段名差异）。"""
@@ -1228,6 +890,66 @@ async def _append_grok_snapshot_marker(text: str, results: list) -> str:
 # ---------------------------------------------------------------------------
 # 通用网页抓取 & 格式化
 # ---------------------------------------------------------------------------
+
+class PageExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.title = ""
+        self.canonical_url = ""
+        self.published_time = ""
+        self._tag_stack = []
+        self._skip_depth = 0
+        self._in_title = False
+        self._text_parts = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = str(tag or "").lower()
+        attrs_dict = dict((str(k).lower(), str(v or "")) for k, v in attrs)
+        self._tag_stack.append(tag)
+
+        if tag in {"script", "style", "noscript", "svg", "nav", "footer"}:
+            self._skip_depth += 1
+
+        if tag == "title":
+            self._in_title = True
+
+        if tag == "link" and attrs_dict.get("rel", "").lower() == "canonical":
+            self.canonical_url = attrs_dict.get("href", "").strip()
+
+        if tag == "meta":
+            key = (attrs_dict.get("property") or attrs_dict.get("name") or "").lower()
+            if key in {"article:published_time", "date", "pubdate", "publishdate", "publish_date", "datepublished"}:
+                self.published_time = attrs_dict.get("content", "").strip()
+
+    def handle_endtag(self, tag):
+        tag = str(tag or "").lower()
+        if tag == "title":
+            self._in_title = False
+
+        if tag in {"script", "style", "noscript", "svg", "nav", "footer"} and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+        if self._tag_stack:
+            self._tag_stack.pop()
+
+    def handle_data(self, data):
+        text = _clean_text(data)
+        if not text:
+            return
+
+        if self._in_title:
+            self.title = (self.title + " " + text).strip()
+            return
+
+        if self._skip_depth:
+            return
+
+        self._text_parts.append(text)
+
+    @property
+    def body_text(self) -> str:
+        return _clean_text(" ".join(self._text_parts))
+
 
 def _parse_page(url: str, html_text: str) -> dict:
     """

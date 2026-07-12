@@ -3773,3 +3773,61 @@ Verification after the fix:
 
 - Extract fetch/page parsing and formatting helpers.
 - Extract verification helpers while keeping public tool names unchanged.
+
+## 2026-07-12 Web Access Round 3 Verification Helper Extraction
+
+### Scope
+
+- Extracted source ranking and conservative claim-verification helper logic from `handlers.py` to `verification.py`.
+- Kept public tool name `verify_recent_claim` and monkeypatch-compatible handler flow in `handlers.py`.
+- Preserved private compatibility exports through `plugins.arteta_agent.tools.web_access`.
+
+### Changes
+
+- Added `plugins/arteta_agent/tools/web/verification.py` with:
+  - `_VerificationEvidence`;
+  - primary and authoritative media domain lists;
+  - domain/source-level helpers;
+  - claim-result scoring helpers;
+  - stance classification and verdict formatting helpers.
+- Imported extracted helpers back into `handlers.py` so legacy private imports continue to work.
+- Restored shared handler-local helpers `_safe_int` and `_safe_float`.
+- Re-exported `_clean_text` from `verification.py` through `handlers.py` because `link_analysis.py` still calls `web_access._clean_text`.
+- Restored `PageExtractor` in `handlers.py`; it belongs to page parsing, not verification, and `_parse_page()` still depends on it.
+- Added module tests that assert extracted verification helpers remain compatibly exported.
+
+### RED Checks Before Implementation
+
+- `test_verification_helpers_are_extracted_but_compatibly_exported` failed because `plugins.arteta_agent.tools.web.verification` did not exist.
+- After the first mechanical extraction, targeted tests failed with:
+  - `NameError: _safe_int is not defined`;
+  - `NameError: _clean_text is not defined`.
+- After restoring those helpers, verification behavior tests failed because `PageExtractor` had also been removed and `_parse_page()` fell back to search snippets. Restoring `PageExtractor` fixed the actual parsing regression.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_web_security.py::test_claim_ranking_has_no_task_specific_entity_hardcodes tests/test_arteta_agent_registry.py::test_web_source_level_requires_exact_or_subdomain_primary_match -q`
+  - Initial result after mechanical extraction: `6 failed, 6 passed`.
+  - Intermediate result after helper restoration: `4 failed, 8 passed`.
+  - Final result: `12 passed`.
+- `python -m pytest tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_web_modules.py -q`
+  - Result: `220 passed`.
+- `python -m pytest tests -q`
+  - Result: `587 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- `verification.py` still exposes underscore-prefixed helper names intentionally; this keeps existing tests and compatibility imports stable while behavior is unchanged.
+- `PageExtractor` remains in `handlers.py` for now. It should move with fetch/page parsing in a later mechanical extraction.
+- Verification remains conservative and heuristic-based; a full evidence/stance subsystem is still a separate project.
+
+### Remaining
+
+- Extract fetch/page parsing and formatting helpers.
+- Consider splitting individual search parsers/backends after behavior remains stable.

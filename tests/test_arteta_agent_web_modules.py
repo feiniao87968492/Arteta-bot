@@ -67,3 +67,15 @@ def test_x_reader_helpers_are_extracted_but_compatibly_exported():
     assert handlers._x_mirror_urls is x_reader._x_mirror_urls
     assert handlers._format_x_mirror_page is x_reader._format_x_mirror_page
     assert handlers._format_x_post is x_reader._format_x_post
+
+
+def test_verification_helpers_are_extracted_but_compatibly_exported():
+    from plugins.arteta_agent.tools.web import handlers, verification
+
+    assert handlers._VerificationEvidence is verification._VerificationEvidence
+    assert handlers._domain is verification._domain
+    assert handlers._source_level is verification._source_level
+    assert handlers._claim_result_score is verification._claim_result_score
+    assert handlers._classify_evidence_stance is verification._classify_evidence_stance
+    assert handlers._select_verification_verdict is verification._select_verification_verdict
+    assert handlers._format_verification_result is verification._format_verification_result
