@@ -3026,4 +3026,28 @@ Verification after the fix:
 
 ### Remaining
 
-- Deploy this final HTTP-client lifecycle slice to ECS and run the standard smoke suites.
+- No remaining work for this HTTP-client lifecycle slice.
+
+### ECS Deployment
+
+- Commit deployed: `ace82b8 refactor: reuse shared client in agent tools`.
+- Deployment archive: `/tmp/arteta_agent_shared_client_ace82b8.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/agent_shared_http_client_20260712103302`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/tools/document.py`;
+  - `plugins/arteta_agent/tools/image.py`;
+  - `plugins/arteta_agent/tools/web_access.py`;
+  - `tests/test_arteta_agent_provider.py`;
+  - `tests/test_arteta_agent_registry.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- `supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `RUNNING`.
+
+### ECS Smoke After Shared HTTP Client Deploy
+
+- `./venv/bin/python tools/verify_features.py --suite chat`
+  - Result: passed on ECS.
+- `./venv/bin/python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed on ECS.
+- `./venv/bin/python tools/verify_features.py --suite agent_loop`
+  - Result: passed on ECS.
