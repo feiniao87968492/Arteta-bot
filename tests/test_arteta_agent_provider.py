@@ -453,7 +453,7 @@ def test_planner_provider_call_uses_fixed_adapter_protocol():
 
 def test_agent_http_tools_use_shared_client_lifecycle():
     tool_paths = [
-        Path("plugins/arteta_agent/tools/web_access.py"),
+        Path("plugins/arteta_agent/tools/web/handlers.py"),
         Path("plugins/arteta_agent/tools/document.py"),
         Path("plugins/arteta_agent/tools/image.py"),
     ]

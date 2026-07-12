@@ -3567,3 +3567,56 @@ Verification after the fix:
 
 - Round 2 is functionally closed for current scope: Web tools return structured results, factual verification has conservative verdicts, remote proxy default/SSRF/sensitive-query boundaries are covered.
 - Round 3 remains: split `web_access.py` into focused modules and add search backend abstractions without changing public tool behavior.
+
+## 2026-07-12 Web Access Round 3 Compatibility Package Boundary
+
+### Scope
+
+- Started Round 3 with a mechanical package boundary move.
+- Moved the existing Web implementation from `plugins/arteta_agent/tools/web_access.py` to `plugins/arteta_agent/tools/web/handlers.py`.
+- Kept `plugins/arteta_agent/tools/web_access.py` as a compatibility alias so old imports and monkeypatch paths continue to reference the implementation module.
+
+### Changes
+
+- Added `plugins/arteta_agent/tools/web/__init__.py`.
+- Added `plugins/arteta_agent/tools/web_access.py` compatibility shim:
+  - imports `plugins.arteta_agent.tools.web.handlers`;
+  - replaces `sys.modules[__name__]` with the handlers module.
+- Updated relative imports in `handlers.py` for the deeper package level.
+- Fixed the moved Grok snapshot helper to import `tools.link_analysis` from the parent package.
+- Updated the provider shared-client source inspection test to inspect `tools/web/handlers.py`, where the HTTP implementation now lives.
+
+### RED Checks Before Implementation
+
+- `test_web_access_compatibility_module_delegates_to_web_handlers` failed because `plugins.arteta_agent.tools.web` did not exist yet.
+- After the move, the Web/registry group exposed one path regression: `_write_grok_snapshot_image()` still used `from . import link_analysis`, which pointed at `tools.web.link_analysis`; this was corrected to `from .. import link_analysis`.
+
+### Verification
+
+- `python -m pytest tests/test_arteta_agent_web_modules.py -q`
+  - RED result before implementation: `1 failed`.
+  - GREEN result after implementation: `1 passed`.
+- `python -m pytest tests/test_arteta_agent_tool_result_protocol.py tests/test_arteta_agent_registry.py tests/test_arteta_agent_web_security.py tests/test_arteta_agent_web_verification.py tests/test_arteta_agent_web_modules.py -q`
+  - First result after move: `1 failed, 215 passed`.
+  - Final result after import fix: `216 passed`.
+- `python -m pytest tests/test_arteta_agent_provider.py tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_registry.py -q`
+  - Result: `209 passed`.
+- `python -m pytest tests -q`
+  - Result: `583 passed`.
+- `python -m compileall -q plugins tests tools dashboard`
+  - Result: passed.
+- `rg -n "\b(dict|list|set|tuple)\[|\|\s*None|None\s*\|" plugins/arteta_agent/tools/web_access.py plugins/arteta_agent/tools/web tests/test_arteta_agent_web_modules.py tests/test_arteta_agent_provider.py`
+  - Result: no matches.
+- `python tools\verify_features.py --suite agent_registry --suite agent_permissions`
+  - Result: passed.
+
+### Risk Notes
+
+- This commit intentionally moves implementation without changing behavior. It creates the package boundary needed for later extraction but does not yet separate security, parsing, search backends, X reading, and verification into individual modules.
+- The `sys.modules` compatibility alias preserves old monkeypatch behavior but should remain a transitional adapter; future imports inside new code should prefer `plugins.arteta_agent.tools.web.handlers` or the specific extracted modules.
+
+### Remaining
+
+- Extract security/fetch helpers into focused modules.
+- Introduce `SearchBackend` abstraction and typed internal search hit models.
+- Extract X reader and verification helpers while keeping public tool names unchanged.
