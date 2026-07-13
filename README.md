@@ -1,73 +1,145 @@
-# Arteta Bot — 阿森纳 QQ 群聊 Agent
+# Arteta Bot
 
-Arteta Bot 是一个基于 NoneBot2 + OneBot V11 / NapCat 的 QQ 群聊机器人，以阿森纳主教练米克尔·阿尔特塔的口吻参与群聊。项目已经从早期的单体工具循环升级为模块化 Agent 架构：`planner.py` 只保留 `run_agent_loop(...)` 兼容入口，并把旧参数封装成 `AgentRequest`；Routing、Planning、Runtime、Provider、Response、Policy 和工具执行层分别负责自己的边界。
+Arteta Bot 是一个基于 NoneBot2、OneBot V11 和 NapCat 的 QQ 群聊机器人。它以阿森纳主教练米克尔·阿尔特塔的口吻参与群聊，同时具备群记忆、实时足球信息核验、图片识别、图片生成、HTML/Markdown 渲染、权限确认、行为策略和审计能力。
+
+项目已经从早期集中式 `run_tool_loop()` 演进为模块化 Agent 架构。当前 `plugins/arteta_agent/planner.py` 只保留 `run_agent_loop(...)` 兼容入口，实际请求会被封装为 `AgentRequest`，再交给 Routing、Planning、Runtime、Provider、Response、Policy、Executor 和 Tools 等模块协作完成。
 
 ## 核心能力
 
-- **群聊人格对话**：围绕阿森纳、足球、群成员上下文和本地记忆生成回复。
-- **实时信息核验**：通过 GrokSearch、Bing/DuckDuckGo/Jina 后备链、网页抓取、X/Twitter 读取和 `verify_recent_claim` 进行当前事实查询。
-- **多意图工具规划**：同一条消息可以组合记忆、文档、链接、联网、渲染、策略等多个工具意图。
-- **权限分级工具系统**：工具按 `safe_read`、`safe_write`、`confirm_write`、`admin_action` 分级，写操作和管理操作必须经服务端确认。
-- **结构化工具结果**：工具返回 `ToolResult`，包含状态、错误码、artifact、pending action、耗时和脱敏 trace 信息。
-- **行为策略持久化**：表情、工具禁用、回复偏好、UI 偏好等行为策略通过 SQLite/兼容层管理，支持 TTL。
-- **多媒体与渲染**：支持 AI 图片生成、图片识别、HTML/Markdown 图片渲染、理科解题渲染和引用图处理。
-- **好感度与群数据**：保留原有好感度、成员档案、昵称、群消息、每日总结、周报和 ChromaDB 向量记忆能力。
+- **阿尔特塔人格群聊**：结合角色设定、群成员档案、长期记忆、近期上下文和响应风格策略生成回复。
+- **当前足球事实核验**：转会、伤病、赛程、积分榜、最近比赛和实时状态会进入 Freshness Policy，需要当前信息时优先走 Web/GrokSearch 等工具。
+- **多意图工具计划**：一条消息可以同时触发记忆、文档、链接、联网、渲染、策略更新和 QQ 动作等多个意图。
+- **统一 Runtime**：强制工具、required tools、模型 tool calls 和工具后的后续 tool calls 都走同一条执行链。
+- **服务端权限边界**：工具按 `safe_read`、`safe_write`、`confirm_write`、`admin_action` 分级，写操作和管理动作必须经过服务端 PendingAction 确认。
+- **结构化工具结果**：工具通过 `ToolResult` 返回状态、错误码、artifact、pending action、耗时和脱敏 trace，不依赖正文伪造控制协议。
+- **响应人格层**：默认人格 prompt 已集中到 `plugins/arteta_agent/prompts.py`，并通过 response style profile 区分日常短答、梗图、足球观点、当前新闻、战术深聊和严肃问题。
+- **表情与好感度后处理**：普通中性回复不再强制发表情；好感度评分与主回复生成解耦，旧 `【好感度...】` 标记会被清理但不再驱动随机大幅加减。
+- **SQLite 行为策略**：回复风格、表情、工具禁用、UI 偏好等行为偏好由 Behavior Policy 持久化，支持 TTL、迁移和并发安全更新。
+- **Provider Adapter**：兼容 DeepSeek 与 OpenAI-compatible API，Provider 层负责能力标记、重试、reasoning content、tool history 降级和共享 HTTP client。
+- **Web Access 安全收口**：搜索、网页抓取、X/Twitter 读取和事实证据收集已拆分模块，并带 SSRF best-effort 校验、重定向校验、Content-Type 与响应大小限制。
+- **多媒体能力**：支持图片识别、AI 图片生成、HTML/Markdown 图片渲染、理科解题渲染和引用图片处理。
+- **群数据与长期记忆**：SQLite 保存成员、昵称、好感度、群消息、每日总结和周报等结构化数据；ChromaDB 保存群向量记忆和足球新闻向量库。
 
-## 最新 Agent 架构
-
-主对话入口仍由 `plugins/arteta_chat.py` 接收 QQ 消息；当启用 Agent Registry 链路时，请求进入 `plugins/arteta_agent` 的分层架构：
+## 当前架构
 
 ```text
-QQ 消息 / 命令
+QQ / NapCat
+  -> NoneBot2
   -> plugins/arteta_chat.py
-  -> plugins/arteta_agent/planner.py        # 兼容入口 run_agent_loop
+  -> plugins/arteta_agent/planner.py        # 兼容入口 run_agent_loop(...)
   -> AgentRequest
-  -> plugins/arteta_agent/service.py        # 请求准备、确认消费、策略 TTL 和最终组合
-  -> routing/                               # RouteDecision / Intent / 初步工具约束
-  -> planning/                              # AgentPlan / required tools / explicit dependencies
-  -> runtime/                               # AgentState / LoopGuard / 统一执行循环
-  -> registry.py + executor.py              # ToolSpec / Schema / 权限 / handler
+  -> plugins/arteta_agent/service.py        # 请求准备、策略 TTL、路由、计划、运行和响应组合
+  -> activation.py                          # 群聊自主唤醒 cheap gate + LLM gate
+  -> routing/                               # Intent / RouteDecision / FreshnessDecision
+  -> planning/                              # AgentPlan / required tools / dependencies
+  -> runtime/                               # AgentState / LoopGuard / unified execution loop
+  -> registry.py + executor.py              # ToolSpec / Schema / permission / handler
   -> providers/                             # OpenAI-compatible provider / shared HTTP client
-  -> tools/                                 # Web、记忆、文档、QQ、管理、渲染等工具
-  -> response/                              # 最终文本、artifact、trace、mood 后处理
+  -> response/                              # final text / style / favorability / mood / artifacts / trace
+```
+
+### 主请求数据流
+
+```text
+用户消息
+  -> Activation 判断是否唤醒主 Agent
+  -> Routing 识别意图、上下文、时效性和可用工具
+  -> Planning 生成 required tools、依赖关系和运行约束
+  -> Runtime 执行计划、调用模型、处理预算、确认等待和终止条件
+  -> Executor 做参数校验、权限判断、PendingAction 和 Audit
+  -> Tools / Provider 读取外部信息或调用模型
+  -> Response 层组合最终文本、artifact、trace、表情和好感度展示
+  -> arteta_chat.py 继续处理群记忆写入、好感度入库和 QQ 发送
 ```
 
 ### 分层职责
 
-| 层 | 主要文件 | 职责 |
+| 层 | 主要位置 | 职责 |
 | --- | --- | --- |
-| Compatibility | `planner.py` | 保留 `run_agent_loop` 外部入口，委托到新 Agent Service。 |
-| Service | `service.py` | 构造 AgentRequest，串联路由、计划、运行时、策略和响应。 |
-| Routing | `routing/` | 生成 `RouteDecision`，识别多意图、工具排除、上下文工具暴露。 |
-| Planning | `planning/` | 将路由结果转为 `AgentPlan`，支持 required tools 和显式依赖关系。 |
-| Runtime | `runtime/` | 统一执行强制工具、计划工具和模型 tool calls；处理预算、循环保护、确认等待、并行只读工具。 |
-| Provider | `providers/` | OpenAI-compatible/DeepSeek 兼容调用、能力标记、重试、tool history 降级和共享 HTTP client。 |
-| Registry | `registry.py` / `executor.py` | 注册 ToolSpec、执行 JSON Schema 校验、权限检查、PendingAction 和 handler 调用。 |
-| Response | `response/` | 组合最终回复、artifact、trace 展示和表情后处理，不执行工具。 |
-| Policy | `policy/` / `behavior_policy.py` | 行为策略读取、TTL 消耗、SQLite 存储和 JSON 迁移兼容。 |
-| Web Access | `tools/web/` | URL/SSRF 校验、响应大小/类型限制、搜索后端、网页抓取、X 来源标注和事实证据收集。 |
+| Compatibility | `plugins/arteta_agent/planner.py` | 保留 `run_agent_loop(...)` 外部调用兼容，委托到 Agent Service。 |
+| Service | `plugins/arteta_agent/service.py` | 构造请求，串联 activation、routing、planning、runtime、policy 和 response。 |
+| Activation | `plugins/arteta_agent/activation.py` | 群聊场景中判断是否需要唤醒主 Agent，避免普通闲聊触发慢模型。 |
+| Routing | `plugins/arteta_agent/routing/` | 输出 `RouteDecision`，识别多意图、上下文工具、排除工具和足球时效性。 |
+| Freshness | `plugins/arteta_agent/routing/freshness.py` | 判断足球问题是否需要当前信息，输出 `none`、`optional`、`required`。 |
+| Planning | `plugins/arteta_agent/planning/` | 将路由结果转成 `AgentPlan`，支持 required tools 和显式依赖关系。 |
+| Runtime | `plugins/arteta_agent/runtime/` | 统一执行工具和模型循环，处理预算、LoopGuard、确认等待、只读并行和降级。 |
+| Registry / Executor | `plugins/arteta_agent/registry.py` / `executor.py` | 注册 `ToolSpec`，执行 JSON Schema 校验、权限检查、PendingAction 和 handler 调用。 |
+| Provider | `plugins/arteta_agent/providers/` | 负责 LLM 请求编码、响应解析、能力标记、重试、tool history 降级和共享 `httpx.AsyncClient`。 |
+| Response | `plugins/arteta_agent/response/` | 生成最终回复，处理 style profile、structured artifacts、trace、mood emoji 和好感度展示。 |
+| Policy | `plugins/arteta_agent/behavior_policy.py` / `policy/` | 管理 SQLite 行为策略、TTL 消耗和旧 JSON 迁移兼容。 |
+| Web Access | `plugins/arteta_agent/tools/web/` | 搜索、网页抓取、X/Twitter 读取、SSRF 校验、响应限制、格式化和事实证据收集。 |
+| Audit | `plugins/arteta_agent/audit.py` | 持久化确认、拒绝、执行、异常、超时和管理动作的脱敏审计记录。 |
 
 ### 关键结构化对象
 
 | 对象 | 位置 | 用途 |
 | --- | --- | --- |
-| `AgentRequest` | `plugins/arteta_agent/service.py` | `planner.py` 的兼容参数被封装成请求对象，供 Service 统一调度。 |
-| `RouteDecision` / `Intent` | `plugins/arteta_agent/routing/models.py` | 表达多意图、工具约束、上下文排除和足球时效性判断。 |
-| `AgentPlan` | `plugins/arteta_agent/planning/models.py` | 保存 required tools、excluded tools、constraints 和显式依赖关系。 |
-| `AgentState` | `plugins/arteta_agent/runtime/state.py` | 记录运行中消息、工具结果、预算、当前事实状态和停止原因。 |
+| `AgentRequest` | `plugins/arteta_agent/service.py` | 将旧入口参数封装为统一请求对象。 |
+| `Intent` / `RouteDecision` | `plugins/arteta_agent/routing/models.py` | 表达多意图、工具约束、上下文排除和时效性判断。 |
+| `AgentPlan` / `PlannedToolCall` | `plugins/arteta_agent/planning/models.py` | 保存 required tools、excluded tools、constraints 和显式依赖关系。 |
+| `AgentState` | `plugins/arteta_agent/runtime/state.py` | 记录运行中的消息、工具结果、预算、当前事实状态和停止原因。 |
 | `ToolSpec` | `plugins/arteta_agent/registry.py` | 定义工具 schema、权限等级、幂等性、并发安全能力和 handler。 |
 | `ToolResult` | `plugins/arteta_agent/result.py` | 结构化承载工具状态、错误码、artifact、marker、pending action 和耗时。 |
 | `ProviderCapabilities` | `plugins/arteta_agent/providers/openai_compatible.py` | 声明模型供应商是否支持 tool history、JSON schema、reasoning content 等能力。 |
+| `ResponseStyleProfile` | `plugins/arteta_agent/response/style.py` | 描述当前回复的模式、人格强度、目标长度、是否允许表情和是否偏向图片渲染。 |
+| `FavorabilityDecision` | `plugins/arteta_agent/response/favorability.py` | 将好感度评分从模型主回复中解耦，使用确定性小幅调整。 |
+
+## 当前足球事实链路
+
+真实群聊里的足球问题经常不会直接说“搜索”，例如：
+
+```text
+萨卡怎么没上？下一场打谁？
+这笔转会成了吗？
+塔子你了解西班牙和比利时最近的一场比赛吗？
+```
+
+这类问题会进入 Freshness Policy：
+
+```text
+足球语境消息
+  -> FreshnessDecision(mode="required")
+  -> Planning 生成必要 Web / GrokSearch 工具步骤
+  -> Runtime 执行 grok_search / web_search / web_fetch / fetch_x_post
+  -> 成功：基于当前工具观察回答
+  -> 失败：明确说明无法核实，不用旧知识兜底
+```
+
+稳定历史、规则和通用战术问题不会默认强制联网，例如“温格为什么离开阿森纳”“高位逼抢为什么怕长传”“2006 年欧冠决赛发生了什么”。
+
+## 响应人格与呈现
+
+响应层不再只靠一段固定 prompt 控制语气，而是由多个后处理模块协作：
+
+- `prompts.py`：默认人格设定的唯一内置来源，Dashboard 和 QQ 主流程共用。
+- `response/style.py`：根据消息、图片、文档、链接、路由提示和当前事实需求生成 `ResponseStyleProfile`。
+- `build_recent_opening_guard(...)`：记录最近开场签名，减少固定动作和固定口头禅重复。
+- `response/mood.py`：只在明确请求或强烈情绪场景下尝试发送表情，普通中性回复不再强制 `positive_neutral`。
+- `response/favorability.py`：清理旧好感度标记，并用确定性规则做小幅好感度变化；普通 0 或小变化默认不占用正文。
+- `response/composer.py`：组合最终文本、artifact 和 trace 展示，不执行工具，也不修改权限状态。
+
+## 工具体系
+
+| 类别 | 代表工具 | 说明 |
+| --- | --- | --- |
+| 足球数据 | `get_arsenal_result`、`get_pl_table`、`get_arsenal_injuries` | 比赛结果、积分榜、伤病等结构化足球信息。 |
+| Web / Research | `grok_search`、`web_search`、`web_fetch`、`fetch_x_post`、`verify_recent_claim` | 当前事实、网页、X/Twitter 和候选证据收集。 |
+| 记忆与群上下文 | `query_group_memory`、`get_recent_group_context`、`remember_user_preference` | 群记忆、近期上下文和偏好写入。 |
+| 文档与链接 | `read_document`、`analyze_link` | 附件、PDF、网页链接与引用内容分析。 |
+| 渲染与多媒体 | `render_html`、`generate_image`、vision 调用层 | 图片生成、图片识别和 HTML/Markdown 渲染。 |
+| 行为策略 | `show_behavior_policy`、`update_behavior_policy` | 查看和修改带 TTL 的行为策略。 |
+| QQ / 管理动作 | 发送、撤回、禁言、档案修改等工具 | 受 `confirm_write` 或 `admin_action` 权限保护。 |
 
 ## 安全边界
 
-- **动态外部内容不进入 system 消息**：网页、PDF、群消息、工具结果和异常文本都作为 tool/user 数据处理。
-- **工具参数先校验再执行**：缺字段、类型错误、额外字段、非法 enum、超长字符串/数组和非法 JSON 会在 handler 前被拒绝。
-- **权限由服务端强制**：模型文本不能声明已授权、已确认、已通过管理员校验或已生成可信 artifact。
-- **PendingAction 原子消费**：确认写操作绑定 action id、用户、群、工具和原始参数，只能消费一次。
-- **受限并行**：只有显式 `parallel_safe=True`、`safe_read`、无依赖、无共享状态的工具才会并行；写和管理工具始终串行。
-- **Web SSRF 防护**：限制 scheme、端口、URL credentials、重定向、DNS 解析结果、Content-Type 和响应大小；生产环境仍需要 egress 防火墙兜底。
-- **审计与脱敏**：确认请求、执行、拒绝、异常、超时和管理动作持久化审计，避免记录 API Key、Cookie、完整网页/PDF/群消息内容。
+- 外部动态内容不进入动态 `system` 消息：网页、PDF、附件、群消息、工具结果和异常文本都只作为 tool/user 数据处理。
+- 工具参数必须在 handler 前完成服务端 Schema 校验：缺字段、类型错误、额外字段、非法 enum、超长字符串/数组、非法 JSON 都会被拒绝。
+- 权限状态不能由模型文本伪造：授权、确认、管理员校验和 artifact 生成状态只能由服务端结构化对象产生。
+- `PendingAction` 绑定 action id、用户、群、工具和原始参数，并且只能在数据库事务中原子消费一次。
+- 只有显式 `parallel_safe=True`、权限为 `safe_read`、无依赖、无共享可变状态的工具才允许受限并行；写和管理工具始终串行。
+- Provider 不支持标准 tool history 时，降级路径也不会把工具结果放入 `system`，并保留 untrusted-data 包络。
+- Web Access 做应用层 SSRF best-effort 防护：限制 scheme、端口、URL credentials、重定向、DNS 解析结果、Content-Type 和响应大小；生产环境仍需要 egress 规则兜底。
+- 审计记录只保存结构化脱敏信息，不记录 API Key、Cookie、完整提示词、完整网页/PDF/群消息正文。
 
 ## 主要目录
 
@@ -75,30 +147,31 @@ QQ 消息 / 命令
 arteta_bot/
 ├── bot.py                         # NoneBot 启动入口和 loguru 日志配置
 ├── plugins/
-│   ├── arteta_chat.py             # QQ 主对话入口、好感度和渲染路由
-│   ├── arteta_agent/              # 最新 Agent 架构
-│   │   ├── routing/               # 路由与多意图判断
-│   │   ├── planning/              # 工具计划与依赖
-│   │   ├── runtime/               # 统一 Runtime 和 AgentState
-│   │   ├── providers/             # LLM Provider Adapter
-│   │   ├── response/              # 回复、artifact、trace、mood
+│   ├── arteta_chat.py             # QQ 主对话入口、好感度、记忆写入和发送
+│   ├── arteta_agent/              # 当前 Agent 架构
+│   │   ├── routing/               # Intent、RouteDecision、FreshnessDecision
+│   │   ├── planning/              # AgentPlan、required tools、dependencies
+│   │   ├── runtime/               # AgentState、LoopGuard、统一执行循环
+│   │   ├── providers/             # LLM Provider Adapter 和共享 HTTP client
+│   │   ├── response/              # 回复、style、好感度、表情、artifact、trace
 │   │   ├── policy/                # 行为策略服务
-│   │   └── tools/                 # Agent 工具集合
+│   │   └── tools/                 # Web、记忆、文档、QQ、管理、渲染等工具
 │   ├── arteta_memory.py           # ChromaDB 群记忆
 │   ├── arteta_vision.py           # 图片识别调用层
 │   ├── arteta_image.py            # 图片生成
 │   ├── arteta_render.py           # HTML/PIL 渲染
 │   └── ...                        # 好感度、周报、积分榜、誓言等传统插件
 ├── dashboard/                     # 开发者 Dashboard / API
-├── Docs/                          # 用户、开发、运维文档
+├── Docs/                          # 用户、开发、运维和任务文档
 ├── tools/verify_features.py       # 本地功能验证入口
-├── tools/groksearch_http_bridge.py# GrokSearch HTTP 桥
+├── tools/evaluate_personality_style.py
+├── tools/evaluate_football_freshness.py
 └── deploy/                        # ECS/Docker 部署脚本
 ```
 
 ## 快速开始
 
-项目线上目标环境为 Python 3.8，开发时也应保持 Python 3.8 兼容写法。
+线上目标环境是 Python 3.8，开发时也必须保持 Python 3.8 兼容写法。
 
 ```bash
 python -m venv .venv
@@ -108,25 +181,25 @@ copy .env.dev .env
 python bot.py
 ```
 
-关键配置项包括：
+关键配置项：
 
 | 配置 | 用途 |
 | --- | --- |
 | `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` / `DEEPSEEK_API_URL` | 主对话 OpenAI-compatible 模型配置。 |
-| `ARTETA_USE_AGENT_REGISTRY` | 是否启用新 Agent Registry 链路。 |
+| `ARTETA_USE_AGENT_REGISTRY` | 是否启用 Agent Registry 链路。 |
 | `ARTETA_GROKSEARCH_API_URL` / `ARTETA_GROKSEARCH_API_KEY` | GrokSearch HTTP 桥配置。 |
 | `ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH` | 行为策略 SQLite 数据库路径。 |
 | `IMAGE_API_KEY` / `IMAGE_API_URL` / `IMAGE_MODEL` | 图片生成配置。 |
 | `VISION_API_KEY` / `VISION_API_URL` / `VISION_MODEL` / `VISION_TIMEOUT` | 图片识别配置。 |
 
-完整配置和部署步骤见 [Docs/ops/deployment.md](Docs/ops/deployment.md)。
+完整部署流程见 [Docs/ops/deployment.md](Docs/ops/deployment.md)。
 
 ## 常用指令
 
 - `A/塔子/阿尔特塔 [内容]`：AI 对话。
 - `算法 [题目]`：理科解题与渲染。
 - `画图 [描述]`：AI 图片生成。
-- `好感度` / `档案` / `盒`：成员档案和好感度。
+- `好感度` / `档案` / `瞅`：成员档案和好感度。
 - `赞我`：QQ 名片赞。
 - `发誓 [目标]`：誓言系统。
 - `帮助`：帮助菜单。
@@ -138,13 +211,15 @@ python bot.py
 常用本地验证入口：
 
 ```bash
-python tools/verify_features.py --suite chat --suite agent_registry --suite agent_permissions --suite agent_loop
+python tools/verify_features.py --suite chat --suite agent_loop --suite agent_registry --suite agent_permissions
+python tools/evaluate_football_freshness.py --output artifacts/football_freshness_eval_report.json
+python tools/evaluate_personality_style.py --output artifacts/personality_style_eval_report.json
 python -m pytest tests/test_arteta_agent_registry.py -q
 python -m pytest tests -q
-python -m compileall -q plugins tests tools dashboard
+python -m compileall -q bot.py plugins tests tools dashboard
 ```
 
-Web Access 和 Agent 架构的最近验收记录见 [Docs/dev/agent-architecture-devlog.md](Docs/dev/agent-architecture-devlog.md)。
+最近的 Agent 架构、Web Access、足球时效性和人格响应验收记录见 [Docs/dev/agent-architecture-devlog.md](Docs/dev/agent-architecture-devlog.md)。
 
 ## 文档导航
 
@@ -157,14 +232,20 @@ Web Access 和 Agent 架构的最近验收记录见 [Docs/dev/agent-architecture
 - [Dashboard 文档](Docs/dev/developer-dashboard.md)
 - [部署指南](Docs/ops/deployment.md)
 - [故障排查](Docs/ops/troubleshooting.md)
+- [足球时效性联网计划](Docs/tasks/arteta_football_freshness_web_plan.md)
+- [Web Access 改造计划](Docs/tasks/rebulid_webaccess.md)
+- [人设与回复呈现优化计划](Docs/tasks/arteta_personality_response_optimization_plan.md)
 
 ## 开发约束
 
 - 保持 Python 3.8 兼容：使用 `Dict[str, X]`、`List[X]`、`Optional[X]` 等 typing 写法。
+- 新增或修改功能前做发散检查，但最终实现保持可控、可回滚、可验证。
 - 不要绕过 `ToolSpec`、Schema、权限、PendingAction、Audit 或 Runtime。
-- 每次修改后运行相关验证，更新必要文档。
+- 不要把外部网页、PDF、附件、群消息或工具结果拼入动态 `system` 消息。
+- 不要在 `planner.py` 里重新堆强制路由分支；Routing、Planning、Runtime、Response 各司其职。
+- 修改后运行相关验证，更新必要文档。
 - 每次更新完成后创建聚焦 commit，并推送到 `https://github.com/feiniao87968492/Arteta-bot.git`。
 
 ## 项目状态
 
-项目处于活跃开发和线上运行状态。当前重点是保持 Agent 架构的可测试性、安全边界和 ECS 部署可回滚性。
+项目处于活跃开发和线上运行状态。当前主线已经完成 Agent 架构重构、Web Access 安全收口、当前足球事实主动联网链路，以及人设 prompt 集中、响应风格 profile、开场去重、表情降噪和好感度解耦。后续重点是继续用真实群聊评测集校准回复呈现、Trace 展示、渲染决策和知识边界，同时保持安全边界、测试覆盖、GitHub 提交纪律和 ECS 部署可回滚性。
