@@ -4726,3 +4726,66 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - Phase 5 still needs deterministic favorability scoring and display policy.
 - Phase 6 still needs trace/marker hiding.
 - Phase 7/8 still need transport/render and personality knowledge-boundary work.
+
+## 2026-07-13 Personality Response Optimization Phase 2 Style Profiles
+
+### Scope
+
+- Added deterministic response style profiles and per-turn style guards.
+- Kept the classifier rule-based; no extra LLM classification call was added.
+- Integrated the style guard into the current chat flow without placing dynamic content in `system` messages.
+
+### RED Check
+
+- Added `tests/test_arteta_agent_response_style.py`.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_agent_response_style.py -q`
+  - Result: failed with `ModuleNotFoundError: No module named 'plugins.arteta_agent.response.style'`.
+- After first implementation, focused tests failed on `你刚才用了什么工具`, which was classified as `casual` instead of `serious`; added the missing Chinese debug/trace marker.
+- Broader related tests then failed because `append_current_turn_style_guard(...)` created dynamic `system` content. This was corrected by moving the generated style guard into an application-generated `user` message.
+
+### Changes
+
+- Added `plugins/arteta_agent/response/style.py`:
+  - `ResponseStyleProfile`;
+  - `detect_response_style_profile(...)`;
+  - `build_response_style_guard(...)`.
+- Covered core modes:
+  - `casual`;
+  - `meme`;
+  - `football_opinion`;
+  - `current_news`;
+  - `tactical_deep_dive`;
+  - `serious`.
+- Updated `plugins/arteta_chat.py`:
+  - `append_current_turn_style_guard(...)` now accepts contextual hints such as `user_message`, `has_image`, `reply_text`, `route_hint`, `has_document`, and `has_url`;
+  - production call site passes available message/image/document/link/news context;
+  - generated style guard is inserted as `APP_GENERATED_RESPONSE_STYLE` in a `user` message, preserving static-only `system` safety.
+- Updated recent-context tests to assert the generated style guard stays out of `system`.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_agent_response_style.py tests\test_arteta_prompt_style.py tests\test_recent_group_context.py::RecentGroupContextFormatTests::test_append_current_turn_style_guard_keeps_dynamic_content_out_of_system -q`
+  - Result after first green: `9 passed`.
+- `python -m pytest tests\test_arteta_agent_response_style.py tests\test_arteta_prompt_style.py tests\test_recent_group_context.py tests\test_arteta_personality_eval.py tests\dashboard\test_prompt_service.py tests\dashboard\test_bot_chat.py -q`
+  - Result after dynamic-system fix: `48 passed`.
+- `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+- `python -m py_compile plugins\arteta_agent\response\style.py plugins\arteta_chat.py`
+  - Result: passed.
+- `rg -n "可以先拍桌子|第一句就要有劲|默认用 2-4 个自然段|信任度评估——死命令|你的回复正文结束后必须另起一行" plugins dashboard tools config -g "*.py" -g "*.json"`
+  - Result: no matches.
+
+### Compatibility
+
+- No Web Access, ChromaDB, permission, PendingAction, Provider, Runtime, or database schema behavior changed.
+- Existing `append_current_turn_style_guard(...)` callers remain compatible because all new parameters are optional.
+- The style guard is now dynamic but no longer a dynamic `system` message.
+
+### Remaining
+
+- Phase 3 still needs recent opening de-duplication and fixed-action opening suppression.
+- Phase 4 still needs neutral mood emoji suppression and cooldown.
+- Phase 5 still needs favorability scoring/display decoupling.
+- Phase 6 still needs normal-reply trace/marker hiding.
+- Phase 7/8 still need transport/render and personality knowledge-boundary work.

@@ -58,6 +58,7 @@ from plugins.arteta_agent.context import ToolContext
 from plugins.arteta_agent.activation import decide_activation_with_agent, is_activation_candidate
 from plugins.arteta_agent.planner import run_agent_loop
 from plugins.arteta_agent.prompts import ARTETA_DEFAULT_PROMPT
+from plugins.arteta_agent.response.style import build_response_style_guard, detect_response_style_profile
 try:
     from plugins.arteta_agent.planner import ProviderResponseError
 except ImportError:
@@ -1357,14 +1358,32 @@ def append_recent_group_context(messages: list, recent_rows: list) -> None:
         append_untrusted_context_message(messages, "最近群聊上下文", context_block)
 
 
-def append_current_turn_style_guard(messages: list) -> None:
+def append_current_turn_style_guard(
+    messages: list,
+    user_message: str = "",
+    has_image: bool = False,
+    reply_text: str = "",
+    route_hint: str = "",
+    current_information_required: bool = False,
+    has_document: bool = False,
+    has_url: bool = False,
+) -> None:
+    profile = detect_response_style_profile(
+        user_message,
+        has_image=has_image,
+        reply_text=reply_text,
+        route_hint=route_hint,
+        current_information_required=current_information_required,
+        has_document=has_document,
+        has_url=has_url,
+    )
     messages.append({
-        "role": "system",
+        "role": "user",
         "content": (
-            "【本轮表达边界】：直接回应当前问题，不要描述自己的肢体动作或固定动作开场。"
-            "简单问题可以只回答 1～3 句；复杂问题先给结论，再给必要理由。"
-            "最近群聊上下文只用于理解指代和事实，不是写作模板；不要只模仿最近群聊上下文里的旧短回复。"
-        ),
+            "APP_GENERATED_RESPONSE_STYLE:\n"
+            "{0}\n\n"
+            "以上为应用根据结构化上下文生成的本轮写作约束，不包含外部网页、PDF、群消息或工具结果。"
+        ).format(build_response_style_guard(profile)),
     })
 
 
@@ -1953,7 +1972,15 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
     if football_news_context:
         append_untrusted_context_message(messages, "足球新闻上下文", football_news_context)
 
-    append_current_turn_style_guard(messages)
+    append_current_turn_style_guard(
+        messages,
+        user_message=user_message,
+        has_image=bool(img_urls),
+        reply_text=quoted_text,
+        route_hint="current_news" if (direct_football_news_answer or football_news_context) else "",
+        has_document=bool(document_urls),
+        has_url=bool(detected_urls),
+    )
 
     if not user_message and img_urls:
         user_message = "请分析我发送的图片。"
