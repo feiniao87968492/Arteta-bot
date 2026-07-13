@@ -20,17 +20,12 @@ python tools\build_emoji_manifest.py 表情包 --output 表情包\manifest.json
 
 Result:
 
-- Asset count: 12
+- Asset count: 22
 - Manifest path: `表情包/manifest.json`
-- Reviewed tags: `开心 -> celebration`, `思考 -> thinking`, `无聊 -> speechless`, `震惊 -> surprised`, `生气1/生气2 -> frustrated`, `哭泣 -> sad`
-- Low-confidence / unrecognized assets:
-  - `消极/ChatGPT Image 2026年7月3日 09_42_30 (6).png`
-  - `积极中立/ChatGPT Image 2026年7月3日 09_42_28 (1).png`
-  - `积极中立/ChatGPT Image 2026年7月3日 09_42_29 (4).png`
-  - `积极中立/ChatGPT Image 2026年7月3日 09_42_29 (5).png`
-  - `积极中立/害羞.png`
+- Reviewed tags now cover `celebration`, `approval`, `amused`, `teasing`, `surprised`, `speechless`, `thinking`, `skeptical`, `encouraging`, `comforting`, `frustrated`, and `sad`.
+- Low-confidence / unrecognized assets: none.
 
-The low-confidence files are retained as `approval` with `weight=0.3` and `reviewed=false` until an operator manually relabels them.
+All current local assets are marked `reviewed=true`; assets that should not be used for serious injury contexts include `avoid_contexts: ["serious_injury"]`.
 
 ## Scenario Evidence
 

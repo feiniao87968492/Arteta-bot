@@ -1,0 +1,489 @@
+{
+  "version": 1,
+  "assets": {
+    "ChatGPT Image 2026年7月3日 09_42_30 (6)": {
+      "file": "消极/ChatGPT Image 2026年7月3日 09_42_30 (6).png",
+      "reactions": [
+        "speechless",
+        "thinking"
+      ],
+      "intensities": [
+        "low",
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user",
+        "toward_event"
+      ],
+      "topics": [
+        "general",
+        "meme"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 0.8,
+      "reviewed": true
+    },
+    "哭泣": {
+      "file": "消极/哭泣.png",
+      "reactions": [
+        "sad"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user"
+      ],
+      "topics": [
+        "general"
+      ],
+      "avoid_contexts": [],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "生气1": {
+      "file": "消极/生气1.png",
+      "reactions": [
+        "frustrated"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user"
+      ],
+      "topics": [
+        "general"
+      ],
+      "avoid_contexts": [],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "生气2": {
+      "file": "消极/生气2.png",
+      "reactions": [
+        "frustrated"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user"
+      ],
+      "topics": [
+        "general"
+      ],
+      "avoid_contexts": [],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "震惊": {
+      "file": "消极/震惊.png",
+      "reactions": [
+        "surprised"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user"
+      ],
+      "topics": [
+        "general"
+      ],
+      "avoid_contexts": [],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "ChatGPT Image 2026年7月3日 09_42_28 (1)": {
+      "file": "积极中立/ChatGPT Image 2026年7月3日 09_42_28 (1).png",
+      "reactions": [
+        "teasing",
+        "amused",
+        "approval"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user",
+        "toward_claim"
+      ],
+      "topics": [
+        "general",
+        "meme",
+        "football"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 0.9,
+      "reviewed": true
+    },
+    "ChatGPT Image 2026年7月3日 09_42_29 (4)": {
+      "file": "积极中立/ChatGPT Image 2026年7月3日 09_42_29 (4).png",
+      "reactions": [
+        "approval",
+        "comforting"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "toward_user",
+        "shared_with_user"
+      ],
+      "topics": [
+        "general",
+        "football"
+      ],
+      "avoid_contexts": [],
+      "weight": 0.9,
+      "reviewed": true
+    },
+    "ChatGPT Image 2026年7月3日 09_42_29 (5)": {
+      "file": "积极中立/ChatGPT Image 2026年7月3日 09_42_29 (5).png",
+      "reactions": [
+        "celebration",
+        "encouraging",
+        "approval"
+      ],
+      "intensities": [
+        "high",
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user",
+        "toward_user"
+      ],
+      "topics": [
+        "football",
+        "match",
+        "general"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 1.1,
+      "reviewed": true
+    },
+    "害羞": {
+      "file": "积极中立/害羞.png",
+      "reactions": [
+        "approval",
+        "comforting"
+      ],
+      "intensities": [
+        "low",
+        "medium"
+      ],
+      "stances": [
+        "toward_user",
+        "shared_with_user"
+      ],
+      "topics": [
+        "general"
+      ],
+      "avoid_contexts": [],
+      "weight": 0.9,
+      "reviewed": true
+    },
+    "开心": {
+      "file": "积极中立/开心.png",
+      "reactions": [
+        "celebration"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user"
+      ],
+      "topics": [
+        "general"
+      ],
+      "avoid_contexts": [],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "思考": {
+      "file": "积极中立/思考.png",
+      "reactions": [
+        "thinking"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user"
+      ],
+      "topics": [
+        "general"
+      ],
+      "avoid_contexts": [],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "无聊": {
+      "file": "积极中立/无聊.png",
+      "reactions": [
+        "speechless"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user"
+      ],
+      "topics": [
+        "general"
+      ],
+      "avoid_contexts": [],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "a2919bdb38c4fdd8bb6690cbf2466859": {
+      "file": "庆祝/a2919bdb38c4fdd8bb6690cbf2466859.png",
+      "reactions": [
+        "celebration",
+        "amused"
+      ],
+      "intensities": [
+        "high"
+      ],
+      "stances": [
+        "shared_with_user",
+        "toward_event"
+      ],
+      "topics": [
+        "football",
+        "match",
+        "meme"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "ChatGPT Image 2026年7月13日 21_52_12 (2)": {
+      "file": "愤怒/ChatGPT Image 2026年7月13日 21_52_12 (2).png",
+      "reactions": [
+        "frustrated"
+      ],
+      "intensities": [
+        "high",
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user",
+        "toward_event"
+      ],
+      "topics": [
+        "football",
+        "match",
+        "general"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "f70f19e2e0cc4c0772fb036b5f7d9188": {
+      "file": "愤怒/f70f19e2e0cc4c0772fb036b5f7d9188.jpg",
+      "reactions": [
+        "frustrated",
+        "skeptical"
+      ],
+      "intensities": [
+        "high",
+        "medium"
+      ],
+      "stances": [
+        "toward_event",
+        "toward_claim",
+        "shared_with_user"
+      ],
+      "topics": [
+        "football",
+        "match",
+        "football_news"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "ChatGPT Image 2026年7月13日 21_52_13 (4)": {
+      "file": "消极/ChatGPT Image 2026年7月13日 21_52_13 (4).png",
+      "reactions": [
+        "sad",
+        "comforting"
+      ],
+      "intensities": [
+        "medium",
+        "low"
+      ],
+      "stances": [
+        "shared_with_user",
+        "toward_user"
+      ],
+      "topics": [
+        "general",
+        "injury"
+      ],
+      "avoid_contexts": [],
+      "weight": 0.9,
+      "reviewed": true
+    },
+    "ChatGPT Image 2026年7月13日 21_52_14 (6)": {
+      "file": "消极/ChatGPT Image 2026年7月13日 21_52_14 (6).png",
+      "reactions": [
+        "comforting",
+        "approval"
+      ],
+      "intensities": [
+        "low",
+        "medium"
+      ],
+      "stances": [
+        "toward_user",
+        "shared_with_user"
+      ],
+      "topics": [
+        "general"
+      ],
+      "avoid_contexts": [],
+      "weight": 0.9,
+      "reviewed": true
+    },
+    "2364abe94210abbb6be5f6e226aed716": {
+      "file": "疑惑/2364abe94210abbb6be5f6e226aed716.jpg",
+      "reactions": [
+        "skeptical",
+        "speechless"
+      ],
+      "intensities": [
+        "medium",
+        "high"
+      ],
+      "stances": [
+        "toward_claim",
+        "toward_event"
+      ],
+      "topics": [
+        "meme",
+        "general",
+        "football_news"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "ChatGPT Image 2026年7月13日 21_52_11 (1)": {
+      "file": "积极中立/ChatGPT Image 2026年7月13日 21_52_11 (1).png",
+      "reactions": [
+        "approval",
+        "celebration",
+        "encouraging"
+      ],
+      "intensities": [
+        "medium",
+        "high"
+      ],
+      "stances": [
+        "shared_with_user",
+        "toward_user"
+      ],
+      "topics": [
+        "general",
+        "football",
+        "match"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "ChatGPT Image 2026年7月13日 21_52_13 (5)": {
+      "file": "积极中立/ChatGPT Image 2026年7月13日 21_52_13 (5).png",
+      "reactions": [
+        "teasing",
+        "amused",
+        "approval"
+      ],
+      "intensities": [
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user",
+        "toward_claim"
+      ],
+      "topics": [
+        "meme",
+        "general",
+        "football"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "bc04712287fc48dd86fc378229cff395": {
+      "file": "震惊/bc04712287fc48dd86fc378229cff395.jpg",
+      "reactions": [
+        "surprised"
+      ],
+      "intensities": [
+        "high"
+      ],
+      "stances": [
+        "toward_event",
+        "shared_with_user"
+      ],
+      "topics": [
+        "football",
+        "match",
+        "general"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 1.0,
+      "reviewed": true
+    },
+    "ChatGPT Image 2026年7月13日 21_52_12 (3)": {
+      "file": "震惊/ChatGPT Image 2026年7月13日 21_52_12 (3).png",
+      "reactions": [
+        "surprised",
+        "speechless"
+      ],
+      "intensities": [
+        "high",
+        "medium"
+      ],
+      "stances": [
+        "shared_with_user",
+        "toward_event"
+      ],
+      "topics": [
+        "general",
+        "football",
+        "meme"
+      ],
+      "avoid_contexts": [
+        "serious_injury"
+      ],
+      "weight": 1.0,
+      "reviewed": true
+    }
+  }
+}

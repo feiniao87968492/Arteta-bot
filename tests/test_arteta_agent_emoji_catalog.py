@@ -48,6 +48,7 @@ def test_catalog_falls_back_to_legacy_scan_when_manifest_missing_or_broken(tmp_p
     missing_root = tmp_path / "missing_manifest"
     write_file(missing_root / "开心" / "happy.png")
     write_file(missing_root / "思考" / "thinking.gif")
+    write_file(missing_root / "疑惑" / "stare.jpg")
     write_file(missing_root / "消极" / "angry.webp")
     write_file(missing_root / "消极" / "震惊.png")
     write_file(missing_root / "unknown.png")
@@ -62,6 +63,7 @@ def test_catalog_falls_back_to_legacy_scan_when_manifest_missing_or_broken(tmp_p
     by_name = {asset.name: asset for asset in missing_assets}
     assert by_name["happy"].reactions == ["celebration"]
     assert by_name["thinking"].reactions == ["thinking"]
+    assert by_name["stare"].reactions == ["skeptical"]
     assert by_name["angry"].reactions == ["frustrated"]
     assert by_name["震惊"].reactions == ["surprised"]
     assert by_name["unknown"].reactions == ["approval"]

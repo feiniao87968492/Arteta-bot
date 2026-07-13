@@ -18,6 +18,7 @@ LEGACY_REACTION_HINTS = (
     ("thinking", ("思考", "想想", "分析", "thinking", "think")),
     ("speechless", ("无聊", "冷场", "平淡", "无语", "speechless", "bored")),
     ("surprised", ("震惊", "惊讶", "surprised", "shock")),
+    ("skeptical", ("疑惑", "怀疑", "质疑", "靠不靠谱", "skeptical", "doubt", "stare")),
     ("frustrated", ("生气", "愤怒", "不满", "红温", "angry", "frustrated")),
     ("sad", ("哭", "哭泣", "难过", "委屈", "遗憾", "sad")),
 )
