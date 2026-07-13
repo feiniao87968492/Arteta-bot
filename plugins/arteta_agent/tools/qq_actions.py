@@ -1,5 +1,4 @@
 import os
-import random
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -12,6 +11,9 @@ except Exception:  # pragma: no cover - unit tests can run without NoneBot.
     MessageSegment = None
 
 from ..context import ToolContext
+from ..emoji.catalog import load_emoji_catalog
+from ..emoji.models import EmojiAsset, EmojiReactionDecision
+from ..emoji.selector import select_emoji_asset
 from ..registry import ToolSpec, ensure_tool
 
 
@@ -20,16 +22,6 @@ EMOJI_DIR = os.environ.get("ARTETA_EMOJI_DIR", str(REPO_ROOT / "表情包"))
 EMOJI_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 MAX_EMOJI_BYTES = 8 * 1024 * 1024
 MAX_EMOJI_DISPLAY_EDGE = 180
-
-EMOJI_CATEGORY_ALIASES = {
-    "positive_neutral": ("positive_neutral", "positive", "neutral", "积极中立", "积极或中立", "积极", "中立"),
-    "negative": ("negative", "消极", "负面"),
-}
-
-LEGACY_CATEGORY_HINTS = {
-    "positive_neutral": ("开心", "高兴", "满意", "赞同", "思考", "想想", "犹豫", "分析", "无聊", "冷场", "平淡", "happy", "thinking", "bored"),
-    "negative": ("生气", "愤怒", "不满", "红温", "哭", "哭泣", "难过", "委屈", "遗憾", "angry", "sad"),
-}
 
 
 async def send_like(ctx: ToolContext, user_id: str = "", times: int = 1) -> str:
@@ -52,76 +44,63 @@ async def send_group_message(ctx: ToolContext, message: str, group_id: str = "")
     return "Sent group message to {0}.".format(target_group)
 
 
-def _safe_relative_path(base_dir: Path, path: Path) -> Optional[str]:
-    try:
-        resolved_base = base_dir.resolve()
-        resolved_path = path.resolve()
-        relative = resolved_path.relative_to(resolved_base)
-    except Exception:
-        return None
-    return str(relative)
+def _asset_to_dict(asset: EmojiAsset) -> Dict[str, object]:
+    return {
+        "name": asset.name,
+        "reactions": list(asset.reactions),
+        "intensities": list(asset.intensities),
+        "stances": list(asset.stances),
+        "topics": list(asset.topics),
+        "avoid_contexts": list(asset.avoid_contexts),
+        "weight": asset.weight,
+        "reviewed": asset.reviewed,
+        "category": asset.reactions[0] if asset.reactions else "approval",
+        "relative_path": asset.relative_path,
+        "path": asset.path,
+    }
 
 
-def list_emoji_assets(base_dir: str = "") -> List[Dict[str, str]]:
+def list_emoji_assets(base_dir: str = "") -> List[Dict[str, object]]:
     # The emoji tool is intentionally limited to this local whitelist
     # directory. The model never receives or controls arbitrary filesystem paths.
-    root = Path(base_dir or EMOJI_DIR)
-    if not root.exists() or not root.is_dir():
-        return []
-
-    assets = []
-    for path in sorted(root.rglob("*"), key=lambda item: str(item).lower()):
-        if not path.is_file() or path.suffix.lower() not in EMOJI_EXTENSIONS:
-            continue
-        relative = _safe_relative_path(root, path)
-        if relative is None:
-            continue
-        assets.append({
-            "name": path.stem,
-            "mood_hint": path.parent.name if path.parent != root else path.stem,
-            "category": _detect_emoji_category(root, path),
-            "relative_path": relative,
-            "path": str(path),
-        })
-    return assets
+    return [_asset_to_dict(asset) for asset in load_emoji_catalog(base_dir or EMOJI_DIR)]
 
 
-def _normalize_emoji_category(mood: str = "", emoji_name: str = "") -> str:
-    text = "{0} {1}".format(mood or "", emoji_name or "").strip().lower()
-    for category, aliases in EMOJI_CATEGORY_ALIASES.items():
-        if any(alias.lower() in text for alias in aliases):
-            return category
-    for category, aliases in LEGACY_CATEGORY_HINTS.items():
-        if any(alias.lower() in text for alias in aliases):
-            return category
-    return "positive_neutral"
-
-
-def _detect_emoji_category(root: Path, path: Path) -> str:
-    try:
-        parts = [part.lower() for part in path.resolve().relative_to(root.resolve()).parts]
-    except Exception:
-        parts = [path.name.lower()]
-    joined = " ".join(parts)
-    for category, aliases in EMOJI_CATEGORY_ALIASES.items():
-        if any(alias.lower() in joined for alias in aliases):
-            return category
-    for category, aliases in LEGACY_CATEGORY_HINTS.items():
-        if any(alias.lower() in joined for alias in aliases):
-            return category
-    return "positive_neutral"
-
-
-def choose_emoji_asset(mood: str = "", emoji_name: str = "", base_dir: str = "") -> Optional[Dict[str, str]]:
-    assets = list_emoji_assets(base_dir=base_dir)
+def choose_emoji_asset(
+    mood: str = "",
+    emoji_name: str = "",
+    base_dir: str = "",
+    reaction: str = "",
+    intensity: str = "medium",
+    stance: str = "shared_with_user",
+    topic: str = "general",
+    reason_code: str = "",
+    request_id: str = "",
+    group_id: str = "",
+) -> Optional[Dict[str, object]]:
+    assets = load_emoji_catalog(base_dir or EMOJI_DIR)
     if not assets:
         return None
 
-    category = _normalize_emoji_category(mood, emoji_name)
-    candidates = [asset for asset in assets if asset.get("category") == category]
-    if not candidates:
-        candidates = assets
-    return random.choice(candidates)
+    decision = EmojiReactionDecision(
+        reaction=reaction or "none",
+        intensity=intensity,
+        stance=stance,
+        topic=topic,
+        confidence=0.8,
+        reason_codes=[reason_code] if reason_code else [],
+    )
+    selected = select_emoji_asset(
+        assets,
+        decision,
+        group_id=group_id,
+        request_id=request_id,
+        explicit_emoji_name=emoji_name,
+        legacy_mood=mood,
+    )
+    if selected is None:
+        return None
+    return _asset_to_dict(selected)
 
 
 def _build_image_segment(image_bytes: bytes):
@@ -197,11 +176,31 @@ async def send_pending_mood_emojis(ctx: ToolContext) -> int:
     return sent
 
 
-async def send_mood_emoji(ctx: ToolContext, mood: str = "", reason: str = "", emoji_name: str = "") -> str:
+async def send_mood_emoji(
+    ctx: ToolContext,
+    reaction: str = "",
+    intensity: str = "medium",
+    stance: str = "shared_with_user",
+    topic: str = "general",
+    emoji_name: str = "",
+    reason_code: str = "",
+    mood: str = "",
+    reason: str = "",
+) -> str:
     if ctx.bot is None:
         return "当前没有可用 bot，无法发送表情。"
 
-    asset = choose_emoji_asset(mood=mood, emoji_name=emoji_name)
+    asset = choose_emoji_asset(
+        mood=mood,
+        emoji_name=emoji_name,
+        reaction=reaction,
+        intensity=intensity,
+        stance=stance,
+        topic=topic,
+        reason_code=reason_code,
+        request_id=str(getattr(ctx, "request_id", "") or ""),
+        group_id=ctx.group_id,
+    )
     if asset is None:
         return "没有找到可用表情包，请检查表情包目录。"
 
@@ -214,7 +213,8 @@ async def send_mood_emoji(ctx: ToolContext, mood: str = "", reason: str = "", em
     pending.append({"name": asset["name"], "path": str(path)})
     ctx.extra["pending_mood_emojis"] = pending
 
-    detail = "，理由：{0}".format(reason) if reason else ""
+    detail_text = reason or reason_code
+    detail = "，理由：{0}".format(detail_text) if detail_text else ""
     return (
         "已准备在主回复之后向当前群 {0} 发送表情：{1}{2}。"
         "如果这个表情已经完整表达回复，最终只输出 [NO_REPLY]，不要再补充文字。"
@@ -257,27 +257,47 @@ def register_tools() -> None:
     ensure_tool(ToolSpec(
         name="send_mood_emoji",
         description=(
-            "根据当前回复的情绪分类，从本地表情包白名单中随机选择并发送一个表情到当前会话。"
+            "根据当前回复的反应意图，从本地表情包白名单中选择并发送一个表情到当前会话。"
             "只能发送表情包目录内的图片，不能指定其他群或任意文件路径。"
-            "mood 只使用 positive_neutral 或 negative；开心、无聊、思考归为 positive_neutral，生气、哭泣归为 negative。"
+            "优先使用 reaction/intensity/stance/topic；mood 仅用于兼容旧参数。"
         ),
         parameters={
             "type": "object",
             "properties": {
+                "reaction": {
+                    "type": "string",
+                    "description": "反应类型，例如 celebration、approval、amused、skeptical、frustrated、sad；不确定可留空",
+                },
+                "intensity": {
+                    "type": "string",
+                    "description": "强度：low、medium、high",
+                },
+                "stance": {
+                    "type": "string",
+                    "description": "立场：shared_with_user、toward_user、toward_event、toward_claim",
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "主题：general、football、football_news、meme、injury、transfer、match 等",
+                },
                 "mood": {
                     "type": "string",
-                    "description": "回复情绪分类，只填 positive_neutral 或 negative",
+                    "description": "兼容旧参数：positive_neutral 或 negative；新调用不要主动填写",
                 },
                 "emoji_name": {
                     "type": "string",
-                    "description": "兼容旧参数，可留空；实际会按 mood 分类目录随机选择",
+                    "description": "可选：指定白名单内的表情素材名；不能是路径",
+                },
+                "reason_code": {
+                    "type": "string",
+                    "description": "可选：规则原因码，trace 只记录参数名",
                 },
                 "reason": {
                     "type": "string",
-                    "description": "可选：为什么此时适合发表情，简短填写，trace 只记录参数名",
+                    "description": "兼容旧参数：为什么此时适合发表情，简短填写",
                 },
             },
-            "required": ["mood"],
+            "required": [],
         },
         handler=send_mood_emoji,
         permission="safe_write",

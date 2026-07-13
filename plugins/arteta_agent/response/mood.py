@@ -1,12 +1,17 @@
 import json
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 from ..context import ToolContext
+from ..emoji.catalog import load_emoji_catalog
+from ..emoji.classifier import classify_emoji_reaction
+from ..emoji.gate import (
+    decide_emoji_gate,
+    user_explicitly_requested_emoji_text,
+)
+from ..emoji.history import record_emoji_send
+from ..emoji.models import EmojiGateContext, EmojiReactionDecision
 from ..runtime.state import AgentState, FinalizedResponse
-
-
-_MOOD_EMOJI_HISTORY = {}
-_MOOD_EMOJI_COOLDOWN_WINDOW = 3
+from .style import detect_response_style_profile
 
 
 def latest_user_content(messages) -> str:
@@ -39,106 +44,111 @@ def trace_has_any_tool(trace, tool_names) -> bool:
 
 
 def should_allow_forced_mood_emoji(messages, trace) -> bool:
-    # Policy/trace/debug answers are operational diagnostics, not emotional
-    # chat replies. Auto-emoji here makes the agent appear to ignore policy.
-    if trace_has_any_tool(trace, {
-        "show_behavior_policy",
-        "update_behavior_policy",
-        "show_agent_trace",
-    }):
-        return False
-    text = latest_user_content(messages)
-    if any(marker in text for marker in ("行为策略", "当前策略", "策略", "trace", "调度", "调用了什么工具")):
-        return False
-    if any(marker in text for marker in ("最新", "官宣", "伤情", "伤病", "转会", "积分榜", "核实", "来源", "报错", "权限")):
-        return False
-    return True
+    user_text = latest_user_content(messages)
+    profile = detect_response_style_profile(user_text)
+    gate = decide_emoji_gate(EmojiGateContext(
+        user_text=user_text,
+        assistant_text="placeholder",
+        group_id="",
+        profile=profile,
+        trace=trace,
+        has_assets=True,
+    ))
+    return gate.should_send
 
 
 def user_explicitly_requested_emoji(messages) -> bool:
-    text = latest_user_content(messages).replace(" ", "").lower()
-    return any(marker in text for marker in (
-        "发表情",
-        "发个表情",
-        "来个表情",
-        "开心表情",
-        "庆祝一下",
-        "发图",
-    ))
+    return user_explicitly_requested_emoji_text(latest_user_content(messages))
 
 
-def _recent_auto_emoji_saturated(group_id: str) -> bool:
-    history = list(_MOOD_EMOJI_HISTORY.get(str(group_id or ""), []))
-    if len(history) < _MOOD_EMOJI_COOLDOWN_WINDOW:
+def _default_explicit_reaction() -> EmojiReactionDecision:
+    return EmojiReactionDecision(
+        reaction="approval",
+        intensity="medium",
+        stance="shared_with_user",
+        topic="general",
+        confidence=0.85,
+        reason_codes=["explicit_request_default"],
+    )
+
+
+def _reaction_args(decision: EmojiReactionDecision) -> dict:
+    reason_code = ""
+    if decision.reason_codes:
+        reason_code = str(decision.reason_codes[0])
+    return {
+        "reaction": decision.reaction,
+        "intensity": decision.intensity,
+        "stance": decision.stance,
+        "topic": decision.topic,
+        "emoji_name": "",
+        "reason_code": reason_code,
+    }
+
+
+def _emoji_assets_available() -> bool:
+    try:
+        from ..tools.qq_actions import EMOJI_DIR
+
+        return bool(load_emoji_catalog(EMOJI_DIR))
+    except Exception:
         return False
-    return all(history[-_MOOD_EMOJI_COOLDOWN_WINDOW:])
 
 
-def _record_mood_emoji_result(group_id: str, sent: bool) -> None:
-    key = str(group_id or "")
-    history = list(_MOOD_EMOJI_HISTORY.get(key, []))
-    history.append(bool(sent))
-    _MOOD_EMOJI_HISTORY[key] = history[-_MOOD_EMOJI_COOLDOWN_WINDOW:]
+def _build_gate_context(
+    messages,
+    assistant_content: str,
+    group_id: str = "",
+    trace=None,
+    emoji_enabled: bool = True,
+    tool_disabled: bool = False,
+    has_assets: bool = True,
+    current_information_required: bool = False,
+    route_hint: str = "",
+) -> EmojiGateContext:
+    user_text = latest_user_content(messages)
+    profile = detect_response_style_profile(
+        user_text,
+        route_hint=route_hint,
+        current_information_required=current_information_required,
+    )
+    return EmojiGateContext(
+        user_text=user_text,
+        assistant_text=assistant_content,
+        group_id=str(group_id or ""),
+        profile=profile,
+        trace=trace,
+        route_hint=route_hint,
+        emoji_enabled=emoji_enabled,
+        tool_disabled=tool_disabled,
+        has_assets=has_assets,
+        current_information_required=current_information_required,
+    )
 
 
 def detect_forced_mood_emoji_args(messages, assistant_content: str = "") -> dict:
-    user_text = latest_user_content(messages).strip()
-    if not user_text:
-        return {}
-    content = (assistant_content or "").strip()
-    if not content or content == "[NO_REPLY]" or content.startswith("[PermissionRequired]"):
-        return {}
-    compact = (user_text + "\n" + (assistant_content or "")).replace(" ", "").lower()
-    if any(marker in compact for marker in ("不要发表情", "别发表情", "不用表情", "不要发图", "别发图")):
-        return {}
-    explicit_emoji = user_explicitly_requested_emoji(messages)
-
-    negative_markers = (
-        "sb",
-        "傻逼",
-        "傻b",
-        "傻叉",
-        "你是傻",
-        "废物",
-        "垃圾",
-        "滚",
-        "烂",
-        "stupid",
-        "idiot",
-        "fuck",
-        "痛苦",
-        "难过",
-        "哭",
-        "崩溃",
-        "遗憾",
-        "输麻",
-        "淘汰了",
-        "被淘汰",
+    context = _build_gate_context(
+        messages,
+        assistant_content,
+        has_assets=True,
     )
+    gate = decide_emoji_gate(context)
+    if not gate.should_send:
+        return {}
 
-    if any(marker in compact for marker in negative_markers):
-        return {
-            "mood": "negative",
-            "emoji_name": "",
-            "reason": "检测到消极情绪，补发表情。",
-        }
-    positive_markers = (
-        "赢了",
-        "庆祝",
-        "太爽",
-        "爽了",
-        "开心",
-        "笑死",
-        "起飞",
-        "牛逼",
+    decision = classify_emoji_reaction(
+        user_text=context.user_text,
+        assistant_text=assistant_content,
+        response_mode=str(getattr(context.profile, "mode", "") or ""),
+        route_hint=context.route_hint,
     )
-    if explicit_emoji or any(marker in compact for marker in positive_markers):
-        return {
-            "mood": "positive_neutral",
-            "emoji_name": "",
-            "reason": "检测到显式请求或强烈积极情绪，补发表情。",
-        }
-    return {}
+    if gate.explicit_request and decision.reaction == "none":
+        decision = _default_explicit_reaction()
+    if decision.reaction == "none":
+        return {}
+    if not gate.explicit_request and decision.confidence < 0.75:
+        return {}
+    return _reaction_args(decision)
 
 
 async def maybe_send_mood_emoji(
@@ -148,35 +158,65 @@ async def maybe_send_mood_emoji(
     execute_tool_call: Callable[[dict, ToolContext], Awaitable[str]],
     emoji_enabled: Callable[[str], bool],
 ) -> FinalizedResponse:
-    forced_emoji_args = detect_forced_mood_emoji_args(runtime_state.messages, content)
     group_id = runtime_state.ctx.group_id
-    explicit_emoji = user_explicitly_requested_emoji(runtime_state.messages)
-    if forced_emoji_args and not explicit_emoji and _recent_auto_emoji_saturated(group_id):
-        _record_mood_emoji_result(group_id, False)
-        return FinalizedResponse(content, 0)
     if (
-        forced_emoji_args
-        and get_tool("send_mood_emoji")
-        and should_allow_forced_mood_emoji(runtime_state.messages, runtime_state.trace)
-        and emoji_enabled(runtime_state.ctx.group_id)
-        and "send_mood_emoji" not in set(runtime_state.policy_disabled_tools or set())
-        and not state_has_tool_call(runtime_state.messages, "send_mood_emoji")
-        and not trace_has_tool(runtime_state.trace, "send_mood_emoji")
+        not get_tool("send_mood_emoji")
+        or state_has_tool_call(runtime_state.messages, "send_mood_emoji")
+        or trace_has_tool(runtime_state.trace, "send_mood_emoji")
     ):
-        emoji_call = {
-            "id": "forced-send-mood-emoji-1",
-            "type": "function",
-            "function": {
-                "name": "send_mood_emoji",
-                "arguments": json.dumps(forced_emoji_args, ensure_ascii=False),
-            },
-        }
-        try:
-            await execute_tool_call(emoji_call, runtime_state.ctx)
-        except Exception:
-            _record_mood_emoji_result(group_id, False)
-            return FinalizedResponse(content, 0)
-        _record_mood_emoji_result(group_id, True)
-        return FinalizedResponse(content, 1)
-    _record_mood_emoji_result(group_id, False)
-    return FinalizedResponse(content, 0)
+        return FinalizedResponse(content, 0)
+
+    tool_disabled = "send_mood_emoji" in set(runtime_state.policy_disabled_tools or set())
+    context = _build_gate_context(
+        runtime_state.messages,
+        content,
+        group_id=group_id,
+        trace=runtime_state.trace,
+        emoji_enabled=emoji_enabled(group_id),
+        tool_disabled=tool_disabled,
+        has_assets=_emoji_assets_available(),
+        current_information_required=runtime_state.requires_current_information,
+        route_hint=runtime_state.freshness_mode,
+    )
+    gate = decide_emoji_gate(context)
+    if not gate.should_send:
+        return FinalizedResponse(content, 0)
+
+    decision = classify_emoji_reaction(
+        user_text=context.user_text,
+        assistant_text=content,
+        response_mode=str(getattr(context.profile, "mode", "") or ""),
+        route_hint=context.route_hint,
+    )
+    if gate.explicit_request and decision.reaction == "none":
+        decision = _default_explicit_reaction()
+    if decision.reaction == "none":
+        return FinalizedResponse(content, 0)
+    if not gate.explicit_request and decision.confidence < 0.75:
+        return FinalizedResponse(content, 0)
+
+    emoji_call = {
+        "id": "forced-send-mood-emoji-1",
+        "type": "function",
+        "function": {
+            "name": "send_mood_emoji",
+            "arguments": json.dumps(_reaction_args(decision), ensure_ascii=False),
+        },
+    }
+    before_pending_count = len((runtime_state.ctx.extra or {}).get("pending_mood_emojis") or [])
+    try:
+        await execute_tool_call(emoji_call, runtime_state.ctx)
+    except Exception:
+        return FinalizedResponse(content, 0)
+
+    pending = list((runtime_state.ctx.extra or {}).get("pending_mood_emojis") or [])
+    asset_name = ""
+    if len(pending) > before_pending_count:
+        asset_name = str((pending[-1] or {}).get("name") or "")
+    record_emoji_send(
+        group_id,
+        asset_name,
+        decision.reaction,
+        automatic=not gate.explicit_request,
+    )
+    return FinalizedResponse(content, 1)

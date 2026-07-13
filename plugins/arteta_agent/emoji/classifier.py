@@ -93,10 +93,10 @@ RULES = (
     },
     {
         "reaction": "frustrated",
-        "markers": ("被绝平", "裁判", "红温", "气死", "愤怒", "不满", "扳平"),
+        "markers": ("sb", "傻逼", "傻b", "傻叉", "废物", "垃圾", "滚", "被绝平", "裁判", "红温", "气死", "愤怒", "不满", "扳平"),
         "intensity": "high",
         "stance": "shared_with_user",
-        "topic": "match",
+        "topic": "general",
         "reason": "frustrated_marker",
     },
     {

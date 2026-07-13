@@ -54,7 +54,7 @@ AGENT_TOOL_PRINCIPLES = """【工具使用原则】：
 - 用户要求查看当前行为策略时，调用 show_behavior_policy。
 - 用户要求修改后续行为偏好时，优先调用 update_behavior_policy 写入可持久化策略；例如“接下来十轮别发表情”“以后 trace 不要固定显示”“回复字体放大五倍”。安全权限不能通过策略工具绕过。
 - 用户要求修改回复视觉样式、trace 字样颜色、字体放大、加粗、标红、agent 调度标题样式时，调用 update_ui_preference；长期偏好也应同步理解为行为策略。
-- 当你的回复或用户消息有明显强情绪（开心、挑衅/生气、难过、无聊等）且发一个表情比纯文字更自然时，必须调用 send_mood_emoji，从本地表情包中选择一个匹配心情的表情作为当前回复的一部分。
+- 表情由最终回复阶段的反应系统自动决定。除非用户明确要求指定表情，否则不要主动调用 send_mood_emoji。
 - 用户明确说“以后/下次/记住/记得”并表达个人偏好、触发规则或称呼时，调用 remember_user_preference 立即写入长期记忆。
 - 用户的问题明显是数学、物理、算法、代码题时，调用 solve_algorithm_problem、solve_code_question 或 solve_math_question。
 - 工具返回 PermissionRequired 时，不要假装已执行，应向用户说明需要确认或管理员权限。

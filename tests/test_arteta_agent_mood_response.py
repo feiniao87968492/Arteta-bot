@@ -1,8 +1,12 @@
 import asyncio
+import json
+import pytest
 
 from plugins.arteta_agent.context import ToolContext
 from plugins.arteta_agent.response.mood import maybe_send_mood_emoji
+from plugins.arteta_agent.response import mood as mood_module
 from plugins.arteta_agent.runtime.state import AgentState, FinalizedResponse
+from plugins.arteta_agent.emoji.history import reset_emoji_history_for_tests
 
 
 def make_runtime_state(messages, trace=None, policy_disabled_tools=None, group_id="group-1"):
@@ -23,7 +27,13 @@ def make_runtime_state(messages, trace=None, policy_disabled_tools=None, group_i
     )
 
 
-def test_mood_finalizer_sends_negative_emoji_when_reply_skips_tool():
+@pytest.fixture(autouse=True)
+def reset_mood_emoji_state(monkeypatch):
+    reset_emoji_history_for_tests()
+    monkeypatch.setattr(mood_module, "_emoji_assets_available", lambda: True)
+
+
+def test_mood_finalizer_sends_reaction_emoji_when_reply_skips_tool():
     calls = []
     state = make_runtime_state([
         {"role": "user", "content": "塔子你是sb吗"},
@@ -43,7 +53,9 @@ def test_mood_finalizer_sends_negative_emoji_when_reply_skips_tool():
 
     assert result == FinalizedResponse("保持尊重。", 1)
     assert calls[0][0]["function"]["name"] == "send_mood_emoji"
-    assert '"mood": "negative"' in calls[0][0]["function"]["arguments"]
+    args = json.loads(calls[0][0]["function"]["arguments"])
+    assert args["reaction"] == "frustrated"
+    assert "mood" not in args
     assert calls[0][1] == "group-1"
 
 
@@ -89,10 +101,13 @@ def test_mood_finalizer_sends_positive_emoji_for_explicit_request():
 
     assert result == FinalizedResponse("今天气氛不错。", 1)
     assert calls[0]["function"]["name"] == "send_mood_emoji"
-    assert '"mood": "positive_neutral"' in calls[0]["function"]["arguments"]
+    args = json.loads(calls[0]["function"]["arguments"])
+    assert args["reaction"] == "approval"
+    assert "mood" not in args
 
 
 def test_mood_finalizer_cooldown_skips_auto_emoji_but_not_explicit_request():
+    reset_emoji_history_for_tests()
     calls = []
     group_id = "cooldown-group"
 
@@ -100,7 +115,7 @@ def test_mood_finalizer_cooldown_skips_auto_emoji_but_not_explicit_request():
         calls.append(tool_call)
         return "emoji sent"
 
-    for index in range(3):
+    for index in range(2):
         state = make_runtime_state([
             {"role": "user", "content": "赢了！太爽了！"},
         ], group_id=group_id)

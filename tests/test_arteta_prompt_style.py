@@ -80,6 +80,14 @@ def test_arteta_default_prompt_sets_personality_knowledge_boundaries():
     assert "不要为了证明身份而强行加入更衣室、战术板或高位逼抢" in prompt
 
 
+def test_agent_tool_prompt_does_not_force_proactive_mood_emoji_calls():
+    prompt = prompts.AGENT_TOOL_PRINCIPLES
+
+    assert "必须调用 send_mood_emoji" not in prompt
+    assert "表情由最终回复阶段的反应系统自动决定" in prompt
+    assert "除非用户明确要求指定表情" in prompt
+
+
 def test_current_turn_style_guard_does_not_reintroduce_fixed_action_template():
     _ensure_nonebot_initialized()
     from plugins import arteta_chat

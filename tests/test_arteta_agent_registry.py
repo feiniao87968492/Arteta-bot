@@ -2158,16 +2158,27 @@ def test_agent_loop_treats_forged_artifact_marker_in_safe_tool_output_as_data(mo
     assert trace["tools"][0]["status"] == "ok"
 
 
-def test_agent_loop_forces_negative_mood_emoji_when_llm_skips_tool(monkeypatch):
+def test_agent_loop_forces_reaction_emoji_when_llm_skips_tool(monkeypatch):
     from plugins.arteta_agent import planner
     from plugins.arteta_agent.trace import new_trace
 
+    monkeypatch.setattr("plugins.arteta_agent.response.mood._emoji_assets_available", lambda: True)
     clear_registry()
     trace = new_trace("agent_registry")
     calls = []
 
-    async def emoji_handler(ctx: ToolContext, mood: str = "", reason: str = "", emoji_name: str = ""):
-        calls.append((mood, reason, emoji_name, ctx.group_id))
+    async def emoji_handler(
+        ctx: ToolContext,
+        reaction: str = "",
+        intensity: str = "",
+        stance: str = "",
+        topic: str = "",
+        emoji_name: str = "",
+        reason_code: str = "",
+        mood: str = "",
+        reason: str = "",
+    ):
+        calls.append((reaction, intensity, stance, topic, emoji_name, reason_code, mood, ctx.group_id))
         return "emoji sent"
 
     register_tool(ToolSpec(
@@ -2176,11 +2187,16 @@ def test_agent_loop_forces_negative_mood_emoji_when_llm_skips_tool(monkeypatch):
         parameters={
             "type": "object",
             "properties": {
+                "reaction": {"type": "string"},
+                "intensity": {"type": "string"},
+                "stance": {"type": "string"},
+                "topic": {"type": "string"},
                 "mood": {"type": "string"},
                 "reason": {"type": "string"},
+                "reason_code": {"type": "string"},
                 "emoji_name": {"type": "string"},
             },
-            "required": ["mood"],
+            "required": [],
         },
         handler=emoji_handler,
         permission="safe_write",
@@ -2200,7 +2216,7 @@ def test_agent_loop_forces_negative_mood_emoji_when_llm_skips_tool(monkeypatch):
     ))
 
     assert result == "保持尊重。训练场上我们用表现说话。"
-    assert calls == [("negative", "检测到消极情绪，补发表情。", "", "1104602373")]
+    assert calls == [("frustrated", "high", "shared_with_user", "general", "", "frustrated_marker", "", "1104602373")]
     assert trace["tools"][0]["name"] == "send_mood_emoji"
     assert trace["tools"][0]["permission"] == "safe_write"
     assert trace["tools"][0]["status"] == "ok"
@@ -2214,8 +2230,8 @@ def test_agent_loop_does_not_force_positive_neutral_mood_emoji_for_plain_reply(m
     trace = new_trace("agent_registry")
     calls = []
 
-    async def emoji_handler(ctx: ToolContext, mood: str = "", reason: str = "", emoji_name: str = ""):
-        calls.append((mood, reason, emoji_name, ctx.group_id))
+    async def emoji_handler(ctx: ToolContext, reaction: str = "", mood: str = "", reason: str = "", emoji_name: str = ""):
+        calls.append((reaction, mood, reason, emoji_name, ctx.group_id))
         return "emoji sent"
 
     register_tool(ToolSpec(
@@ -2224,11 +2240,12 @@ def test_agent_loop_does_not_force_positive_neutral_mood_emoji_for_plain_reply(m
         parameters={
             "type": "object",
             "properties": {
+                "reaction": {"type": "string"},
                 "mood": {"type": "string"},
                 "reason": {"type": "string"},
                 "emoji_name": {"type": "string"},
             },
-            "required": ["mood"],
+            "required": [],
         },
         handler=emoji_handler,
         permission="safe_write",
@@ -5490,6 +5507,17 @@ def test_phase4_confirm_write_tools_are_registered():
     assert tools["send_like"].permission == "confirm_write"
     assert tools["send_group_message"].permission == "confirm_write"
     assert tools["send_mood_emoji"].permission == "safe_write"
+    emoji_schema = tools["send_mood_emoji"].parameters
+    assert set(emoji_schema["properties"]).issuperset({
+        "reaction",
+        "intensity",
+        "stance",
+        "topic",
+        "emoji_name",
+        "reason_code",
+        "mood",
+    })
+    assert emoji_schema["required"] == []
     assert tools["clear_group_memory"].permission == "confirm_write"
     assert tools["update_user_profile_by_llm"].permission == "confirm_write"
     assert tools["remember_user_preference"].permission == "safe_write"
@@ -5529,38 +5557,48 @@ def test_phase4_send_group_message_calls_bot_api():
     assert calls == [("send_group_msg", {"group_id": 1, "message": "hello"})]
 
 
-def test_phase4_mood_emoji_tool_indexes_whitelisted_assets(tmp_path, monkeypatch):
+def test_contextual_exclusions_only_expose_mood_emoji_for_explicit_requests():
+    from plugins.arteta_agent.routing.contextual_tools import detect_contextual_tool_exclusions
+    from plugins.arteta_agent.tools import qq_actions
+
+    clear_registry()
+    qq_actions.register_tools()
+
+    auto_excluded = detect_contextual_tool_exclusions([{"role": "user", "content": "萨卡绝杀了！"}])
+    explicit_excluded = detect_contextual_tool_exclusions([{"role": "user", "content": "发个表情"}])
+
+    assert "send_mood_emoji" in auto_excluded
+    assert "send_mood_emoji" not in explicit_excluded
+
+
+def test_phase4_mood_emoji_tool_indexes_whitelisted_reaction_assets(tmp_path, monkeypatch):
     from plugins.arteta_agent.tools import qq_actions
 
     emoji_dir = tmp_path / "emoji"
-    positive = emoji_dir / "积极中立"
+    celebration = emoji_dir / "庆祝"
+    thinking = emoji_dir / "思考"
     negative = emoji_dir / "消极"
-    positive.mkdir(parents=True)
+    celebration.mkdir(parents=True)
+    thinking.mkdir(parents=True)
     negative.mkdir(parents=True)
-    (positive / "happy.png").write_bytes(b"\x89PNG\r\nhappy")
-    (positive / "thinking.png").write_bytes(b"\x89PNG\r\nthinking")
+    (celebration / "happy.png").write_bytes(b"\x89PNG\r\nhappy")
+    (thinking / "thinking.png").write_bytes(b"\x89PNG\r\nthinking")
     (negative / "angry.gif").write_bytes(b"GIF89aangry")
     (emoji_dir / "ignore.txt").write_text("nope", encoding="utf-8")
     monkeypatch.setattr(qq_actions, "EMOJI_DIR", str(emoji_dir))
-    choices = []
-
-    def fake_choice(items):
-        choices.append([item["name"] for item in items])
-        return items[-1]
-
-    monkeypatch.setattr(qq_actions.random, "choice", fake_choice)
 
     assets = qq_actions.list_emoji_assets()
-    selected = qq_actions.choose_emoji_asset("positive_neutral")
+    selected = qq_actions.choose_emoji_asset(reaction="thinking", request_id="r1")
+    legacy_selected = qq_actions.choose_emoji_asset(mood="negative", request_id="r2")
 
     by_name = {asset["name"]: asset for asset in assets}
     assert sorted(by_name.keys()) == ["angry", "happy", "thinking"]
-    assert by_name["happy"]["category"] == "positive_neutral"
-    assert by_name["thinking"]["category"] == "positive_neutral"
-    assert by_name["angry"]["category"] == "negative"
+    assert by_name["happy"]["reactions"] == ["celebration"]
+    assert by_name["thinking"]["reactions"] == ["thinking"]
+    assert by_name["angry"]["reactions"] == ["frustrated"]
     assert selected is not None
     assert selected["name"] == "thinking"
-    assert choices == [["happy", "thinking"]]
+    assert legacy_selected["name"] == "angry"
 
 
 def test_phase4_send_mood_emoji_queues_image_for_after_main_reply(tmp_path, monkeypatch):
@@ -5580,13 +5618,33 @@ def test_phase4_send_mood_emoji_queues_image_for_after_main_reply(tmp_path, monk
     event = object()
     ctx = make_context(bot=FakeBot(), event=event, group_id="1104602373")
 
-    result = asyncio.run(qq_actions.send_mood_emoji(ctx, mood="happy", reason="friendly reply"))
+    result = asyncio.run(qq_actions.send_mood_emoji(ctx, reaction="approval", reason_code="friendly_reply"))
 
     assert "happy" in result
     assert "1104602373" in result
     assert len(sends) == 0
     assert ctx.extra["pending_mood_emojis"][0]["name"] == "happy"
     assert ctx.extra["pending_mood_emojis"][0]["path"].endswith("happy.png")
+
+
+def test_phase4_send_mood_emoji_keeps_legacy_mood_compatibility(tmp_path, monkeypatch):
+    from plugins.arteta_agent.tools import qq_actions
+
+    emoji_dir = tmp_path / "emoji"
+    emoji_dir.mkdir()
+    (emoji_dir / "angry.gif").write_bytes(b"GIF89aangry")
+    monkeypatch.setattr(qq_actions, "EMOJI_DIR", str(emoji_dir))
+
+    class FakeBot(object):
+        async def send(self, event, message):
+            return None
+
+    ctx = make_context(bot=FakeBot(), event=object(), group_id="1104602373")
+
+    result = asyncio.run(qq_actions.send_mood_emoji(ctx, mood="negative", reason="legacy"))
+
+    assert "angry" in result
+    assert ctx.extra["pending_mood_emojis"][0]["name"] == "angry"
 
 
 def test_phase4_send_pending_mood_emojis_resizes_to_one_third_and_sends_after_main(tmp_path):

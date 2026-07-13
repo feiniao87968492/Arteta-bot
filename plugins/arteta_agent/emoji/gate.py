@@ -51,6 +51,13 @@ OPERATIONAL_TRACE_TOOLS = (
 )
 
 HIGH_SIGNAL_MARKERS = (
+    "sb",
+    "傻逼",
+    "傻b",
+    "傻叉",
+    "废物",
+    "垃圾",
+    "滚",
     "绝杀",
     "赢了",
     "起飞",
@@ -146,7 +153,7 @@ def decide_emoji_gate(context: EmojiGateContext) -> EmojiGateDecision:
 
     if not reason_codes:
         return _deny("low_signal")
-    if not profile_allows and profile_mode != "meme":
+    if not profile_allows and profile_mode != "meme" and "high_social_signal" not in reason_codes:
         return _deny("style_disallows_auto")
     if automatic_cooldown_active(context.group_id):
         return _deny("auto_cooldown")

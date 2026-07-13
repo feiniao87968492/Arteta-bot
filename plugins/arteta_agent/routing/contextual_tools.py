@@ -135,6 +135,10 @@ POLICY_INTENT_MARKERS = (
 )
 ACTION_INTENT_MARKERS = (
     "发表情",
+    "发个表情",
+    "来个表情",
+    "用表情回应",
+    "发个开心的",
     "点赞",
     "赞我",
     "撤回",
