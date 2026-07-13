@@ -174,6 +174,7 @@ Reason: the local environment can deploy and run remote smoke tests, but it cann
 Use `Docs/dev/personality-response-manual-evidence.md` as the required evidence table for the remaining live QQ observations. The goal should not be marked fully complete until that table is filled from real post-deployment QQ replies and operator-provided before/after screenshots, and this command passes:
 
 ```powershell
+python tools\build_personality_manual_evidence.py --init-dir artifacts\personality_manual
 python tools\build_personality_manual_evidence.py --samples-csv artifacts\personality_manual\samples.csv --before-after-csv artifacts\personality_manual\before_after.csv --output Docs\dev\personality-response-manual-evidence.md
 python tools\validate_personality_manual_evidence.py
 python tools\verify_features.py --suite personality_manual

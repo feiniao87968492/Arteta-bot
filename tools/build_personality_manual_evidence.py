@@ -1,5 +1,6 @@
 import argparse
 import csv
+import os
 import sys
 from datetime import date
 from typing import Dict, List, Optional
@@ -30,6 +31,29 @@ BEFORE_AFTER_COLUMNS = [
     "notes",
 ]
 
+SAMPLE_TEMPLATE_CATEGORIES = [
+    "daily chat",
+    "daily chat",
+    "daily chat",
+    "meme/image",
+    "meme/image",
+    "football opinion",
+    "football opinion",
+    "latest news",
+    "latest news",
+    "tactical deep dive",
+    "tactical deep dive",
+    "Trace query",
+]
+
+BEFORE_AFTER_TEMPLATE_ITEMS = [
+    "Short plain reply",
+    "Meme/image reply",
+    "Long tactical reply",
+    "Current news reply",
+    "Explicit Trace query",
+]
+
 
 def _read_csv(path: str, required_columns: List[str]) -> List[Dict[str, str]]:
     with open(path, "r", encoding="utf-8-sig", newline="") as handle:
@@ -39,6 +63,40 @@ def _read_csv(path: str, required_columns: List[str]) -> List[Dict[str, str]]:
         if missing:
             raise ValueError("{0} missing column(s): {1}".format(path, ", ".join(missing)))
         return [{column: row.get(column, "") for column in required_columns} for row in reader]
+
+
+def _write_csv(path: str, columns: List[str], rows: List[Dict[str, str]]) -> None:
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent and not os.path.exists(parent):
+        os.makedirs(parent)
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns, lineterminator="\n")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({column: row.get(column, "") for column in columns})
+
+
+def write_template_csvs(output_dir: str) -> Dict[str, str]:
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    samples_path = os.path.join(output_dir, "samples.csv")
+    before_after_path = os.path.join(output_dir, "before_after.csv")
+    sample_rows = []
+    for category in SAMPLE_TEMPLATE_CATEGORIES:
+        row = {column: "" for column in SAMPLE_COLUMNS}
+        row["category"] = category
+        sample_rows.append(row)
+    before_after_rows = []
+    for item in BEFORE_AFTER_TEMPLATE_ITEMS:
+        row = {column: "" for column in BEFORE_AFTER_COLUMNS}
+        row["item"] = item
+        before_after_rows.append(row)
+    _write_csv(samples_path, SAMPLE_COLUMNS, sample_rows)
+    _write_csv(before_after_path, BEFORE_AFTER_COLUMNS, before_after_rows)
+    return {
+        "samples_csv": os.path.abspath(samples_path),
+        "before_after_csv": os.path.abspath(before_after_path),
+    }
 
 
 def _cell(value: object) -> str:
@@ -159,10 +217,19 @@ Both commands must pass before the manual acceptance item can be treated as comp
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Build Arteta personality manual evidence Markdown from CSV files.")
-    parser.add_argument("--samples-csv", required=True, help="CSV containing the 12 live QQ sample rows.")
-    parser.add_argument("--before-after-csv", required=True, help="CSV containing before/after screenshot rows.")
-    parser.add_argument("--output", required=True, help="Markdown output path.")
+    parser.add_argument("--init-dir", help="Write blank samples.csv and before_after.csv templates to this directory.")
+    parser.add_argument("--samples-csv", help="CSV containing the 12 live QQ sample rows.")
+    parser.add_argument("--before-after-csv", help="CSV containing before/after screenshot rows.")
+    parser.add_argument("--output", help="Markdown output path.")
     args = parser.parse_args(argv)
+
+    if args.init_dir:
+        paths = write_template_csvs(args.init_dir)
+        print("samples_csv={0}".format(paths["samples_csv"]))
+        print("before_after_csv={0}".format(paths["before_after_csv"]))
+        return 0
+    if not args.samples_csv or not args.before_after_csv or not args.output:
+        parser.error("--samples-csv, --before-after-csv, and --output are required unless --init-dir is used")
 
     markdown = build_manual_evidence_markdown(args.samples_csv, args.before_after_csv)
     with open(args.output, "w", encoding="utf-8") as handle:

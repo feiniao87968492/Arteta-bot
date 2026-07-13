@@ -5355,3 +5355,39 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 ### Remaining
 
 - Operator still needs to provide real QQ evidence and screenshot files. The builder only reduces formatting errors; it does not create acceptance evidence.
+
+## 2026-07-13 Personality Response Manual Evidence CSV Templates
+
+### Scope
+
+- Added CSV template generation so operators do not need to manually construct the two required CSV headers or category rows.
+- Kept the generated CSV files under `artifacts/personality_manual/`, which remains ignored by Git.
+
+### Changes
+
+- Added `write_template_csvs(...)` to `tools/build_personality_manual_evidence.py`.
+- Added CLI support:
+  - `python tools\build_personality_manual_evidence.py --init-dir artifacts\personality_manual`
+- Extended `tests/test_personality_manual_evidence.py` to assert the generated templates contain:
+  - required headers;
+  - 12 sample rows with required category counts;
+  - 5 before/after rows.
+- Updated manual evidence and acceptance docs with the template initialization command.
+
+### RED/GREEN Verification
+
+- RED:
+  - `python -m pytest tests\test_personality_manual_evidence.py::test_manual_evidence_builder_writes_blank_csv_templates -q`
+  - Result before implementation: failed because `write_template_csvs` did not exist.
+- GREEN:
+  - `python -m pytest tests\test_personality_manual_evidence.py -q`
+  - Result: `4 passed`.
+  - `python tools\build_personality_manual_evidence.py --init-dir <temp-dir>`
+  - Result: created `samples.csv` and `before_after.csv`.
+  - `python -m py_compile tools\build_personality_manual_evidence.py tests\test_personality_manual_evidence.py`
+  - Result: passed.
+
+### Remaining
+
+- The templates still need to be filled with real QQ observations and screenshot paths.
+- Final acceptance still requires `python tools\verify_features.py --suite personality_manual` to exit `0`.

@@ -59,7 +59,13 @@ The task plan also asks for visual before/after evidence. Because old production
 
 ## Validation Command
 
-If you prefer filling CSV files first, generate this Markdown file with:
+If you prefer filling CSV files first, initialize the CSV templates with:
+
+```powershell
+python tools\build_personality_manual_evidence.py --init-dir artifacts\personality_manual
+```
+
+After filling those CSV files with real QQ observations and screenshot paths, generate this Markdown file with:
 
 ```powershell
 python tools\build_personality_manual_evidence.py --samples-csv artifacts\personality_manual\samples.csv --before-after-csv artifacts\personality_manual\before_after.csv --output Docs\dev\personality-response-manual-evidence.md

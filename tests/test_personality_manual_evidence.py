@@ -163,3 +163,26 @@ def test_manual_evidence_builder_generates_validator_compatible_markdown(tmp_pat
 
     assert result["ok"] is True
     assert "Do not fill this table with generated fixture output" in markdown
+
+
+def test_manual_evidence_builder_writes_blank_csv_templates(tmp_path):
+    from tools.build_personality_manual_evidence import write_template_csvs
+
+    paths = write_template_csvs(str(tmp_path))
+
+    samples = (tmp_path / "samples.csv").read_text(encoding="utf-8")
+    before_after = (tmp_path / "before_after.csv").read_text(encoding="utf-8")
+
+    assert paths["samples_csv"].endswith("samples.csv")
+    assert paths["before_after_csv"].endswith("before_after.csv")
+    assert samples.splitlines()[0] == (
+        "category,user_input_summary,screenshot,first_sentence,character_count,"
+        "paragraph_count,emoji_sent,transport,trace_visible,favorability_visible,"
+        "source_display,pass_fail,notes"
+    )
+    assert before_after.splitlines()[0] == (
+        "item,before_screenshot,after_screenshot,what_changed,pass_fail,notes"
+    )
+    assert samples.count("daily chat") == 3
+    assert samples.count("Trace query") == 1
+    assert before_after.count("Short plain reply") == 1
