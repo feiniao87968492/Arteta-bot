@@ -104,7 +104,7 @@ async def test_dashboard_call_algo_llm_keeps_dynamic_prompt_out_of_system(monkey
 
 
 @pytest.mark.anyio
-async def test_bot_chat_service_uses_tool_loop_and_strips_favor_marker(monkeypatch, tmp_path):
+async def test_bot_chat_service_strips_legacy_favor_marker_without_random_delta(monkeypatch, tmp_path):
     monkeypatch.setenv("ARTETA_DB_PATH", str(tmp_path / "arsenal_data.db"))
     monkeypatch.setenv("DEEPSEEK_API_KEY", "unit-test-deepseek")
 
@@ -136,6 +136,9 @@ async def test_bot_chat_service_uses_tool_loop_and_strips_favor_marker(monkeypat
 
     def fake_text_to_tactical_board(text):
         assert "信任过程是每天训练出来的。" in text
+        assert "【好感度+】" not in text
+        assert "信任度无变化" not in text
+        assert "[red]" not in text
         return b"normal-chat-png"
 
     monkeypatch.setattr("dashboard.api.services.bot_chat_service.run_tool_loop", fake_tool_loop)
@@ -150,7 +153,7 @@ async def test_bot_chat_service_uses_tool_loop_and_strips_favor_marker(monkeypat
     assert result["reply"] == "信任过程是每天训练出来的。"
     assert result["reply_format"] == "image"
     assert result["reply_image"] == "data:image/png;base64," + base64.b64encode(b"normal-chat-png").decode("ascii")
-    assert result["favor_delta"] > 0
+    assert result["favor_delta"] == 0
     assert result["verify_hints"] == ["chat", "memory", "render"]
 
 

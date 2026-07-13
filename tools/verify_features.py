@@ -566,7 +566,7 @@ def chat_check_keyword_penalty(ctx: RunContext) -> CaseResult:
     chat = import_arteta_chat_for_helpers()
     heavy_score, heavy_reason = chat.check_keyword_penalty("阿尔特塔滚")
     neutral_score, neutral_reason = chat.check_keyword_penalty("今天训练很积极")
-    if not (-80 <= heavy_score <= -40) or "滚" not in heavy_reason:
+    if not (-8 <= heavy_score <= -1) or "负面" not in heavy_reason:
         return fail_result("chat", "check_keyword_penalty", "Heavy keyword penalty outside expected range", start, details={"score": heavy_score, "reason": heavy_reason})
     if neutral_score != 0 or neutral_reason != "":
         return fail_result("chat", "check_keyword_penalty", "Neutral text received a penalty", start, details={"score": neutral_score, "reason": neutral_reason})

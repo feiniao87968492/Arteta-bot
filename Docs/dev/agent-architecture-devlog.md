@@ -4906,3 +4906,68 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - Phase 5 still needs deterministic favorability scoring/display decoupling.
 - Phase 6 still needs normal-reply trace/marker hiding.
 - Phase 7/8 still need transport/render and personality knowledge-boundary work.
+
+## 2026-07-13 Personality Response Optimization Phase 5 Favorability Decoupling
+
+### Scope
+
+- Decoupled favorability scoring from model-emitted `【好感度...】` markers.
+- Replaced random large marker ranges with a deterministic small-delta scorer shared by QQ and Dashboard paths.
+- Stopped showing ordinary zero-change favorability notices.
+- Kept existing database totals and query/admin tools compatible.
+
+### RED Check
+
+- Added `tests/test_arteta_favorability.py`.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_favorability.py tests\dashboard\test_bot_chat.py::test_bot_chat_service_strips_legacy_favor_marker_without_random_delta -q`
+  - Result: failed because `plugins.arteta_agent.response.favorability` did not exist.
+- Added a QQ source regression:
+  - `test_arteta_chat_uses_shared_favorability_without_random_marker_ranges`
+  - Initial result: failed because `plugins/arteta_chat.py` still had `FAVOR_MARKERS`, random marker ranges, and zero-change red notice logic.
+
+### Changes
+
+- Added `plugins/arteta_agent/response/favorability.py`:
+  - `FavorabilityDecision`;
+  - `strip_legacy_favor_markers(...)`;
+  - `evaluate_favorability(...)`;
+  - `should_show_favorability_notice(...)`;
+  - `format_favorability_notice(...)`.
+- Updated `plugins/arteta_chat.py`:
+  - legacy LLM favor markers are stripped but no longer scored;
+  - deterministic scorer uses the user message and clean assistant reply;
+  - ordinary `0` and small changes are hidden;
+  - displayed notices no longer use `[red]`;
+  - `extract_favor_marker(...)` remains as a compatibility wrapper for existing verification helpers.
+- Updated `dashboard/api/services/bot_chat_service.py` to use the same scorer and display policy.
+- Updated `tools/verify_features.py` to expect the new small deterministic keyword penalty range.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_favorability.py tests\dashboard\test_bot_chat.py::test_bot_chat_service_strips_legacy_favor_marker_without_random_delta -q`
+  - Result after Dashboard integration: `7 passed`.
+- `python -m pytest tests\test_arteta_favorability.py::test_arteta_chat_uses_shared_favorability_without_random_marker_ranges -q`
+  - RED before QQ integration; passed after `arteta_chat.py` migration.
+- `python -m pytest tests\test_arteta_favorability.py tests\dashboard\test_bot_chat.py tests\test_verify_features.py -q`
+  - Result: `25 passed`.
+- `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+- `python -m pytest tests\test_arteta_favorability.py tests\dashboard\test_bot_chat.py tests\test_verify_features.py tests\test_arteta_agent_registry.py -q`
+  - Result: `217 passed`.
+- `python -m py_compile plugins\arteta_agent\response\favorability.py plugins\arteta_chat.py dashboard\api\services\bot_chat_service.py tools\verify_features.py`
+  - Result: passed.
+- `rg -n "FAVOR_MARKERS = \{|random\.randint\(|信任度无变化|\[red\]【信任度" plugins\arteta_chat.py dashboard\api\services\bot_chat_service.py`
+  - Result: no matches.
+
+### Compatibility
+
+- Existing `extract_favor_marker(...)` helper remains for verifier compatibility, but marker extraction no longer drives scoring.
+- Historical favorability totals are not recalculated.
+- Admin favor tools and profile display paths are unchanged.
+- No Web Access, ChromaDB, permission, PendingAction, Provider, Runtime, or database schema behavior changed.
+
+### Remaining
+
+- Phase 6 still needs normal-reply trace/marker hiding.
+- Phase 7/8 still need transport/render and personality knowledge-boundary work.

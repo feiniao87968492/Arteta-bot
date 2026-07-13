@@ -11,7 +11,6 @@ import sqlite3
 import time
 import os
 import re
-import random
 from datetime import datetime
 import base64
 import tempfile
@@ -62,6 +61,11 @@ from plugins.arteta_agent.response.style import (
     build_recent_opening_guard,
     build_response_style_guard,
     detect_response_style_profile,
+)
+from plugins.arteta_agent.response.favorability import (
+    evaluate_favorability,
+    format_favorability_notice,
+    strip_legacy_favor_markers,
 )
 try:
     from plugins.arteta_agent.planner import ProviderResponseError
@@ -1494,41 +1498,17 @@ FAVOR_LIGHT_NEGATIVE = [
 
 
 def check_keyword_penalty(prompt: str) -> (int, str):
-    """检测发言中的负面关键词，返回额外扣分和原因"""
-    p = prompt.lower()
-    for kw in FAVOR_HEAVY_NEGATIVE:
-        if kw in p:
-            return random.randint(-80, -40), f"（触发敏感词：{kw}）"
-    for kw in FAVOR_MODERATE_NEGATIVE:
-        if kw in p:
-            return random.randint(-40, -15), f"（触发敏感词：{kw}）"
-    for kw in FAVOR_LIGHT_NEGATIVE:
-        if kw in p:
-            return random.randint(-20, -5), f"（触发敏感词：{kw}）"
+    """兼容旧 verifier 的确定性负面表达检测。"""
+    decision = evaluate_favorability(prompt or "", "")
+    if decision.delta < 0:
+        return decision.delta, "（{0}）".format(decision.reason)
     return 0, ""
 
 
-# --- 好感度标记系统（LLM 评估，比关键词更智能） ---
-FAVOR_MARKERS = {
-    "【好感度+++】": (380, 770, "令人惊叹的表现，极大提升了信任度"),
-    "【好感度++】": (200, 370, "出色的交流，大幅提升了信任度"),
-    "【好感度+】": (10, 190, "积极的互动，提升了信任度"),
-    "【好感度=】": (0, 0, ""),
-    "【好感度-】": (-190, -10, "不当言行，降低了信任度"),
-    "【好感度--】": (-370, -200, "严重的负面言行，大幅降低了信任度"),
-    "【好感度---】": (-770, -380, "极端恶劣的言行，信任度严重受损"),
-}
-
 def extract_favor_marker(text: str) -> Optional[str]:
-    """从 LLM 回复中提取好感度标记（取最后一个出现的）"""
-    found = []
-    for marker in FAVOR_MARKERS:
-        for m in re.finditer(re.escape(marker), text):
-            found.append((m.start(), marker))
-    if not found:
-        return None
-    found.sort(key=lambda x: x[0])
-    return found[-1][1]
+    """兼容旧工具：只提取 marker，不再用于评分。"""
+    _clean, marker = strip_legacy_favor_markers(text)
+    return marker
 
 FAVOR_LEVEL_THRESHOLDS = [
     ("看台内鬼", -50),
@@ -2069,29 +2049,11 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
                 with open("/tmp/debug.log", "a") as df:
                     df.write(f"FC answer (first 500): {answer[:500]}\n")
 
-                # --- LLM 好感度评估：从回复中提取标记 ---
-                inc, reason = 0, ""
-                marker = extract_favor_marker(answer)
                 is_admin = (user_id == ADMIN_QQ)
-                if marker and marker in FAVOR_MARKERS:
-                    min_val, max_val, marker_reason = FAVOR_MARKERS[marker]
-                    if min_val != 0:
-                        inc = random.randint(min(min_val, max_val), max(min_val, max_val))
-                    reason = marker_reason
-
-                    # 从显示文本中移除标记
-                    answer = re.sub(r'\s*' + re.escape(marker) + r'\s*$', '', answer).rstrip()
-                else:
-                    with open("/tmp/debug.log", "a") as df:
-                        df.write(f"[FAV] user={user_id} no marker found\n")
-
-                # --- 关键词辅助检测：在 LLM 评估基础上额外扣分 ---
-                kw_penalty, kw_reason = check_keyword_penalty(prompt) if not is_admin else (0, "")
-                if kw_penalty < 0:
-                    inc += kw_penalty
-                    reason = (reason + kw_reason) if reason else kw_reason.lstrip("（").rstrip("）")
-                    with open("/tmp/debug.log", "a") as df:
-                        df.write(f"[FAV] keyword extra: {kw_penalty} reason={kw_reason}\n")
+                answer, _legacy_marker = strip_legacy_favor_markers(answer)
+                old_level = lvl
+                favor_decision = evaluate_favorability(prompt, answer, is_admin=is_admin)
+                inc, reason = favor_decision.delta, favor_decision.reason
 
                 # 应用好感度变更（管理员不参与）
                 if not is_admin:
@@ -2116,13 +2078,9 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
                     aliases=known_aliases,
                 )
 
-                # 好感度变动红字（由代码保证总是显示）
-                if inc > 0:
-                    answer += f"\n\n[red]【信任度上升{abs(inc)}点 - {reason}】[/red]"
-                elif inc < 0:
-                    answer += f"\n\n[red]【信任度下降{abs(inc)}点 - {reason}】[/red]"
-                else:
-                    answer += f"\n\n[red]【信任度无变化】[/red]"
+                favor_notice = format_favorability_notice(inc, old_level, lvl, fav)
+                if favor_notice:
+                    answer += "\n\n" + favor_notice
 
                 answer = apply_text_preferences(answer, group_id)
                 agent_image_artifacts = extract_agent_image_artifacts(answer)
