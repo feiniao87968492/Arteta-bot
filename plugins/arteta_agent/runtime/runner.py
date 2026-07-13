@@ -1,10 +1,26 @@
 import asyncio
 import inspect
+import json
+import logging
+import time
 from typing import Awaitable, Callable, Iterable, Optional, Set
 
 from ..context import ToolContext
 from ..executor import execute_tool_call_result
 from ..registry import get_tool
+from ..progress.models import (
+    PROGRESS_FINAL_SYNTHESIS_STARTED,
+    PROGRESS_FINISHED,
+    PROGRESS_MODEL_ROUND_STARTED,
+    PROGRESS_RUN_STARTED,
+    PROGRESS_RUNTIME_STOPPED,
+    PROGRESS_TOOL_BATCH_FINISHED,
+    PROGRESS_TOOL_BATCH_STARTED,
+    PROGRESS_TOOL_FINISHED,
+    PROGRESS_WAITING_CONFIRMATION,
+    AgentProgressEvent,
+    ProgressToolCall,
+)
 from ..result import (
     TOOL_STATUS_ERROR,
     TOOL_STATUS_INVALID_ARGUMENTS,
@@ -35,6 +51,8 @@ ModelCall = Callable[[list, AgentState], Awaitable[dict]]
 ToolExecutor = Callable[[dict, ToolContext], Awaitable[ToolResult]]
 ToolResultObserver = Callable[[ToolResult, AgentState], object]
 Finalizer = Callable[[str, AgentState], object]
+ProgressObserver = Callable[[AgentProgressEvent, AgentState], object]
+LOGGER = logging.getLogger(__name__)
 
 
 async def _maybe_await(value):
@@ -50,11 +68,13 @@ class AgentRuntimeRunner:
         tool_executor: Optional[ToolExecutor] = None,
         tool_result_observer: Optional[ToolResultObserver] = None,
         finalizer: Optional[Finalizer] = None,
+        progress_observer: Optional[ProgressObserver] = None,
     ) -> None:
         self.model_call = model_call
         self.tool_executor = tool_executor or execute_tool_call_result
         self.tool_result_observer = tool_result_observer
         self.finalizer = finalizer
+        self.progress_observer = progress_observer
 
     async def run(
         self,
@@ -71,6 +91,11 @@ class AgentRuntimeRunner:
                 )
             except asyncio.TimeoutError:
                 state.stop_reason = STOP_REASON_TIMEOUT
+                await self._emit_progress(AgentProgressEvent(
+                    kind=PROGRESS_RUNTIME_STOPPED,
+                    status=STOP_REASON_TIMEOUT,
+                    metadata={"stop_reason": STOP_REASON_TIMEOUT},
+                ), state)
                 return AgentRunResult(
                     "[LoopGuard] Agent runtime stopped: request timeout.",
                     STOP_REASON_TIMEOUT,
@@ -85,6 +110,7 @@ class AgentRuntimeRunner:
         initial_tool_calls: Optional[Iterable[dict]] = None,
     ) -> AgentRunResult:
         guard = LoopGuard(config)
+        await self._emit_progress(AgentProgressEvent(kind=PROGRESS_RUN_STARTED), state)
         initial_calls = list(initial_tool_calls or [])
         if initial_calls:
             state.append_message({
@@ -101,6 +127,17 @@ class AgentRuntimeRunner:
                 return AgentRunResult(content, STOP_REASON_INITIAL_TOOLS_COMPLETE, state)
 
         for _ in range(config.max_rounds):
+            await self._emit_progress(AgentProgressEvent(
+                kind=PROGRESS_MODEL_ROUND_STARTED,
+                round_index=self._progress_round_index(state),
+            ), state)
+            if state.tool_results:
+                state.metadata["progress_final_synthesis_started"] = True
+                await self._emit_progress(AgentProgressEvent(
+                    kind=PROGRESS_FINAL_SYNTHESIS_STARTED,
+                    tools=[self._progress_call_from_result(result) for result in state.tool_results[-3:]],
+                    metadata={"scene": self._synthesis_scene(state)},
+                ), state)
             assistant_msg = await self.model_call(state.messages, state)
             state.append_message(assistant_msg)
             tool_calls = assistant_msg.get("tool_calls") or []
@@ -112,6 +149,11 @@ class AgentRuntimeRunner:
                 return stopped
 
         state.stop_reason = STOP_REASON_MAX_ROUNDS
+        await self._emit_progress(AgentProgressEvent(
+            kind=PROGRESS_RUNTIME_STOPPED,
+            status=STOP_REASON_MAX_ROUNDS,
+            metadata={"stop_reason": STOP_REASON_MAX_ROUNDS},
+        ), state)
         return AgentRunResult(
             "Agent runtime stopped after the maximum model rounds. Please restate the goal more specifically.",
             STOP_REASON_MAX_ROUNDS,
@@ -131,20 +173,48 @@ class AgentRuntimeRunner:
         completed_call_ids = self._completed_tool_call_ids(state)
         while index < len(calls):
             batch = self._parallel_safe_batch(calls, index, config, completed_call_ids)
+            await self._emit_progress(AgentProgressEvent(
+                kind=PROGRESS_TOOL_BATCH_STARTED,
+                tools=[self._progress_call_from_tool_call(tool_call) for tool_call in batch],
+            ), state)
+            started = time.monotonic()
             if len(batch) > 1:
                 for tool_call in batch:
                     guard_reason = guard.before_tool_call(tool_call, state.tool_call_count)
                     if guard_reason:
                         state.stop_reason = STOP_REASON_LOOP_GUARD
+                        await self._emit_progress(AgentProgressEvent(
+                            kind=PROGRESS_RUNTIME_STOPPED,
+                            status=STOP_REASON_LOOP_GUARD,
+                            metadata={"stop_reason": STOP_REASON_LOOP_GUARD},
+                        ), state)
                         return AgentRunResult(loop_guard_message(guard_reason), STOP_REASON_LOOP_GUARD, state)
                 tool_results = await asyncio.gather(*[
                     self.tool_executor(tool_call, state.ctx) for tool_call in batch
                 ])
+                duration_ms = int((time.monotonic() - started) * 1000)
                 for tool_call, tool_result in zip(batch, tool_results):
+                    await self._emit_progress(AgentProgressEvent(
+                        kind=PROGRESS_TOOL_FINISHED,
+                        tools=[self._progress_call_from_result(tool_result, tool_call)],
+                        status=self._progress_status(tool_result),
+                        duration_ms=int(getattr(tool_result, "duration_ms", 0) or duration_ms),
+                        error_code=str(getattr(tool_result, "error_code", "") or ""),
+                    ), state)
                     stopped = await self._observe_tool_result(state, config, guard, tool_call, tool_result)
                     completed_call_ids.add(str(tool_call.get("id") or ""))
                     if stopped is not None:
                         return stopped
+                await self._emit_progress(AgentProgressEvent(
+                    kind=PROGRESS_TOOL_BATCH_FINISHED,
+                    tools=[self._progress_call_from_result(result, call) for call, result in zip(batch, tool_results)],
+                    status="ok" if all(self._progress_status(result) == "ok" for result in tool_results) else "error",
+                    duration_ms=duration_ms,
+                    metadata={
+                        "success_count": sum(1 for result in tool_results if self._progress_status(result) == "ok"),
+                        "failure_count": sum(1 for result in tool_results if self._progress_status(result) != "ok"),
+                    },
+                ), state)
                 index += len(batch)
                 continue
 
@@ -152,13 +222,33 @@ class AgentRuntimeRunner:
             guard_reason = guard.before_tool_call(tool_call, state.tool_call_count)
             if guard_reason:
                 state.stop_reason = STOP_REASON_LOOP_GUARD
+                await self._emit_progress(AgentProgressEvent(
+                    kind=PROGRESS_RUNTIME_STOPPED,
+                    status=STOP_REASON_LOOP_GUARD,
+                    metadata={"stop_reason": STOP_REASON_LOOP_GUARD},
+                ), state)
                 return AgentRunResult(loop_guard_message(guard_reason), STOP_REASON_LOOP_GUARD, state)
 
             tool_result = await self.tool_executor(tool_call, state.ctx)
+            duration_ms = int((time.monotonic() - started) * 1000)
+            await self._emit_progress(AgentProgressEvent(
+                kind=PROGRESS_TOOL_FINISHED,
+                tools=[self._progress_call_from_result(tool_result, tool_call)],
+                status=self._progress_status(tool_result),
+                duration_ms=int(getattr(tool_result, "duration_ms", 0) or duration_ms),
+                error_code=str(getattr(tool_result, "error_code", "") or ""),
+            ), state)
             stopped = await self._observe_tool_result(state, config, guard, tool_call, tool_result)
             completed_call_ids.add(str(tool_call.get("id") or ""))
             if stopped is not None:
                 return stopped
+            await self._emit_progress(AgentProgressEvent(
+                kind=PROGRESS_TOOL_BATCH_FINISHED,
+                tools=[self._progress_call_from_result(tool_result, tool_call)],
+                status=self._progress_status(tool_result),
+                duration_ms=int(getattr(tool_result, "duration_ms", 0) or duration_ms),
+                error_code=str(getattr(tool_result, "error_code", "") or ""),
+            ), state)
             index += 1
         return None
 
@@ -232,6 +322,11 @@ class AgentRuntimeRunner:
         if tool_result.status == TOOL_STATUS_PERMISSION_REQUIRED:
             state.stop_reason = STOP_REASON_WAITING_CONFIRMATION
             state.pending_action_id = tool_result.pending_action_id
+            await self._emit_progress(AgentProgressEvent(
+                kind=PROGRESS_WAITING_CONFIRMATION,
+                tools=[self._progress_call_from_result(tool_result, tool_call)],
+                status=TOOL_STATUS_PERMISSION_REQUIRED,
+            ), state)
             return AgentRunResult(tool_result.content, STOP_REASON_WAITING_CONFIRMATION, state)
 
         if self._is_required_current_information_call(tool_call, config):
@@ -241,6 +336,11 @@ class AgentRuntimeRunner:
             else:
                 state.stop_reason = STOP_REASON_REQUIRED_CURRENT_INFORMATION_UNAVAILABLE
                 state.required_web_failure_code = self._current_information_failure_code(tool_result)
+                await self._emit_progress(AgentProgressEvent(
+                    kind=PROGRESS_RUNTIME_STOPPED,
+                    status=STOP_REASON_REQUIRED_CURRENT_INFORMATION_UNAVAILABLE,
+                    metadata={"stop_reason": STOP_REASON_REQUIRED_CURRENT_INFORMATION_UNAVAILABLE},
+                ), state)
                 return AgentRunResult(
                     self._required_current_information_unavailable_message(state),
                     STOP_REASON_REQUIRED_CURRENT_INFORMATION_UNAVAILABLE,
@@ -251,6 +351,11 @@ class AgentRuntimeRunner:
         guard_reason = guard.after_observation(state.total_observation_chars)
         if guard_reason:
             state.stop_reason = STOP_REASON_LOOP_GUARD
+            await self._emit_progress(AgentProgressEvent(
+                kind=PROGRESS_RUNTIME_STOPPED,
+                status=STOP_REASON_LOOP_GUARD,
+                metadata={"stop_reason": STOP_REASON_LOOP_GUARD},
+            ), state)
             return AgentRunResult(loop_guard_message(guard_reason), STOP_REASON_LOOP_GUARD, state)
 
         state.append_message({
@@ -305,8 +410,88 @@ class AgentRuntimeRunner:
             final_tool_call_count = 0
         record_round(state.trace, int(final_tool_call_count or 0))
         state.stop_reason = STOP_REASON_FINAL
+        if not state.metadata.get("progress_final_synthesis_started"):
+            await self._emit_progress(AgentProgressEvent(
+                kind=PROGRESS_FINAL_SYNTHESIS_STARTED,
+                metadata={"scene": self._synthesis_scene(state)},
+            ), state)
+        await self._emit_progress(AgentProgressEvent(
+            kind=PROGRESS_FINISHED,
+            status=STOP_REASON_FINAL,
+        ), state)
         return AgentRunResult(
             final_content or "I need more information before I can complete this task.",
             STOP_REASON_FINAL,
             state,
         )
+
+    async def _emit_progress(self, event: AgentProgressEvent, state: AgentState) -> None:
+        if not self.progress_observer:
+            return
+        try:
+            await _maybe_await(self.progress_observer(event, state))
+        except Exception:
+            LOGGER.warning("agent_progress_observer_failed", exc_info=True)
+
+    def _progress_call_from_tool_call(self, tool_call: dict) -> ProgressToolCall:
+        function = (tool_call or {}).get("function") or {}
+        name = str(function.get("name") or "")
+        spec = get_tool(name)
+        return ProgressToolCall(
+            call_id=str((tool_call or {}).get("id") or ""),
+            name=name,
+            permission=str(getattr(spec, "permission", "") or ""),
+            argument_keys=self._argument_keys(function.get("arguments") or "{}"),
+        )
+
+    def _progress_call_from_result(self, result: ToolResult, tool_call: dict = None) -> ProgressToolCall:
+        call_id = ""
+        if tool_call:
+            call_id = str((tool_call or {}).get("id") or "")
+        return ProgressToolCall(
+            call_id=call_id,
+            name=str(getattr(result, "name", "") or ""),
+            permission=str(getattr(result, "permission", "") or ""),
+        )
+
+    def _argument_keys(self, raw_arguments) -> list:
+        try:
+            value = json.loads(str(raw_arguments or "{}"))
+        except Exception:
+            return []
+        if not isinstance(value, dict):
+            return []
+        return sorted(str(key) for key in value.keys())
+
+    def _progress_status(self, result: ToolResult) -> str:
+        status = str(getattr(result, "status", "") or "")
+        if status == TOOL_STATUS_OK:
+            return "ok" if str(getattr(result, "content", "") or "").strip() else "empty"
+        if status == TOOL_STATUS_TIMEOUT:
+            return "timeout"
+        if status == TOOL_STATUS_UNAVAILABLE:
+            return "unavailable"
+        if status == TOOL_STATUS_PERMISSION_REQUIRED:
+            return "permission_required"
+        return "error"
+
+    def _synthesis_scene(self, state: AgentState) -> str:
+        names = [str(getattr(result, "name", "") or "") for result in list(state.tool_results or [])]
+        if any(name in {"solve_math_question", "solve_algorithm_problem", "solve_code_question", "solve_science_question"} for name in names):
+            return "math"
+        if any(name == "analyze_image" for name in names):
+            return "image"
+        if any(name in {"grok_search", "web_search", "web_fetch", "verify_recent_claim", "fetch_x_post", "search_news", "search_football_news"} for name in names):
+            return "news"
+        return ""
+
+    def _progress_round_index(self, state: AgentState) -> int:
+        if not isinstance(state.trace, dict):
+            return 0
+        value = state.trace.get("rounds", 0)
+        if isinstance(value, list):
+            return len(value)
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0

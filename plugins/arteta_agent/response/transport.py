@@ -17,7 +17,7 @@ def choose_reply_transport(
     text: str,
     has_image_artifact: bool = False,
     user_requested_image: bool = False,
-    plain_text_limit: int = 400,
+    plain_text_limit: int = 350,
 ) -> ReplyTransportDecision:
     body = str(text or "").strip()
     if has_image_artifact:

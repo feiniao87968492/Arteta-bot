@@ -123,6 +123,7 @@ async def run_runtime_loop_from_state(
     freshness_mode: str = "none",
     freshness_reason_codes=None,
     required_current_information_tool_call_ids=None,
+    progress_observer=None,
 ) -> str:
     runtime_state = build_runtime_state(
         state,
@@ -153,6 +154,7 @@ async def run_runtime_loop_from_state(
             agent_state,
             emoji_enabled,
         ),
+        progress_observer=progress_observer,
     )
     result = await runner.run(
         runtime_state,
@@ -197,6 +199,7 @@ async def run_loop_from_state(
     max_tool_calls: int = 10,
     max_same_tool_call_repeats: int = 2,
     max_total_observation_chars: int = 80000,
+    progress_observer=None,
 ) -> str:
     return await run_runtime_loop_from_state(
         state,
@@ -217,4 +220,5 @@ async def run_loop_from_state(
         max_tool_calls=max_tool_calls,
         max_same_tool_call_repeats=max_same_tool_call_repeats,
         max_total_observation_chars=max_total_observation_chars,
+        progress_observer=progress_observer,
     )

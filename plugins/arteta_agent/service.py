@@ -46,6 +46,7 @@ class AgentRequest:
     max_same_tool_call_repeats: int
     max_total_observation_chars: int
     chat_model_call: object
+    progress_observer: object = None
 
 
 def prepare_agent_run(
@@ -151,6 +152,7 @@ async def run_agent_request(request: AgentRequest) -> str:
             required_current_information_tool_call_ids=required_current_call_ids,
             chat_model_call=request.chat_model_call,
             emoji_enabled=mood_emoji_enabled,
+            progress_observer=request.progress_observer,
         )
         if initial_plan.constraints.get("direct_trace_response"):
             return finish_agent_run(compose_trace_response(trace), ctx, prepared)
@@ -175,4 +177,5 @@ async def run_agent_request(request: AgentRequest) -> str:
         max_total_observation_chars=request.max_total_observation_chars,
         chat_model_call=request.chat_model_call,
         emoji_enabled=mood_emoji_enabled,
+        progress_observer=request.progress_observer,
     ), ctx, prepared)

@@ -125,6 +125,8 @@ def test_planner_no_longer_defines_legacy_forced_tool_followup_helpers():
 
 
 def test_registry_registers_and_exports_openai_tools():
+    from plugins.arteta_agent.progress.models import ToolProgressSpec
+
     clear_registry()
     register_tool(ToolSpec(
         name="sample_read",
@@ -136,6 +138,7 @@ def test_registry_registers_and_exports_openai_tools():
         parallel_safe=True,
         idempotent=True,
         result_contains_untrusted_content=False,
+        progress=ToolProgressSpec("测试读取服务", "读取测试数据"),
     ))
 
     spec = get_tool("sample_read")
@@ -143,6 +146,7 @@ def test_registry_registers_and_exports_openai_tools():
     assert spec.parallel_safe is True
     assert spec.idempotent is True
     assert spec.result_contains_untrusted_content is False
+    assert spec.progress.service_type == "测试读取服务"
     assert [tool.name for tool in list_enabled_tools()] == ["sample_read"]
     assert build_openai_tools() == [{
         "type": "function",
@@ -156,6 +160,7 @@ def test_registry_registers_and_exports_openai_tools():
             },
         },
     }]
+    assert "progress" not in build_openai_tools()[0]["function"]
 
 
 def test_tool_spec_defaults_to_serial_untrusted_results():
@@ -492,6 +497,21 @@ def test_behavior_policy_tools_accept_route_preferences(tmp_path, monkeypatch):
     assert "route.public_current_fact.preferred_tool=verify_recent_claim" in updated
     assert stored["value"] == "verify_recent_claim"
     assert "route.public_current_fact.preferred_tool=verify_recent_claim" in shown
+
+
+def test_behavior_policy_accepts_progress_and_reply_preferences(tmp_path, monkeypatch):
+    from plugins.arteta_agent import behavior_policy
+
+    policy_path = tmp_path / "behavior_policy.json"
+    monkeypatch.setenv("ARTETA_AGENT_BEHAVIOR_POLICY_PATH", str(policy_path))
+
+    progress = behavior_policy.set_group_policy("group-1", "progress.enabled", False)
+    reply = behavior_policy.set_group_policy("group-1", "reply.default_detail_mode", "expanded")
+
+    assert progress["value"] is False
+    assert reply["value"] == "expanded"
+    assert behavior_policy.get_group_policy("group-1", "progress.enabled")["value"] is False
+    assert behavior_policy.get_group_policy("group-1", "reply.default_detail_mode")["value"] == "expanded"
 
 
 def test_behavior_policy_parses_public_current_fact_route_preference():

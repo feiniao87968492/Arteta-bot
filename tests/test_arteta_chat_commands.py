@@ -621,7 +621,7 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
         finally:
             restore_modules(previous)
 
-    def test_send_agent_answer_message_uses_image_for_short_plain_reply(self):
+    def test_send_agent_answer_message_uses_text_for_short_plain_reply(self):
         arteta_chat, previous = load_arteta_chat_module()
         try:
             sent = []
@@ -647,9 +647,9 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
                 [],
             ))
 
-            self.assertEqual(result.mode, "image")
-            self.assertEqual(result.reason, "default_ui_image")
-            self.assertEqual(image_called, sent)
+            self.assertEqual(result.mode, "text")
+            self.assertEqual(result.reason, "short_plain_text")
+            self.assertEqual(image_called, [])
             self.assertEqual(sent, ["早，今天先把节奏稳住。"])
         finally:
             restore_modules(previous)
@@ -756,6 +756,261 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
 
             self.assertIn("早，今天先把节奏稳住。", sent)
             self.assertFalse(any("回复处理出错" in item for item in sent))
+        finally:
+            try:
+                arteta_chat.asyncio.create_task = original_create_task
+            except UnboundLocalError:
+                pass
+            restore_modules(previous)
+
+    def test_process_chat_sends_progress_without_saving_it_to_memory(self):
+        arteta_chat, previous = load_arteta_chat_module({
+            "arteta_use_agent_registry": True,
+        })
+        try:
+            from plugins.arteta_agent.progress.models import (
+                PROGRESS_TOOL_BATCH_STARTED,
+                AgentProgressEvent,
+                ProgressToolCall,
+            )
+
+            sent = []
+            saved_memory = []
+            created_tasks = []
+
+            class FakeSegment(object):
+                def __init__(self, seg_type, data=None):
+                    self.type = seg_type
+                    self.data = data or {}
+
+            class FakeMessage(list):
+                def extract_plain_text(self):
+                    return "A 罗杰斯适合吗"
+
+            class FakeEvent(arteta_chat.GroupMessageEvent):
+                group_id = 10001
+                group_name = "Test Group"
+                sender = types.SimpleNamespace(card="测试球员", nickname="测试球员")
+                reply = None
+                original_message = None
+
+                def get_user_id(self):
+                    return "20002"
+
+                def get_message(self):
+                    return FakeMessage([FakeSegment("text", {"text": "A 罗杰斯适合吗"})])
+
+            class FakeBot(object):
+                self_id = "99999"
+
+                async def send(self, event, message):
+                    sent.append(str(message))
+
+            class FakeMessageSegment(object):
+                @staticmethod
+                def image(data):
+                    return data
+
+            async def no_op(*args, **kwargs):
+                return None
+
+            async def fake_get_player_data(*args, **kwargs):
+                return "青训生", 0
+
+            async def fake_apply_favor_change(*args, **kwargs):
+                return "青训生", 0
+
+            async def fake_count(*args, **kwargs):
+                return 1
+
+            async def fake_profile(*args, **kwargs):
+                return ""
+
+            async def fake_rows(*args, **kwargs):
+                return []
+
+            async def fake_answer(*args, **kwargs):
+                observer = kwargs.get("progress_observer")
+                assert observer is not None
+                await observer(AgentProgressEvent(
+                    kind=PROGRESS_TOOL_BATCH_STARTED,
+                    tools=[ProgressToolCall(call_id="call-1", name="grok_search", permission="safe_read")],
+                ), None)
+                return "结论：罗杰斯可以聊，但要看价格、位置和无球强度。"
+
+            async def fake_should_update_profile(*args, **kwargs):
+                return False
+
+            original_create_task = arteta_chat.asyncio.create_task
+
+            def tracking_create_task(coro):
+                task = original_create_task(coro)
+                created_tasks.append(task)
+                return task
+
+            arteta_chat.asyncio.create_task = tracking_create_task
+            arteta_chat.AGENT_PROGRESS_INITIAL_DELAY = 0.0
+            arteta_chat.AGENT_PROGRESS_MIN_INTERVAL = 0.0
+            arteta_chat.MessageSegment = FakeMessageSegment
+            arteta_chat.text_to_tactical_board = lambda text: text
+            arteta_chat.refresh_group_name = no_op
+            arteta_chat.save_message = no_op
+            arteta_chat.get_player_data = fake_get_player_data
+            arteta_chat.get_message_count = fake_count
+            arteta_chat.get_profile_section = fake_profile
+            arteta_chat.get_active_members_snapshot = lambda *args, **kwargs: ""
+            arteta_chat.get_recent_group_messages = fake_rows
+            arteta_chat.find_recent_messages_by_alias = lambda *args, **kwargs: []
+            arteta_chat.maybe_answer_football_news_directly = fake_profile
+            arteta_chat.maybe_search_football_news_for_prompt = fake_profile
+            arteta_chat.memory_store.query_memories = lambda *args, **kwargs: []
+            arteta_chat.memory_store.add_memory = lambda *args, **kwargs: saved_memory.append(args)
+            arteta_chat.run_agent_loop = fake_answer
+            arteta_chat.apply_favor_change = fake_apply_favor_change
+            arteta_chat.should_update_profile = fake_should_update_profile
+            arteta_chat.get_known_aliases = fake_rows
+            arteta_chat.save_bot_reply_to_daily_messages = no_op
+            arteta_chat.send_pending_mood_emojis = fake_count
+
+            async def exercise():
+                await arteta_chat.process_chat(FakeBot(), FakeEvent())
+                await arteta_chat.asyncio.gather(*created_tasks)
+
+            asyncio.run(exercise())
+
+            self.assertIn(
+                "[Action] 我将调用 grok_search 实时检索服务，检索最新新闻、官宣、记者原帖和 X/Twitter 实时线索。",
+                sent,
+            )
+            self.assertIn("结论：罗杰斯可以聊，但要看价格、位置和无球强度。", sent)
+            self.assertEqual(len(saved_memory), 1)
+            self.assertNotIn("[Action]", saved_memory[0][3])
+        finally:
+            try:
+                arteta_chat.asyncio.create_task = original_create_task
+            except UnboundLocalError:
+                pass
+            restore_modules(previous)
+
+    def test_process_chat_closes_progress_reporter_on_reply_processing_error(self):
+        arteta_chat, previous = load_arteta_chat_module({
+            "arteta_use_agent_registry": True,
+        })
+        try:
+            sent = []
+            created_tasks = []
+            reporters = []
+
+            class FakeSegment(object):
+                def __init__(self, seg_type, data=None):
+                    self.type = seg_type
+                    self.data = data or {}
+
+            class FakeMessage(list):
+                def extract_plain_text(self):
+                    return "A 罗杰斯适合吗"
+
+            class FakeEvent(arteta_chat.GroupMessageEvent):
+                group_id = 10001
+                group_name = "Test Group"
+                sender = types.SimpleNamespace(card="测试球员", nickname="测试球员")
+                reply = None
+                original_message = None
+
+                def get_user_id(self):
+                    return "20002"
+
+                def get_message(self):
+                    return FakeMessage([FakeSegment("text", {"text": "A 罗杰斯适合吗"})])
+
+            class FakeBot(object):
+                self_id = "99999"
+
+                async def send(self, event, message):
+                    sent.append(str(message))
+
+            class FakeMessageSegment(object):
+                @staticmethod
+                def image(data):
+                    return data
+
+            class FakeProgressReporter(object):
+                def __init__(self, *args, **kwargs):
+                    self.closed = False
+                    reporters.append(self)
+
+                async def handle_event(self, event):
+                    return None
+
+                async def close(self):
+                    self.closed = True
+
+            async def no_op(*args, **kwargs):
+                return None
+
+            async def fake_get_player_data(*args, **kwargs):
+                return "青训生", 0
+
+            async def fake_apply_favor_change(*args, **kwargs):
+                return "青训生", 0
+
+            async def fake_count(*args, **kwargs):
+                return 1
+
+            async def fake_profile(*args, **kwargs):
+                return ""
+
+            async def fake_rows(*args, **kwargs):
+                return []
+
+            async def fake_answer(*args, **kwargs):
+                return "结论：罗杰斯可以聊，但要看价格、位置和无球强度。"
+
+            async def fake_should_update_profile(*args, **kwargs):
+                return False
+
+            def raise_on_memory_write(*args, **kwargs):
+                raise RuntimeError("memory write failed")
+
+            original_create_task = arteta_chat.asyncio.create_task
+
+            def tracking_create_task(coro):
+                task = original_create_task(coro)
+                created_tasks.append(task)
+                return task
+
+            arteta_chat.asyncio.create_task = tracking_create_task
+            arteta_chat.DebugProgressReporter = FakeProgressReporter
+            arteta_chat.MessageSegment = FakeMessageSegment
+            arteta_chat.text_to_tactical_board = lambda text: text
+            arteta_chat.refresh_group_name = no_op
+            arteta_chat.save_message = no_op
+            arteta_chat.get_player_data = fake_get_player_data
+            arteta_chat.get_message_count = fake_count
+            arteta_chat.get_profile_section = fake_profile
+            arteta_chat.get_active_members_snapshot = lambda *args, **kwargs: ""
+            arteta_chat.get_recent_group_messages = fake_rows
+            arteta_chat.find_recent_messages_by_alias = lambda *args, **kwargs: []
+            arteta_chat.maybe_answer_football_news_directly = fake_profile
+            arteta_chat.maybe_search_football_news_for_prompt = fake_profile
+            arteta_chat.memory_store.query_memories = lambda *args, **kwargs: []
+            arteta_chat.memory_store.add_memory = raise_on_memory_write
+            arteta_chat.run_agent_loop = fake_answer
+            arteta_chat.apply_favor_change = fake_apply_favor_change
+            arteta_chat.should_update_profile = fake_should_update_profile
+            arteta_chat.get_known_aliases = fake_rows
+            arteta_chat.save_bot_reply_to_daily_messages = no_op
+            arteta_chat.send_pending_mood_emojis = fake_count
+
+            async def exercise():
+                await arteta_chat.process_chat(FakeBot(), FakeEvent())
+                await arteta_chat.asyncio.gather(*created_tasks)
+
+            asyncio.run(exercise())
+
+            self.assertEqual(1, len(reporters))
+            self.assertTrue(reporters[0].closed)
+            self.assertTrue(any("回复处理出错" in item for item in sent))
         finally:
             try:
                 arteta_chat.asyncio.create_task = original_create_task

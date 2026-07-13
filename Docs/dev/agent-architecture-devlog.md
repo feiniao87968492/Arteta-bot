@@ -1,5 +1,47 @@
 # Agent Architecture Devlog
 
+## 2026-07-13 - ReAct Progress And Default Expanded Replies
+
+### Scope
+
+- Implemented the integrated `arteta_agent_react_longform_integrated_plan.md` slice for visible runtime progress and default expanded replies.
+- Kept the change inside the existing Runtime, AgentRequest, ToolSpec, response style, and QQ send-helper boundaries.
+- Did not change Web SSRF, ChromaDB schema, PendingAction permissions, or provider security logic.
+
+### Changes
+
+- Added `plugins/arteta_agent/progress/`:
+  - sanitized `AgentProgressEvent` and `ProgressToolCall` models;
+  - formatter for `[Agent]`, `[Plan]`, `[Action]`, `[Observation]`, and `[Confirmation]` messages;
+  - `DebugProgressReporter` with initial delay, dedupe, throttle, max-message cap, tool heartbeat, synthesis heartbeat, and close cancellation.
+- Added `ToolSpec.progress` metadata support while keeping it out of `build_openai_tools()`.
+- Threaded `progress_observer` through `run_agent_loop -> AgentRequest -> run_runtime_loop_from_state -> AgentRuntimeRunner`.
+- Added runtime progress events for run start, model rounds, tool batch start/finish, individual tool finish, confirmation, synthesis start, runtime stop, and finish.
+- Added `LongFormResponsePolicy` and dynamic constraints so short input defaults to expanded replies, while explicit concise requests and controlled failure/confirmation states remain concise.
+- Removed old prompt/style guidance that made casual and meme replies default short.
+- Restored content-based final transport selection: short plain final content may be sent as native text; structured/long/math/code/table/style-tag content routes to image.
+- Allowed `progress.*` behavior policy keys and documented `reply.*` long-form policy usage.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_agent_progress_models.py tests\test_arteta_agent_progress_formatter.py tests\test_arteta_agent_progress_reporter.py tests\test_arteta_agent_runtime_progress.py tests\test_arteta_agent_long_form_policy.py tests\test_arteta_agent_response_style.py tests\test_arteta_agent_response_transport.py tests\test_arteta_agent_registry.py tests\test_arteta_chat_commands.py tests\test_arteta_prompt_style.py tests\test_recent_group_context.py -q`
+  - Result: `275 passed`.
+- `python -m pytest tests -q`
+  - Result: `695 passed`.
+- `python tools\verify_features.py --suite chat --json-only`
+  - Result: `4 passed`.
+- `python tools\verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`.
+- `python -m compileall -q bot.py plugins tests tools dashboard`
+  - Result: passed.
+- `git diff --check`
+  - Result: passed.
+
+### Remaining Manual Gate
+
+- Live QQ smoke still needs operator-facing evidence for long-running current-news/math/image cases if this task is being closed against production ECS behavior.
+- ECS deploy/smoke must still be run after commit because this pass is local-only so far.
+
 ## 2026-07-11 - Phase A: Dynamic System Injection Closure
 
 ### Scope

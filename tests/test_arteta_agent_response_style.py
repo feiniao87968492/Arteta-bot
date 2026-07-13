@@ -20,14 +20,14 @@ def test_response_style_profile_classifies_core_modes():
     casual = detect_response_style_profile("早")
     assert casual.mode == "casual"
     assert casual.persona_intensity == "light"
-    assert casual.target_length == "short"
+    assert casual.target_length == "expanded"
     assert casual.allow_mood_emoji is False
     assert casual.prefer_image_render is False
 
     meme = detect_response_style_profile("这图笑死，怎么看", has_image=True)
     assert meme.mode == "meme"
     assert meme.persona_intensity == "light"
-    assert meme.target_length == "short"
+    assert meme.target_length == "expanded"
     assert meme.allow_mood_emoji is True
 
     opinion = detect_response_style_profile("罗杰斯适合阿森纳吗")
@@ -68,20 +68,37 @@ def test_response_style_profile_uses_context_over_broad_keywords():
         route_hint="memory_image",
     )
     assert meme.mode == "meme"
-    assert meme.target_length == "short"
+    assert meme.target_length == "expanded"
 
 
-def test_build_response_style_guard_is_short_and_mode_specific():
+def test_build_response_style_guard_defaults_to_expanded_meme_response():
     profile = detect_response_style_profile("这图笑死，怎么看", has_image=True)
 
     guard = build_response_style_guard(profile)
 
     assert "【本轮表达模式：梗图轻互动】" in guard
-    assert "120 字以内" in guard
+    assert "画面信息" in guard
+    assert "梗点" in guard
+    assert "足球语境" in guard
+    assert "120 字以内" not in guard
+    assert "1～3" not in guard
     assert "不要描述自己的肢体动作" in guard
-    assert "不要强行上升到战术哲学" in guard
+    assert "不要强行写成正式论文" in guard
     assert "不要只模仿最近群聊上下文里的旧短回复" in guard
-    assert len([line for line in guard.splitlines() if line.strip()]) <= 8
+    assert len([line for line in guard.splitlines() if line.strip()]) <= 9
+
+
+def test_short_input_style_guard_does_not_request_short_answer():
+    profile = detect_response_style_profile("早")
+
+    guard = build_response_style_guard(profile)
+
+    assert profile.target_length == "expanded"
+    assert "【本轮回答模式：expanded】" in guard
+    assert "用户输入较短" in guard
+    assert "充分展开" in guard
+    assert "简单问题可以只回答" not in guard
+    assert "1～3" not in guard
 
 
 def test_arteta_chat_appends_style_module_guard_for_current_turn():
@@ -99,7 +116,8 @@ def test_arteta_chat_appends_style_module_guard_for_current_turn():
     assert messages[-1]["role"] == "user"
     assert "APP_GENERATED_RESPONSE_STYLE" in messages[-1]["content"]
     assert "【本轮表达模式：梗图轻互动】" in messages[-1]["content"]
-    assert "120 字以内" in messages[-1]["content"]
+    assert "120 字以内" not in messages[-1]["content"]
+    assert "画面信息" in messages[-1]["content"]
 
 
 def test_extract_opening_signature_normalizes_first_sentence():

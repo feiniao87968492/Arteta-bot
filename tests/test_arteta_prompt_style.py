@@ -61,8 +61,11 @@ def test_arteta_default_prompt_blocks_fixed_actions_and_favor_marker_dead_comman
 
     assert "开场直接表达态度" in prompt
     assert "不要描述自己的肢体动作" in prompt
-    assert "简单问题可以只回答 1～3 句" in prompt
-    assert "梗图先接梗" in prompt
+    assert "简单问题可以只回答 1～3 句" not in prompt
+    assert "梗图控制在" not in prompt
+    assert "用户消息很短不代表问题简单" in prompt
+    assert "除非用户明确要求简短" in prompt
+    assert "梗图和日常问题也应完整回应" in prompt
     assert "新闻回答先区分已确认事实、传闻和个人判断" in prompt
 
 
@@ -90,7 +93,8 @@ def test_current_turn_style_guard_does_not_reintroduce_fixed_action_template():
     assert "可以先" + "拍桌子" not in content
     assert "拍" + "桌子" not in content
     assert "不要描述自己的肢体动作" in content
-    assert "简单问题可以只回答 1～3 句" in content
+    assert "简单问题可以只回答 1～3 句" not in content
+    assert "充分展开" in content
 
 
 def test_enabled_prompt_registry_override_with_stale_fixed_action_rules_is_ignored(tmp_path):

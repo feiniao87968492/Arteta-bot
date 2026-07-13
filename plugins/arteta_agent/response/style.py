@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 import re
 from typing import List
 
+from .length_policy import build_dynamic_response_constraints, resolve_long_form_policy
+
 
 @dataclass(frozen=True)
 class ResponseStyleProfile(object):
@@ -141,7 +143,7 @@ def detect_response_style_profile(
         return _profile(
             "meme",
             "light",
-            "short",
+            "expanded",
             ["image_meme"],
             allow_football_metaphor=False,
             allow_mood_emoji=True,
@@ -150,7 +152,7 @@ def detect_response_style_profile(
         return _profile(
             "meme",
             "light",
-            "short",
+            "expanded",
             ["meme_text"],
             allow_football_metaphor=False,
             allow_mood_emoji=True,
@@ -215,12 +217,12 @@ def detect_response_style_profile(
         return _profile("football_opinion", "medium", "medium", ["football_opinion"])
 
     if _has_any(text, ("表情", "庆祝")):
-        return _profile("casual", "medium", "short", ["explicit_emoji"], allow_mood_emoji=True)
+        return _profile("casual", "medium", "expanded", ["explicit_emoji"], allow_mood_emoji=True)
 
     if has_document:
         return _profile("serious", "light", "medium", ["document"], allow_football_metaphor=False, prefer_image_render=True)
 
-    return _profile("casual", "light", "short", ["default_casual"])
+    return _profile("casual", "light", "expanded", ["default_casual"])
 
 
 def build_response_style_guard(profile: ResponseStyleProfile, recent_opening_guard: str = "") -> str:
@@ -237,9 +239,9 @@ def build_response_style_guard(profile: ResponseStyleProfile, recent_opening_gua
 
     if profile.mode == "meme":
         lines.extend([
-            "- 先接住笑点，直接说最有趣的反差。",
-            "- 控制在 1～3 个短段或 120 字以内。",
-            "- 不要描述自己的肢体动作，不要强行上升到战术哲学。",
+            "- 先说明画面信息，再讲真正的梗点和反差。",
+            "- 补充相关足球语境或群聊语境，最后自然点评。",
+            "- 不要描述自己的肢体动作，不要强行写成正式论文。",
         ])
     elif profile.mode == "current_news":
         lines.extend([
@@ -266,11 +268,8 @@ def build_response_style_guard(profile: ResponseStyleProfile, recent_opening_gua
             "- 必要时给出下一步，不自动发表情。",
         ])
     else:
-        lines.extend([
-            "- 直接回应当前问题。",
-            "- 简单问题可以只回答 1～3 句。",
-            "- 不要描述自己的肢体动作或固定动作开场。",
-        ])
+        lines.append(build_dynamic_response_constraints(resolve_long_form_policy()).strip())
+        lines.append("- 不要描述自己的肢体动作或固定动作开场。")
 
     if recent_opening_guard:
         lines.append(recent_opening_guard)

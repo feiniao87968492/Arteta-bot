@@ -8,6 +8,21 @@ def test_reply_transport_prefers_text_for_short_plain_reply():
     assert decision.reason == "short_plain_text"
 
 
+def test_reply_transport_ignores_original_input_length():
+    expanded_reply = "\n".join([
+        "结论：可以聊，但不能只看表面。",
+        "",
+        "第一层要看球员当前状态和角色。",
+        "第二层要看阿森纳体系里是否有稳定位置。",
+        "第三层要看价格、伤病风险和更衣室适配。",
+    ] + ["这段是围绕最终内容展开的判断。" for _ in range(18)])
+
+    decision = choose_reply_transport(expanded_reply)
+
+    assert decision.mode == "image"
+    assert decision.reason in {"long_structured_content", "long_text"}
+
+
 def test_reply_transport_uses_image_for_code_formula_and_tables():
     samples = [
         "```python\nprint('hi')\n```",

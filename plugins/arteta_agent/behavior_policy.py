@@ -9,6 +9,7 @@ from typing import Any, Dict, Set
 POLICY_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-zA-Z0-9_]+)+$")
 ALLOWED_PREFIXES = (
     "emoji.",
+    "progress.",
     "render.",
     "reply.",
     "trace.",

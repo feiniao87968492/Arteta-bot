@@ -2,6 +2,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Set, Union
 
+from .progress.models import ToolProgressSpec
+
 
 PermissionLevel = Literal["safe_read", "safe_write", "confirm_write", "admin_action"]
 ToolHandler = Callable[..., Union[Awaitable[str], str]]
@@ -33,6 +35,7 @@ class ToolSpec:
     concurrency_group: Optional[str] = None
     idempotent: bool = False
     result_contains_untrusted_content: bool = True
+    progress: Optional[ToolProgressSpec] = None
 
 
 _TOOL_REGISTRY: Dict[str, ToolSpec] = {}

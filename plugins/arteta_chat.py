@@ -67,7 +67,9 @@ from plugins.arteta_agent.response.favorability import (
     format_favorability_notice,
     strip_legacy_favor_markers,
 )
-from plugins.arteta_agent.response.transport import ReplyTransportDecision, choose_reply_transport
+from plugins.arteta_agent.response.transport import choose_reply_transport
+from plugins.arteta_agent.progress.formatter import ProgressFormatterPolicy
+from plugins.arteta_agent.progress.reporter import DebugProgressReporter, ProgressReporterConfig
 try:
     from plugins.arteta_agent.planner import ProviderResponseError
 except ImportError:
@@ -78,6 +80,11 @@ from plugins.arteta_agent.tools import register_all_tools
 from plugins.arteta_agent.tools.qq_actions import send_pending_mood_emojis
 from plugins.arteta_agent.ui_preferences import apply_text_preferences
 from plugins.arteta_agent.behavior_policy import format_group_policies
+try:
+    from plugins.arteta_agent.behavior_policy import get_group_policy
+except ImportError:
+    def get_group_policy(group_id: str, key: str) -> dict:
+        return {}
 try:
     from duckduckgo_search import DDGS
     HAS_WEB_SEARCH = True
@@ -164,6 +171,24 @@ AGENT_VISUAL_TRACE = _setting_enabled(
 AGENT_RESPONSE_TIMEOUT = float(
     _read_runtime_setting("ARTETA_AGENT_RESPONSE_TIMEOUT", "arteta_agent_response_timeout", "180")
 )
+AGENT_PROGRESS_ENABLED = _setting_enabled(
+    _read_runtime_setting("ARTETA_AGENT_PROGRESS_ENABLED", "arteta_agent_progress_enabled", "true")
+)
+AGENT_PROGRESS_INITIAL_DELAY = float(
+    _read_runtime_setting("ARTETA_AGENT_PROGRESS_INITIAL_DELAY", "arteta_agent_progress_initial_delay", "0.8")
+)
+AGENT_PROGRESS_MIN_INTERVAL = float(
+    _read_runtime_setting("ARTETA_AGENT_PROGRESS_MIN_INTERVAL", "arteta_agent_progress_min_interval", "1.8")
+)
+AGENT_PROGRESS_HEARTBEAT = float(
+    _read_runtime_setting("ARTETA_AGENT_PROGRESS_HEARTBEAT", "arteta_agent_progress_heartbeat", "12.0")
+)
+AGENT_SYNTHESIS_HEARTBEAT = float(
+    _read_runtime_setting("ARTETA_AGENT_SYNTHESIS_HEARTBEAT", "arteta_agent_synthesis_heartbeat", "10.0")
+)
+AGENT_PROGRESS_MAX_MESSAGES = int(
+    _read_runtime_setting("ARTETA_AGENT_PROGRESS_MAX_MESSAGES", "arteta_agent_progress_max_messages", "9")
+)
 AGENT_AUTONOMOUS_ACTIVATION = _setting_enabled(
     _read_runtime_setting("ARTETA_AGENT_AUTONOMOUS_ACTIVATION", "arteta_agent_autonomous_activation", "true")
 )
@@ -193,6 +218,20 @@ def agent_visual_trace_enabled(group_id: str) -> bool:
     return str(group_id) in AGENT_VISUAL_TRACE_GROUPS
 
 
+def agent_progress_enabled(group_id: str) -> bool:
+    item = get_group_policy(str(group_id), "progress.enabled")
+    if item:
+        return bool(item.get("value"))
+    return AGENT_PROGRESS_ENABLED
+
+
+def progress_show_observations(group_id: str) -> bool:
+    item = get_group_policy(str(group_id), "progress.show_observations")
+    if item:
+        return bool(item.get("value"))
+    return True
+
+
 def append_agent_visual_trace(answer: str, trace) -> str:
     # Only append the sanitized trace block; raw prompts, arguments, API keys,
     # and full tool observations must never be exposed to QQ messages. Keep it
@@ -219,7 +258,8 @@ async def send_agent_answer_message(
         user_requested_image=user_requested_image,
     )
     if decision.mode == "text":
-        decision = ReplyTransportDecision("image", "default_ui_image")
+        await bot.send(event, answer)
+        return decision
 
     should_use_html = needs_html_render(answer) or decision.reason in {
         "long_structured_content",
@@ -1423,13 +1463,29 @@ def append_current_turn_style_guard(
         has_document=has_document,
         has_url=has_url,
     )
+    from plugins.arteta_agent.response.length_policy import build_dynamic_response_constraints, resolve_long_form_policy
+
+    long_form_policy = resolve_long_form_policy(
+        user_message,
+        has_image=has_image,
+        route_hint=route_hint,
+        current_information_required=current_information_required,
+        has_document=has_document,
+        has_url=has_url,
+    )
+    style_guard = build_response_style_guard(profile, recent_opening_guard=build_recent_opening_guard(messages))
+    dynamic_constraints = build_dynamic_response_constraints(long_form_policy)
+    if dynamic_constraints in style_guard:
+        combined_guard = style_guard
+    else:
+        combined_guard = "{0}\n\n{1}".format(style_guard, dynamic_constraints)
     messages.append({
         "role": "user",
         "content": (
             "APP_GENERATED_RESPONSE_STYLE:\n"
             "{0}\n\n"
             "以上为应用根据结构化上下文生成的本轮写作约束，不包含外部网页、PDF、群消息或工具结果。"
-        ).format(build_response_style_guard(profile, recent_opening_guard=build_recent_opening_guard(messages))),
+        ).format(combined_guard),
     })
 
 
@@ -2049,6 +2105,27 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
         print(f"[delayed_response] 后台任务开始 group={group_id} user={user_id}")
         trace = None
         show_trace = agent_visual_trace_enabled(group_id)
+        progress_reporter = None
+        if USE_AGENT_REGISTRY and agent_progress_enabled(group_id):
+            async def send_progress_message(text):
+                await bot.send(event, Message(text))
+
+            progress_reporter = DebugProgressReporter(
+                send_progress_message,
+                config=ProgressReporterConfig(
+                    initial_delay_seconds=AGENT_PROGRESS_INITIAL_DELAY,
+                    minimum_update_interval_seconds=AGENT_PROGRESS_MIN_INTERVAL,
+                    tool_heartbeat_seconds=AGENT_PROGRESS_HEARTBEAT,
+                    synthesis_heartbeat_seconds=AGENT_SYNTHESIS_HEARTBEAT,
+                    maximum_messages=AGENT_PROGRESS_MAX_MESSAGES,
+                ),
+                formatter_policy=ProgressFormatterPolicy(
+                    show_observations=progress_show_observations(group_id),
+                ),
+            )
+            async def progress_observer(event, _state):
+                await progress_reporter.handle_event(event)
+
         async def call_answer_model(active_messages):
             nonlocal trace
             if direct_football_news_answer:
@@ -2071,6 +2148,7 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                         trace=trace,
                         temperature=DEEPSEEK_TEMPERATURE,
                         request_timeout=AGENT_RESPONSE_TIMEOUT,
+                        progress_observer=progress_observer if progress_reporter else None,
                     ),
                     timeout=AGENT_RESPONSE_TIMEOUT,
                 )
@@ -2098,14 +2176,20 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                 answer = await call_answer_model(retry_messages)
         except asyncio.TimeoutError:
             print(f"[delayed_response] 超时 group={group_id} user={user_id}")
+            if progress_reporter:
+                await progress_reporter.close()
             await bot.send(event, Message("⏰ 教练这次思考太久，重新说一遍？"))
             return
         except Exception as e:
             print(f"[delayed_response] 异常: {e} group={group_id} user={user_id}")
+            if progress_reporter:
+                await progress_reporter.close()
             await bot.send(event, Message(format_user_facing_exception(e)))
             return
 
         if should_skip_agent_reply(answer):
+            if progress_reporter:
+                await progress_reporter.close()
             if allow_no_reply:
                 await send_pending_mood_emojis(tool_context)
                 print(f"[AgentActivation] skipped reply group={group_id} user={user_id}")
@@ -2165,6 +2249,8 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                     if trace_block:
                         answer = append_agent_visual_trace(answer, trace)
 
+                if progress_reporter:
+                    await progress_reporter.close()
                 transport_decision = await send_agent_answer_message(
                     bot,
                     event,
@@ -2204,12 +2290,16 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                     print(f"[AgentTrace] rendered group={group_id} user={user_id}")
             except Exception as e:
                 print(f"[delayed_response] 回复处理出错: {e}")
+                if progress_reporter:
+                    await progress_reporter.close()
                 try:
                     await bot.send(event, Message(f"回复处理出错：{str(e)}"))
                 except Exception as e2:
                     print(f"[delayed_response] 连错误提示都发不出去: {e2}")
         else:
             print(f"[delayed_response] answer 为空，group={group_id} user={user_id}")
+            if progress_reporter:
+                await progress_reporter.close()
             await bot.send(event, Message("让我想想再回答你。"))
 
     asyncio.create_task(delayed_response())

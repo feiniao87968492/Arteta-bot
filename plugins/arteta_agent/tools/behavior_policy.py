@@ -48,14 +48,15 @@ def register_tools() -> None:
         name="update_behavior_policy",
         description=(
             "更新当前群的可持久化行为策略。只用于软行为偏好，不用于绕过权限。"
-            "例如 emoji.enabled=false、tool.send_mood_emoji.disabled=true、render.reply_body={...}。"
+            "例如 emoji.enabled=false、progress.enabled=true、reply.default_detail_mode=expanded、"
+            "tool.send_mood_emoji.disabled=true、render.reply_body={...}。"
         ),
         parameters={
             "type": "object",
             "properties": {
                 "key": {
                     "type": "string",
-                    "description": "策略键；允许 emoji.*、render.*、reply.*、trace.*、tool.* 这类软行为策略",
+                    "description": "策略键；允许 emoji.*、progress.*、render.*、reply.*、trace.*、tool.* 这类软行为策略",
                 },
                 "value": {
                     "type": "string",
