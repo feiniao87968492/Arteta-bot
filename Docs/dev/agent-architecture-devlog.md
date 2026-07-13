@@ -5640,3 +5640,24 @@ This policy aligns the offline labels with Activation scope: pure current-footba
   - Same focused command after implementation: `1 passed`.
   - `python -m pytest tests\test_agent_progress_longform_manual_evidence.py -q`
   - Result: `4 passed`.
+
+### Deployment
+
+- Deployed archive: `/tmp/arteta_default_ui_image_regression_0e78452.tar.gz`.
+- Remote backup directory: `/opt/arteta_bot/backups/default_ui_image_regression_0e78452_20260713192648`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_chat.py`;
+  - `tools/validate_agent_progress_longform_manual_evidence.py`.
+- Restarted `arteta_bot`; service state after restart:
+  - `arteta_bot RUNNING pid 7531`;
+  - `arteta_dashboard RUNNING pid 6650`.
+- Remote smoke:
+  - `./venv/bin/python tools/verify_features.py --suite chat --json-only`
+  - Result: `4 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-192720/report.json`.
+  - `./venv/bin/python tools/verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-192720/report.json`.
+  - `./venv/bin/python -m unittest tests.test_arteta_chat_commands.ClearGroupMemoryCommandTests.test_send_agent_answer_message_uses_image_for_short_plain_reply`
+  - Result: `OK`.
+- Post-restart log health:
+  - `tail -120 logs/arteta_bot.log | grep -E 'ERROR|CRITICAL|Traceback'`
+  - Result: no matches.
