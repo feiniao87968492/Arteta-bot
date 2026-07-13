@@ -94,3 +94,49 @@ python tools\verify_features.py --suite agent_loop --json-only
 python -m compileall -q bot.py plugins tests tools dashboard
 git diff --check
 ```
+
+## ECS Deployment
+
+Deployed commit:
+
+```text
+59357c7 feat: add agent progress and expanded replies
+```
+
+Deployment evidence:
+
+```text
+archive: /tmp/arteta_agent_react_longform_59357c7.tar.gz
+backup: /opt/arteta_bot/backups/react_longform_59357c7_20260713183658
+services: arteta_bot RUNNING pid 6646; arteta_dashboard RUNNING pid 6650
+```
+
+Remote smoke:
+
+```text
+./venv/bin/python tools/verify_features.py --suite chat --json-only
+4 passed, report /opt/arteta_bot/artifacts/verify/20260713-183715/report.json
+
+./venv/bin/python tools/verify_features.py --suite agent_loop --json-only
+14 passed, report /opt/arteta_bot/artifacts/verify/20260713-183715/report.json
+
+./venv/bin/python tools/verify_features.py --suite agent_registry --suite agent_permissions --json-only
+14 passed, report /opt/arteta_bot/artifacts/verify/20260713-183759/report.json
+```
+
+Post-restart log health:
+
+```text
+tail -120 logs/arteta_bot.log | grep -E 'ERROR|CRITICAL|Traceback'
+# no matches
+```
+
+## Manual Acceptance Gate
+
+The task plan still requires operator-provided live QQ evidence before full closure:
+
+- 12 end-to-end QQ samples covering one-word greeting, short football opinion, image/meme explanation, latest injury, transfer news, math, algorithm, document summary, group memory, explicit concise request, tool timeout fallback, and admin confirmation tool.
+- Each sample must record the Progress sequence, real tool call order, final answer structure/length, no parameter leaks, Reporter close behavior, and final text/image transport.
+- Before/after screenshots must come from real QQ captures or operator-provided historical screenshots.
+
+Automated fixtures, local tests, and ECS smoke are not substitutes for those live screenshots.

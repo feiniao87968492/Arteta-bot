@@ -39,8 +39,28 @@
 
 ### Remaining Manual Gate
 
-- Live QQ smoke still needs operator-facing evidence for long-running current-news/math/image cases if this task is being closed against production ECS behavior.
-- ECS deploy/smoke must still be run after commit because this pass is local-only so far.
+- Live QQ smoke still needs operator-facing evidence for the 12 end-to-end sample categories listed in `Docs/tasks/arteta_agent_react_longform_integrated_plan.md`.
+- Before/after screenshots still require operator-provided captures; they were not fabricated from automated fixtures.
+- The code, local verification, ECS deployment, and ECS smoke gates below are complete for commit `59357c7`.
+
+### ECS Deployment And Smoke
+
+- Commit deployed: `59357c7 feat: add agent progress and expanded replies`.
+- Deployment archive: `/tmp/arteta_agent_react_longform_59357c7.tar.gz`.
+- Remote backup directory: `/opt/arteta_bot/backups/react_longform_59357c7_20260713183658`.
+- Remote `py_compile` passed for the deployed plugin and test files from the commit.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- Final service state:
+  - `arteta_bot RUNNING pid 6646`;
+  - `arteta_dashboard RUNNING pid 6650`.
+- Remote smoke:
+  - `./venv/bin/python tools/verify_features.py --suite chat --json-only`
+  - Result: `4 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-183715/report.json`.
+  - `./venv/bin/python tools/verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-183715/report.json`.
+  - `./venv/bin/python tools/verify_features.py --suite agent_registry --suite agent_permissions --json-only`
+  - Result: `14 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-183759/report.json`.
+- Last 120 `logs/arteta_bot.log` lines after restart had no `ERROR`, `CRITICAL`, or `Traceback` matches.
 
 ## 2026-07-11 - Phase A: Dynamic System Injection Closure
 
