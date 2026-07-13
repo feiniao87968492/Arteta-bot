@@ -139,4 +139,6 @@ The task plan still requires operator-provided live QQ evidence before full clos
 - Each sample must record the Progress sequence, real tool call order, final answer structure/length, no parameter leaks, Reporter close behavior, and final text/image transport.
 - Before/after screenshots must come from real QQ captures or operator-provided historical screenshots.
 
+Use `Docs/dev/agent-progress-longform-manual-evidence.md` as the evidence sheet for those observations.
+
 Automated fixtures, local tests, and ECS smoke are not substitutes for those live screenshots.
