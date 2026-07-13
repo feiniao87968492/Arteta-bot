@@ -5731,3 +5731,42 @@ This policy aligns the offline labels with Activation scope: pure current-footba
   - Same focused command after implementation: `5 passed`.
   - `python -m pytest tests\test_arteta_agent_football_freshness.py tests\test_arteta_agent_planning.py tests\test_arteta_agent_routing.py tests\test_arteta_agent_provider.py::test_web_access_fetch_helpers_reuse_shared_client tests\test_arteta_agent_web_search.py tests\test_arteta_agent_web_modules.py tests\test_arteta_agent_registry.py::test_web_search_reads_groksearch_env_lazily tests\test_arteta_agent_registry.py::test_web_search_uses_groksearch_when_configured tests\test_arteta_agent_registry.py::test_web_search_falls_back_when_groksearch_returns_empty tests\test_arteta_agent_registry.py::test_web_search_falls_back_when_groksearch_exceeds_first_hop_budget tests\test_arteta_agent_registry.py::test_web_search_uses_bing_html_when_available tests\test_arteta_agent_registry.py::test_agent_loop_forces_web_search_for_public_current_transfer_questions tests\test_arteta_agent_registry.py::test_agent_loop_forces_web_search_for_recent_team_match_questions tests\test_arteta_agent_registry.py::test_agent_loop_uses_behavior_policy_route_for_public_current_questions tests\test_arteta_agent_registry.py::test_agent_loop_falls_back_to_grok_when_route_policy_tool_is_unavailable -q`
   - Result: `86 passed`.
+  - `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result: `196 passed`.
+  - `python -m compileall plugins\arteta_agent\planning\plan_builder.py plugins\arteta_agent\tools\web\handlers.py`
+  - Result: passed.
+
+### ECS Deployment
+
+- Commit: `137aed2`.
+- Deployment archive: `/tmp/arteta_web_fallback_137aed2.tar.gz` on ECS.
+- Remote backup directory: `/opt/arteta_bot/backups/web_fallback_137aed2_20260713231013`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/activation.py`;
+  - `plugins/arteta_agent/routing/freshness.py`;
+  - `plugins/arteta_agent/planning/plan_builder.py`;
+  - `plugins/arteta_agent/tools/web/handlers.py`.
+- Remote route probe for `塔子帮我查一下目前那些队伍对加纳乔感兴趣`:
+  - `activation True`;
+  - `freshness_mode required`;
+  - `freshness_intent transfer_status`;
+  - required tool: `web_search`;
+  - `current_information_required True`.
+- Remote ordinary search fallback probe with GrokSearch env unset:
+  - `web_search("Garnacho Manchester United transfer Chelsea latest")`;
+  - status `ok`;
+  - returned public web results.
+- Remote Behavior Policy check:
+  - `route.public_current_fact.preferred_tool` policy count: `0`.
+- Restart:
+  - `supervisorctl restart arteta_bot`;
+  - `arteta_bot RUNNING pid 12474`;
+  - `arteta_dashboard RUNNING pid 6650`.
+- Remote smoke:
+  - `./venv/bin/python tools/verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-231447/report.json`.
+  - `./venv/bin/python tools/verify_features.py --suite chat --json-only`
+  - Result: `4 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-231447/report.json`.
+- Post-restart log health:
+  - `tail -120 /opt/arteta_bot/logs/arteta_bot.log | grep -E 'ERROR|CRITICAL|Traceback'`
+  - Result: no matches.
