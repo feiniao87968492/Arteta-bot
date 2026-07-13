@@ -5254,3 +5254,40 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 ### Remaining
 
 - The actual 12 live QQ observations and before/after screenshots still require operator-provided evidence. They were not fabricated from automated fixtures.
+
+## 2026-07-13 Personality Response Manual Evidence Validator
+
+### Scope
+
+- Added a repository-local validator for the remaining manual QQ screenshot acceptance gate.
+- Kept this as a development/verification tool only. It does not affect bot runtime behavior.
+
+### Changes
+
+- Added `tools/validate_personality_manual_evidence.py`.
+- Added `tests/test_personality_manual_evidence.py`.
+- Updated `Docs/dev/personality-response-manual-evidence.md` with the validation command and screenshot path expectations.
+- Updated `Docs/dev/personality-response-acceptance.md` so final completion requires the manual evidence table plus a passing validator run.
+
+### RED/GREEN Verification
+
+- RED:
+  - `python -m pytest tests\test_personality_manual_evidence.py -q`
+  - Result before implementation: failed with `ModuleNotFoundError: No module named 'tools.validate_personality_manual_evidence'`.
+- GREEN:
+  - `python -m pytest tests\test_personality_manual_evidence.py -q`
+  - Result: `2 passed`.
+  - `python -m py_compile tools\validate_personality_manual_evidence.py tests\test_personality_manual_evidence.py`
+  - Result: passed.
+
+### Current Manual Gate
+
+- `python tools\validate_personality_manual_evidence.py --json`
+  - Result: failed as expected because the current table is still a blank checklist.
+  - The validator found the required 12 sample rows and 5 before/after rows, but reported missing live QQ observations, screenshot paths, numeric counts, pass/fail values, and screenshot files.
+
+### Remaining
+
+- Fill the evidence table from real QQ observations and redacted screenshots.
+- Re-run `python tools\validate_personality_manual_evidence.py`.
+- Only after it passes can the task-book manual acceptance item be treated as satisfied.

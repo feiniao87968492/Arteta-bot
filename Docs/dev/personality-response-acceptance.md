@@ -171,7 +171,11 @@ The following task-plan evidence remains manual-only and was not fabricated:
 
 Reason: the local environment can deploy and run remote smoke tests, but it cannot safely trigger real QQ group conversations or recover pre-change visual screenshots without operator input. The automated evaluator and ECS smoke prove the code paths and risk flags, but they are not a substitute for live QQ screenshot review.
 
-Use `Docs/dev/personality-response-manual-evidence.md` as the required evidence table for the remaining live QQ observations. The goal should not be marked fully complete until that table is filled from real post-deployment QQ replies and operator-provided before/after screenshots.
+Use `Docs/dev/personality-response-manual-evidence.md` as the required evidence table for the remaining live QQ observations. The goal should not be marked fully complete until that table is filled from real post-deployment QQ replies and operator-provided before/after screenshots, and this command passes:
+
+```powershell
+python tools\validate_personality_manual_evidence.py
+```
 
 ## Residual Risk
 

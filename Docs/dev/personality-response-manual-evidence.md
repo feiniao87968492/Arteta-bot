@@ -55,6 +55,24 @@ The task plan also asks for visual before/after evidence. Because old production
 - `Transport` should be `text` for short plain replies and `image` for code, formulas, tables, long structured content, explicit image requests, or image artifacts.
 - Latest news/current fact replies must record whether sources were shown in natural language.
 - Any row that shows raw `[grok]`, `markers:`, `【Agent 调度】`, tool arguments, or "信任度无变化" in ordinary user-facing output should fail.
+- Screenshot fields must point to real local screenshot files, either relative to the repository root or relative to this evidence file. Use redacted screenshots if raw QQ captures contain private data.
+
+## Validation Command
+
+After filling the table, run:
+
+```powershell
+python tools\validate_personality_manual_evidence.py
+```
+
+The command must pass before the manual acceptance item can be treated as complete. It verifies:
+
+- all 12 required sample rows are filled;
+- required category counts match the task plan;
+- character and paragraph counts are positive integers;
+- transport is `text` or `image`;
+- pass/fail fields are `Pass`;
+- all sample, before, and after screenshot files exist.
 
 ## Current Status
 
