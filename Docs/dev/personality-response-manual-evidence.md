@@ -59,6 +59,24 @@ The task plan also asks for visual before/after evidence. Because old production
 
 ## Validation Command
 
+If you prefer filling CSV files first, generate this Markdown file with:
+
+```powershell
+python tools\build_personality_manual_evidence.py --samples-csv artifacts\personality_manual\samples.csv --before-after-csv artifacts\personality_manual\before_after.csv --output Docs\dev\personality-response-manual-evidence.md
+```
+
+Required `samples.csv` header:
+
+```csv
+category,user_input_summary,screenshot,first_sentence,character_count,paragraph_count,emoji_sent,transport,trace_visible,favorability_visible,source_display,pass_fail,notes
+```
+
+Required `before_after.csv` header:
+
+```csv
+item,before_screenshot,after_screenshot,what_changed,pass_fail,notes
+```
+
 After filling the table, run:
 
 ```powershell

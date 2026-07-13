@@ -5323,3 +5323,35 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 ### Remaining
 
 - Fill real QQ evidence, re-run `python tools\verify_features.py --suite personality_manual`, and require exit code `0` before final task completion.
+
+## 2026-07-13 Personality Response Manual Evidence CSV Builder
+
+### Scope
+
+- Added a helper for operators to generate the manual evidence Markdown from CSV exports.
+- Kept this as a development/verification tool only. It does not alter runtime behavior or validation requirements.
+
+### Changes
+
+- Added `tools/build_personality_manual_evidence.py`.
+- Extended `tests/test_personality_manual_evidence.py` to prove Markdown generated from valid sample and before/after CSV files passes `validate_manual_evidence(...)`.
+- Updated `Docs/dev/personality-response-manual-evidence.md` with:
+  - CSV generation command;
+  - required `samples.csv` header;
+  - required `before_after.csv` header.
+- Updated `Docs/dev/personality-response-acceptance.md` with the optional CSV-to-Markdown generation command before validation.
+
+### RED/GREEN Verification
+
+- RED:
+  - `python -m pytest tests\test_personality_manual_evidence.py::test_manual_evidence_builder_generates_validator_compatible_markdown -q`
+  - Result before implementation: failed with `ModuleNotFoundError: No module named 'tools.build_personality_manual_evidence'`.
+- GREEN:
+  - `python -m pytest tests\test_personality_manual_evidence.py -q`
+  - Result: `3 passed`.
+  - `python -m py_compile tools\build_personality_manual_evidence.py tools\validate_personality_manual_evidence.py tests\test_personality_manual_evidence.py`
+  - Result: passed.
+
+### Remaining
+
+- Operator still needs to provide real QQ evidence and screenshot files. The builder only reduces formatting errors; it does not create acceptance evidence.
