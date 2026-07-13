@@ -30,7 +30,7 @@ def choose_reply_transport(
         return ReplyTransportDecision("image", "math")
     if _TABLE_SEPARATOR_RE.search(body):
         return ReplyTransportDecision("image", "table")
-    if _STYLE_TAG_RE.search(body) and len(body) > plain_text_limit:
+    if _STYLE_TAG_RE.search(body):
         return ReplyTransportDecision("image", "rich_style")
     if len(body) > plain_text_limit and _looks_structured(body):
         return ReplyTransportDecision("image", "long_structured_content")

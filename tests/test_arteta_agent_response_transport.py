@@ -38,3 +38,10 @@ def test_reply_transport_uses_image_for_long_structured_analysis():
 
     assert decision.mode == "image"
     assert decision.reason == "long_structured_content"
+
+
+def test_reply_transport_uses_image_for_short_rich_style_tags():
+    decision = choose_reply_transport("[color=#22bb22][bold][scale=1]hello[/scale][/bold][/color]")
+
+    assert decision.mode == "image"
+    assert decision.reason == "rich_style"

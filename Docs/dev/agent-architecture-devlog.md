@@ -5421,3 +5421,52 @@ This policy aligns the offline labels with Activation scope: pure current-footba
   - Result: `31 passed`.
   - `python -m py_compile plugins\arteta_chat.py tests\test_arteta_chat_commands.py`
   - Result: passed.
+
+## 2026-07-13 QQ Manual Test Reply Transport and Explicit No-Reply Fix
+
+### Scope
+
+- Fixed two live QQ manual-test issues found from `artifacts/personality_manual/screenshots/`:
+  - short styled replies leaked literal `[color]`, `[bold]`, and `[scale]` tags into QQ text;
+  - explicit requests can no longer be silently dropped when the model returns `[NO_REPLY]`.
+- Kept ordinary non-addressed group chatter activation-dependent. Manual acceptance prompts should use `塔子`, `A`, or `@` when a reply is required.
+
+### Root Cause
+
+- `choose_reply_transport(...)` only rendered style-tag replies as images when the body exceeded the plain-text limit. Short rich-style replies were sent through QQ text unchanged.
+- `process_chat(...)` treated `[NO_REPLY]` as a global terminal marker, even for explicit command/mention requests.
+
+### Changes
+
+- Changed rich style detection so any supported style tag routes to image transport.
+- Added an explicit-request response requirement before the final user message.
+- Added one controlled retry when an explicit request returns `[NO_REPLY]`.
+- Preserved `[NO_REPLY]` silence for autonomous activation turns by passing `allow_no_reply=True` only for non-explicit `at_cmd` activation.
+
+### RED/GREEN Verification
+
+- RED:
+  - `python -m pytest tests\test_arteta_agent_response_transport.py::test_reply_transport_uses_image_for_short_rich_style_tags -q`
+  - Result before implementation: failed because mode was `text`.
+  - `python -m pytest tests\test_arteta_chat_commands.py::ClearGroupMemoryCommandTests::test_process_chat_explicit_request_does_not_silently_drop_no_reply_marker -q`
+  - Result before implementation: failed with no sent reply.
+- GREEN:
+  - `python -m pytest tests\test_arteta_agent_response_transport.py::test_reply_transport_uses_image_for_short_rich_style_tags tests\test_arteta_chat_commands.py::ClearGroupMemoryCommandTests::test_process_chat_explicit_request_does_not_silently_drop_no_reply_marker -q`
+  - Result: `2 passed`.
+  - `python -m pytest tests\test_arteta_agent_response_transport.py tests\test_arteta_chat_commands.py tests\test_arteta_favorability.py tests\test_arteta_agent_response_style.py -q`
+  - Result: `41 passed`.
+  - `python -m pytest tests\test_arteta_chat_vision.py tests\test_arteta_agent_mood_response.py tests\test_arteta_agent_behavior_policy_store.py -q`
+  - Result: `42 passed`.
+  - `python tools\verify_features.py --suite chat --json-only`
+  - Result: `4 passed`.
+  - `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+  - `python tools\verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`.
+  - `python -m py_compile plugins\arteta_agent\response\transport.py plugins\arteta_chat.py tests\test_arteta_agent_response_transport.py tests\test_arteta_chat_commands.py`
+  - Result: passed.
+
+### Remaining
+
+- ECS deployment is still required for this commit.
+- SSH to the ECS host timed out during banner exchange during local investigation, so live log inspection for the unprefixed `今天状态怎么样` screenshot could not be completed in this pass.

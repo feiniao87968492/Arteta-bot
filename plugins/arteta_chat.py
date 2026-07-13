@@ -1788,7 +1788,7 @@ async def fetch_quoted_chain(
 
 
 # --- 7. 核心引擎与路由 ---
-async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None):
+async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None, allow_no_reply: bool = False):
     import json
     with open("/tmp/debug.log", "a") as df:
         df.write(f"process_chat called, custom_prompt={custom_prompt}\n")
@@ -2011,6 +2011,15 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
         user_message = "请读取我发送或引用的文档。"
     if not user_message and detected_urls:
         user_message = "请分析我发送或引用的链接。"
+    if not allow_no_reply:
+        messages.append({
+            "role": "user",
+            "content": (
+                "APP_GENERATED_RESPONSE_REQUIREMENT:\n"
+                "This turn explicitly addressed Arteta Bot. Answer the user's request normally. "
+                "Do not output [NO_REPLY]."
+            ),
+        })
     messages.append({"role": "user", "content": user_message})
     # ToolContext is the per-request bridge between NoneBot events and agent
     # tools. Tools should read group/user scope from here instead of globals.
@@ -2041,18 +2050,21 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
         print(f"[delayed_response] 后台任务开始 group={group_id} user={user_id}")
         trace = None
         show_trace = agent_visual_trace_enabled(group_id)
-        try:
+        async def call_answer_model(active_messages):
+            nonlocal trace
             if direct_football_news_answer:
                 print(f"[FootballNews] direct answer used group={group_id} user={user_id}")
-                trace = new_trace("direct_football_news") if show_trace else None
-                answer = direct_football_news_answer
-            elif USE_AGENT_REGISTRY:
+                if trace is None:
+                    trace = new_trace("direct_football_news") if show_trace else None
+                return direct_football_news_answer
+            if USE_AGENT_REGISTRY:
                 # New architecture path: the LLM plans with registered tools,
                 # and every tool call goes through executor + permission checks.
-                trace = new_trace("agent_registry") if show_trace else None
-                answer = await asyncio.wait_for(
+                if trace is None:
+                    trace = new_trace("agent_registry") if show_trace else None
+                return await asyncio.wait_for(
                     run_agent_loop(
-                        messages,
+                        active_messages,
                         tool_context,
                         DEEPSEEK_MODEL,
                         DEEPSEEK_API_KEY,
@@ -2063,12 +2075,28 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
                     ),
                     timeout=AGENT_RESPONSE_TIMEOUT,
                 )
-            else:
-                # Legacy fallback path remains intentionally reachable by
-                # ARTETA_USE_AGENT_REGISTRY=false for production rollback.
+
+            # Legacy fallback path remains intentionally reachable by
+            # ARTETA_USE_AGENT_REGISTRY=false for production rollback.
+            if trace is None:
                 trace = new_trace("legacy_run_tool_loop") if show_trace else None
                 set_fallback(trace, "legacy_run_tool_loop")
-                answer = await asyncio.wait_for(run_tool_loop(messages), timeout=AGENT_RESPONSE_TIMEOUT)
+            return await asyncio.wait_for(run_tool_loop(active_messages), timeout=AGENT_RESPONSE_TIMEOUT)
+
+        try:
+            answer = await call_answer_model(messages)
+            if should_skip_agent_reply(answer) and not allow_no_reply:
+                print(f"[AgentActivation] retry explicit no_reply group={group_id} user={user_id}")
+                retry_messages = list(messages)
+                retry_messages.append({
+                    "role": "user",
+                    "content": (
+                        "APP_GENERATED_RESPONSE_RETRY:\n"
+                        "The previous assistant result was [NO_REPLY], but this is an explicit user request. "
+                        "Provide a concise normal answer now."
+                    ),
+                })
+                answer = await call_answer_model(retry_messages)
         except asyncio.TimeoutError:
             print(f"[delayed_response] 超时 group={group_id} user={user_id}")
             await bot.send(event, Message("⏰ 教练这次思考太久，重新说一遍？"))
@@ -2079,8 +2107,12 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
             return
 
         if should_skip_agent_reply(answer):
-            await send_pending_mood_emojis(tool_context)
-            print(f"[AgentActivation] skipped reply group={group_id} user={user_id}")
+            if allow_no_reply:
+                await send_pending_mood_emojis(tool_context)
+                print(f"[AgentActivation] skipped reply group={group_id} user={user_id}")
+                return
+            await bot.send(event, Message("我在。刚才这条被误判成不用回复了，重新问我一句，我直接接上。"))
+            print(f"[AgentActivation] explicit no_reply fallback group={group_id} user={user_id}")
             return
 
         if answer:
@@ -2410,7 +2442,7 @@ async def handle_chat_cmd(bot: Bot, event: MessageEvent):
         return
     if isinstance(event, GroupMessageEvent) and is_muted(str(event.group_id)):
         return
-    await process_chat(bot, event)
+    await process_chat(bot, event, allow_no_reply=False)
 
 @at_cmd.handle()
 async def handle_at_msg(bot: Bot, event: MessageEvent):
@@ -2421,7 +2453,9 @@ async def handle_at_msg(bot: Bot, event: MessageEvent):
     # 注：不拦截"塔"开头，因为 chat_cmd 只匹配"塔子""阿尔特塔"完整词
     if raw and raw[0] in ("A", "a", "/"):
         return
-    await process_chat(bot, event)
+    has_image = _message_has_image(event)
+    explicit_request = should_consider_agent_response(event, raw_text=raw, has_image=has_image) or await _message_mentions_bot(event)
+    await process_chat(bot, event, allow_no_reply=not explicit_request)
 
 @fav_cmd.handle()
 async def handle_fav(bot: Bot, event: MessageEvent):
