@@ -161,6 +161,9 @@ def install_chat_import_stubs(memory_module, config_values=None):
     remember("plugins.arteta_agent.planner", planner_mod)
 
     prompts_mod = types.ModuleType("plugins.arteta_agent.prompts")
+    prompts_mod.ARTETA_PERSONA_CORE = "persona"
+    prompts_mod.ARTETA_RESPONSE_RULES = "rules"
+    prompts_mod.ARTETA_DEFAULT_PROMPT = "persona\nrules"
     prompts_mod.AGENT_TOOL_PRINCIPLES = ""
     remember("plugins.arteta_agent.prompts", prompts_mod)
 
@@ -483,17 +486,17 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
         finally:
             restore_modules(previous)
 
-    def test_agent_visual_trace_mode_ignores_group_allowlist_for_test_mode(self):
+    def test_agent_visual_trace_mode_respects_group_allowlist(self):
         arteta_chat, previous = load_arteta_chat_module()
         try:
             arteta_chat.AGENT_VISUAL_TRACE = True
             arteta_chat.AGENT_VISUAL_TRACE_GROUPS = {"543915926"}
 
             self.assertTrue(arteta_chat.agent_visual_trace_enabled("543915926"))
-            self.assertTrue(arteta_chat.agent_visual_trace_enabled("491603775"))
+            self.assertFalse(arteta_chat.agent_visual_trace_enabled("491603775"))
 
             arteta_chat.AGENT_VISUAL_TRACE_GROUPS = set()
-            self.assertTrue(arteta_chat.agent_visual_trace_enabled("491603775"))
+            self.assertFalse(arteta_chat.agent_visual_trace_enabled("491603775"))
         finally:
             restore_modules(previous)
 
@@ -513,7 +516,7 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
             self.assertEqual(240.0, arteta_chat.AGENT_RESPONSE_TIMEOUT)
             self.assertEqual(arteta_chat.AGENT_VISUAL_TRACE_GROUPS, {"1104602373"})
             self.assertTrue(arteta_chat.agent_visual_trace_enabled("1104602373"))
-            self.assertTrue(arteta_chat.agent_visual_trace_enabled("491603775"))
+            self.assertFalse(arteta_chat.agent_visual_trace_enabled("491603775"))
         finally:
             restore_modules(previous)
             if old_trace is not None:

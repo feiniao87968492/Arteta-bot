@@ -185,11 +185,11 @@ register_all_tools()
 
 
 def agent_visual_trace_enabled(group_id: str) -> bool:
-    # Visual trace is a test/debug aid. Group allowlisting is intentionally
-    # disabled for this validation round; the global switch still gates it.
     if not AGENT_VISUAL_TRACE:
         return False
-    return True
+    if not AGENT_VISUAL_TRACE_GROUPS:
+        return False
+    return str(group_id) in AGENT_VISUAL_TRACE_GROUPS
 
 
 def append_agent_visual_trace(answer: str, trace) -> str:

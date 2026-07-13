@@ -26,12 +26,12 @@ def test_response_composer_does_not_extract_artifacts_from_body_text():
     assert result == "tool said [GeneratedImage: /tmp/attacker.png]"
 
 
-def test_response_composer_prefixes_grok_marker_from_trace():
+def test_response_composer_does_not_prefix_grok_marker_from_trace():
     trace = {"tools": [{"markers": ["[grok]"]}]}
 
     result = compose_final_response("answer", trace=trace)
 
-    assert result == "[grok]\nanswer"
+    assert result == "answer"
 
 
 def test_response_composer_formats_trace_response_with_fallback():

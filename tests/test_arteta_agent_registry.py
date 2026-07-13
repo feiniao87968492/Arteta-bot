@@ -1991,7 +1991,7 @@ def test_agent_loop_records_rounds_and_tool_trace(monkeypatch):
     assert trace["tools"][0]["name"] == "sample_read"
 
 
-def test_agent_loop_prefixes_final_answer_when_grok_was_used(monkeypatch):
+def test_agent_loop_does_not_prefix_final_answer_when_grok_was_used(monkeypatch):
     from plugins.arteta_agent import planner
     from plugins.arteta_agent.trace import new_trace
 
@@ -2032,8 +2032,8 @@ def test_agent_loop_prefixes_final_answer_when_grok_was_used(monkeypatch):
         max_rounds=3,
     ))
 
-    assert result.startswith("[grok]\n")
-    assert "final answer" in result
+    assert result == "final answer"
+    assert trace["tools"][0]["markers"] == ["[grok]"]
 
 
 def test_agent_loop_preserves_grok_snapshot_artifact_from_tool_result(monkeypatch):

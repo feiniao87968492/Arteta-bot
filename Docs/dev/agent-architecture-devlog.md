@@ -4971,3 +4971,58 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 - Phase 6 still needs normal-reply trace/marker hiding.
 - Phase 7/8 still need transport/render and personality knowledge-boundary work.
+
+## 2026-07-13 Personality Response Optimization Phase 6 Trace And Marker Hiding
+
+### Scope
+
+- Stopped prefixing normal final replies with internal trace markers such as `[grok]`.
+- Kept Grok/source marker data in structured trace/tool metadata for diagnostics.
+- Made visual Agent trace output require both the global switch and an explicit group allowlist entry.
+
+### RED Check
+
+- Extended `tests/test_arteta_agent_response.py` so `compose_final_response("answer", trace={"tools": [{"markers": ["[grok]"]}]})` must return only `answer`.
+- Extended `tests/test_arteta_chat_commands.py` so `agent_visual_trace_enabled(...)` respects `ARTETA_AGENT_VISUAL_TRACE_GROUPS`.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_agent_response.py tests\test_arteta_chat_commands.py -q`
+  - Result: failed because `response/composer.py` still prefixed `[grok]`, and the chat command test stub lacked the new `ARTETA_DEFAULT_PROMPT` constant.
+- Registry regression initially failed because `test_agent_loop_prefixes_final_answer_when_grok_was_used` still asserted the old visible marker contract.
+
+### Changes
+
+- Updated `plugins/arteta_agent/response/composer.py`:
+  - removed normal-reply trace marker prefixing;
+  - retained structured artifact appending only.
+- Updated `plugins/arteta_chat.py`:
+  - `agent_visual_trace_enabled(group_id)` now returns true only when `ARTETA_AGENT_VISUAL_TRACE` is enabled and `group_id` is in `ARTETA_AGENT_VISUAL_TRACE_GROUPS`.
+- Updated tests:
+  - refreshed the chat command import stub for centralized prompt constants;
+  - renamed the Grok registry regression to assert final replies stay clean while `trace["tools"][0]["markers"]` still records `[grok]`.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_agent_response.py tests\test_arteta_chat_commands.py -q`
+  - Result after implementation: `25 passed`.
+- `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result after registry expectation update: `192 passed`.
+- `python -m py_compile plugins\arteta_agent\response\composer.py plugins\arteta_chat.py tests\test_arteta_chat_commands.py tests\test_arteta_agent_registry.py`
+  - Result: passed.
+- `python tools\evaluate_personality_style.py --output artifacts\personality_style_eval_report_phase6.json`
+  - Result:
+    - `trace_prefixes_grok_marker=false`;
+    - `visible_trace_marker_cases=0`;
+    - `fixed_opening_prompt_hits=0`;
+    - `forced_neutral_emoji_cases=0`;
+    - `visible_favorability_cases=0`.
+
+### Compatibility
+
+- Explicit trace rendering remains available through the existing sanitized trace footer path.
+- Tool names, trace structure, artifact handling, permissions, PendingAction, Provider, Runtime, Web Access, ChromaDB, and database schema were not changed.
+- Grok marker provenance is still retained in trace metadata, but no longer appears in ordinary replies by default.
+
+### Remaining
+
+- Phase 7 still needs reply transport/render decision improvements.
+- Phase 8 still needs personality knowledge-boundary work.
