@@ -5154,3 +5154,52 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 ### Remaining
 
 - Final acceptance should run the combined personality-related tests, registry regression, evaluator, and a broader test pass.
+
+## 2026-07-13 Personality Response Optimization Final Acceptance
+
+### Scope
+
+- Completed acceptance for `Docs/tasks/arteta_personality_response_optimization_plan.md`.
+- Updated stale personality evaluator expectations so Phase 6's hidden trace-marker behavior is the tested baseline.
+
+### Requirement Review
+
+- Phase 0 baseline exists:
+  - `tests/fixtures/personality_eval_cases.json`;
+  - `tools/evaluate_personality_style.py`;
+  - `tests/test_arteta_personality_eval.py`.
+- Phase 1 prompt centralization is covered by `plugins/arteta_agent/prompts.py`, Dashboard prompt defaults, and prompt style tests.
+- Phase 2 style profiles are covered by `plugins/arteta_agent/response/style.py` and response-style tests.
+- Phase 3 opening guard is covered by opening signature and fixed-action guard tests.
+- Phase 4 mood emoji policy is covered by mood response tests and registry expectations.
+- Phase 5 favorability decoupling is covered by `plugins/arteta_agent/response/favorability.py`, QQ/Dashboard integrations, and favorability tests.
+- Phase 6 trace/marker hiding is covered by response/composer, chat command, registry, and personality evaluator tests.
+- Phase 7 reply transport/render modes are covered by transport, chat helper, and render template tests.
+- Phase 8 personality knowledge boundaries are covered by prompt and knowledge-tool boundary tests.
+
+### Final Verification
+
+- `python -m pytest tests\test_arteta_agent_response_style.py tests\test_arteta_agent_mood_response.py tests\test_arteta_favorability.py tests\test_arteta_prompt_style.py tests\test_arteta_agent_response.py tests\test_arteta_agent_response_transport.py tests\test_arteta_knowledge_boundaries.py tests\test_arteta_chat_commands.py tests\test_arteta_render.py tests\dashboard\test_prompt_service.py tests\dashboard\test_bot_chat.py -q`
+  - Result: `91 passed`.
+- `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+- `python tools\evaluate_personality_style.py --output artifacts\personality_style_eval_report_final.json`
+  - Result:
+    - `fixed_opening_prompt_hits=0`;
+    - `mood_forces_positive_neutral=false`;
+    - `forced_neutral_emoji_cases=0`;
+    - `favorability_prompt_marker_required=false`;
+    - `trace_prefixes_grok_marker=false`;
+    - `visible_favorability_cases=0`;
+    - `visible_trace_marker_cases=0`;
+    - `total=41`.
+- `python -m pytest tests -q`
+  - First run exposed stale expectation in `tests/test_arteta_personality_eval.py` that still expected `[grok]` prefixing.
+  - After updating the expectation, result: `657 passed`.
+- `python -m compileall -q bot.py plugins tests tools dashboard`
+  - Result: passed.
+
+### Compatibility
+
+- No Web Access security, ChromaDB schema, PendingAction, Provider, Runtime, or permission model changes were made in the final acceptance slice.
+- The active branch has each implementation phase committed and pushed to `origin/feat/chromadb-memory`.

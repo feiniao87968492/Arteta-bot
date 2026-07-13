@@ -33,8 +33,9 @@ def test_personality_eval_report_records_current_baseline_flags():
     assert "current_code_baseline" in report
     assert "risk_flags" in report
     assert report["current_code_baseline"]["mood_forces_positive_neutral"] is False
-    assert report["current_code_baseline"]["trace_prefixes_grok_marker"] is True
+    assert report["current_code_baseline"]["trace_prefixes_grok_marker"] is False
     assert report["risk_flags"]["forced_neutral_emoji_cases"] == 0
+    assert report["risk_flags"]["visible_trace_marker_cases"] == 0
 
 
 def test_personality_eval_baseline_checks_favorability_marker_only_in_default_prompt():
