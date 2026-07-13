@@ -142,3 +142,12 @@ The task plan still requires operator-provided live QQ evidence before full clos
 Use `Docs/dev/agent-progress-longform-manual-evidence.md` as the evidence sheet for those observations.
 
 Automated fixtures, local tests, and ECS smoke are not substitutes for those live screenshots.
+
+Manual evidence can be checked with:
+
+```bash
+python tools\validate_agent_progress_longform_manual_evidence.py --json
+python tools\verify_features.py --suite agent_progress_manual --json-only
+```
+
+These commands are expected to fail while the evidence sheet still contains blank rows. The suite is intentionally explicit-only and is not part of `core` or `all`.

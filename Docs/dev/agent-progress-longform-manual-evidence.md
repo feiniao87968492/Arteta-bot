@@ -49,6 +49,17 @@ The task plan asks for visual before/after evidence. Because old production beha
 - Math, algorithm, code, document, and tactical/detail requests include method, key steps, validation, and answer where applicable.
 - The final reply is sent only after delayed progress and heartbeat tasks are closed.
 
+## Validation
+
+Run either command after filling the tables:
+
+```bash
+python tools\validate_agent_progress_longform_manual_evidence.py --json
+python tools\verify_features.py --suite agent_progress_manual --json-only
+```
+
+The validation requires screenshot paths to resolve to real local files relative to the repository root or this evidence file.
+
 ## Current Status
 
 Local tests and ECS smoke are complete for commit `59357c7`, and deployment evidence is recorded in `Docs/dev/agent-progress-longform.md`.

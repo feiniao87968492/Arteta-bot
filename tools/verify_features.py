@@ -2035,6 +2035,44 @@ def personality_manual_evidence_complete(ctx: RunContext) -> CaseResult:
 
 
 # ---------------------------------------------------------------------------
+# Agent progress long-form manual acceptance suite
+# ---------------------------------------------------------------------------
+
+
+def agent_progress_manual_evidence_complete(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    validator = import_module("tools.validate_agent_progress_longform_manual_evidence")
+    evidence_path = os.path.join(ctx.repo_root, "Docs", "dev", "agent-progress-longform-manual-evidence.md")
+    result = validator.validate_manual_evidence(evidence_path, repo_root=ctx.repo_root)
+    artifact = ctx.artifact_path("agent_progress_manual", "manual_evidence_validation.json")
+    write_text(artifact, json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    details = {
+        "sample_rows": result.get("sample_rows", 0),
+        "before_after_rows": result.get("before_after_rows", 0),
+        "scenario_counts": result.get("scenario_counts", {}),
+        "errors": result.get("errors", []),
+        "evidence": relative(evidence_path),
+    }
+    if result.get("ok"):
+        return pass_result(
+            "agent_progress_manual",
+            "manual_evidence_complete",
+            "manual evidence complete",
+            start,
+            artifacts=[relative(artifact)],
+            details=details,
+        )
+    return fail_result(
+        "agent_progress_manual",
+        "manual_evidence_complete",
+        "manual evidence incomplete: {0} validation error(s)".format(len(result.get("errors", []))),
+        start,
+        artifacts=[relative(artifact)],
+        details=details,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Online suite
 # ---------------------------------------------------------------------------
 
@@ -2194,6 +2232,13 @@ def build_registry() -> Dict[str, SuiteSpec]:
             "Manual personality response screenshot acceptance gate",
             [
                 ("manual_evidence_complete", safe_case("personality_manual", "manual_evidence_complete", personality_manual_evidence_complete)),
+            ],
+        ),
+        "agent_progress_manual": SuiteSpec(
+            "agent_progress_manual",
+            "Manual agent progress and long-form QQ screenshot acceptance gate",
+            [
+                ("manual_evidence_complete", safe_case("agent_progress_manual", "manual_evidence_complete", agent_progress_manual_evidence_complete)),
             ],
         ),
     }
