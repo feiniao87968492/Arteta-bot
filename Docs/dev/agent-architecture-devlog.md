@@ -5468,5 +5468,13 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 ### Remaining
 
-- ECS deployment is still required for this commit.
-- SSH to the ECS host timed out during banner exchange during local investigation, so live log inspection for the unprefixed `今天状态怎么样` screenshot could not be completed in this pass.
+- ECS deployment is still required for commit `d26002f`.
+- Deployment attempts were blocked locally because SSH reached TCP/22 but timed out during banner exchange:
+  - `ssh -o BatchMode=yes -o ConnectTimeout=12 arteta ...`
+  - Result: `Connection timed out during banner exchange`.
+  - `Test-NetConnection 118.178.140.171 -Port 22`
+  - Result: `TcpTestSucceeded=True`.
+  - `ssh -o BatchMode=yes -o ConnectTimeout=45 ...`
+  - Result: `Connection timed out during banner exchange`.
+- `deploy/deploy_quick.py` could not be used because `ARTETA_DEPLOY_HOST` and `ARTETA_DEPLOY_PASSWORD` were not set in the local shell.
+- Live log inspection for the unprefixed `今天状态怎么样` screenshot could not be completed in this pass for the same SSH reason.
