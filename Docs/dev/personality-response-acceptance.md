@@ -44,6 +44,27 @@ The implementation phases in the task plan are complete in code and automated ve
    - `plugins/arteta_agent/prompts.py`
    - `plugins/arteta_agent/tools/football.py`
 
+## Reaction Emoji Addendum
+
+The mood emoji subsystem has since been refactored from the old `positive_neutral` / `negative` random path into the reaction emoji pipeline:
+
+- `plugins/arteta_agent/emoji/` owns Gate, Classifier, Catalog, Selector, and History.
+- `plugins/arteta_agent/response/mood.py` now routes the finalizer through reaction decisions.
+- `plugins/arteta_agent/tools/qq_actions.py` keeps the public `send_mood_emoji` tool name but accepts `reaction`, `intensity`, `stance`, `topic`, `emoji_name`, `reason_code`, and legacy `mood`.
+- The model prompt no longer tells the main model to proactively call `send_mood_emoji`; automatic emoji is handled after final reply generation.
+
+Dedicated evidence: `Docs/dev/reaction-emoji-manual-evidence.md`.
+
+Latest reaction-emoji verification:
+
+```powershell
+python -m pytest tests\test_arteta_agent_mood_response.py tests\test_arteta_agent_registry.py tests\test_arteta_prompt_style.py tests\test_arteta_agent_emoji_gate.py tests\test_arteta_agent_emoji_classifier.py tests\test_arteta_agent_emoji_catalog.py tests\test_arteta_agent_emoji_selector.py -q
+# 233 passed
+
+python -m pytest tests -q
+# 728 passed
+```
+
 ## Local Verification
 
 Commands run locally:

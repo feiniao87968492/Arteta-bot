@@ -106,3 +106,5 @@ Both commands must pass before the manual acceptance item can be treated as comp
 Automated code and ECS smoke acceptance is recorded in `Docs/dev/personality-response-acceptance.md`.
 
 Manual QQ screenshot evidence is still pending until this file is filled with real operator observations.
+
+The separate reaction emoji pipeline evidence lives in `Docs/dev/reaction-emoji-manual-evidence.md`.

@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from plugins.arteta_agent.emoji.catalog import load_emoji_catalog
@@ -47,6 +49,7 @@ def test_catalog_falls_back_to_legacy_scan_when_manifest_missing_or_broken(tmp_p
     write_file(missing_root / "开心" / "happy.png")
     write_file(missing_root / "思考" / "thinking.gif")
     write_file(missing_root / "消极" / "angry.webp")
+    write_file(missing_root / "消极" / "震惊.png")
     write_file(missing_root / "unknown.png")
 
     broken_root = tmp_path / "broken_manifest"
@@ -60,6 +63,7 @@ def test_catalog_falls_back_to_legacy_scan_when_manifest_missing_or_broken(tmp_p
     assert by_name["happy"].reactions == ["celebration"]
     assert by_name["thinking"].reactions == ["thinking"]
     assert by_name["angry"].reactions == ["frustrated"]
+    assert by_name["震惊"].reactions == ["surprised"]
     assert by_name["unknown"].reactions == ["approval"]
     assert by_name["unknown"].weight == 0.3
     assert broken_assets[0].name == "sad"
@@ -123,3 +127,26 @@ def test_build_emoji_manifest_generates_initial_tags_without_overwriting_manual_
     assert result["manifest"]["assets"]["mystery"]["reactions"] == ["approval"]
     assert "unknown/mystery.png" in result["unrecognized"]
     assert json.loads(output.read_text(encoding="utf-8"))["assets"]["happy"]["weight"] == 2.5
+
+
+def test_build_emoji_manifest_cli_runs_from_repo_root(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    root = tmp_path / "emoji"
+    write_file(root / "开心" / "happy.png")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "tools/build_emoji_manifest.py",
+            str(root),
+            "--dry-run",
+        ],
+        cwd=str(repo_root),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["manifest"]["assets"]["happy"]["reactions"] == ["celebration"]
