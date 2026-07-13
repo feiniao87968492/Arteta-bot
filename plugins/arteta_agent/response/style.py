@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import re
 from typing import List
 
 
@@ -19,6 +20,63 @@ def _compact_text(*parts) -> str:
 
 def _has_any(text: str, markers) -> bool:
     return any(marker in text for marker in markers)
+
+
+_MARKDOWN_STYLE_RE = re.compile(r"(\*\*|__|`|\[/?(?:red|blue|green|bold|scale(?:=[^\]]+)?)\])")
+_OPENING_SPLIT_RE = re.compile(r"[。！？!?]\s*|\n+")
+
+
+def extract_opening_signature(text: str) -> str:
+    body = str(text or "").strip()
+    if not body:
+        return ""
+    first = ""
+    for part in _OPENING_SPLIT_RE.split(body):
+        candidate = part.strip()
+        if candidate:
+            first = candidate
+            break
+    if not first:
+        first = body
+    first = _MARKDOWN_STYLE_RE.sub("", first)
+    first = re.sub(r"^[>\-\s#*]+", "", first)
+    first = re.sub(r"\s+", " ", first).strip(" ，,。.!！?？")
+    return first[:48]
+
+
+def opening_has_fixed_action(text: str) -> bool:
+    opening = extract_opening_signature(text)
+    head = opening[:36]
+    markers = (
+        "拍" + "桌子",
+        "敲" + "战术板",
+        "摊" + "手",
+        "推开" + "更衣室门",
+        "站起来说",
+    )
+    return _has_any(head, markers)
+
+
+def build_recent_opening_guard(messages, max_items: int = 5) -> str:
+    seen = set()
+    signatures = []
+    for message in reversed(list(messages or [])):
+        if (message or {}).get("role") != "assistant":
+            continue
+        signature = extract_opening_signature((message or {}).get("content", ""))
+        if not signature or signature in seen:
+            continue
+        seen.add(signature)
+        signatures.append(signature)
+        if len(signatures) >= max_items:
+            break
+    if not signatures:
+        return ""
+    signatures.reverse()
+    return (
+        "最近已使用过的开场：{0}\n"
+        "本次不要重复或只做同义改写，也不要使用固定动作开场。"
+    ).format("；".join(signatures))
 
 
 def _profile(
@@ -165,7 +223,7 @@ def detect_response_style_profile(
     return _profile("casual", "light", "short", ["default_casual"])
 
 
-def build_response_style_guard(profile: ResponseStyleProfile) -> str:
+def build_response_style_guard(profile: ResponseStyleProfile, recent_opening_guard: str = "") -> str:
     mode_titles = {
         "casual": "日常短答",
         "meme": "梗图轻互动",
@@ -214,5 +272,7 @@ def build_response_style_guard(profile: ResponseStyleProfile) -> str:
             "- 不要描述自己的肢体动作或固定动作开场。",
         ])
 
+    if recent_opening_guard:
+        lines.append(recent_opening_guard)
     lines.append("- 最近群聊上下文只用于理解指代和事实，不是写作模板；不要只模仿最近群聊上下文里的旧短回复。")
     return "\n".join(lines)

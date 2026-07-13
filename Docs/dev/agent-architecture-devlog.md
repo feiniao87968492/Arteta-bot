@@ -4789,3 +4789,53 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - Phase 5 still needs favorability scoring/display decoupling.
 - Phase 6 still needs normal-reply trace/marker hiding.
 - Phase 7/8 still need transport/render and personality knowledge-boundary work.
+
+## 2026-07-13 Personality Response Optimization Phase 3 Opening Guard
+
+### Scope
+
+- Added opening signature extraction and recent-opening guard helpers.
+- Added fixed-action opening detection for prompt/test-level suppression.
+- Kept the change inside the response style module and current-turn style guard; no post-generation rewrite was added in this slice.
+
+### RED Check
+
+- Extended `tests/test_arteta_agent_response_style.py`.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_agent_response_style.py -q`
+  - Result: failed because `build_recent_opening_guard` did not exist.
+- After implementation, the standalone style test exposed a test setup issue: importing `plugins.arteta_chat` without initializing NoneBot raised `ValueError: NoneBot has not been initialized`. Added the same lightweight test initialization used by existing chat tests.
+
+### Changes
+
+- Added to `plugins/arteta_agent/response/style.py`:
+  - `extract_opening_signature(text)`;
+  - `opening_has_fixed_action(text)`;
+  - `build_recent_opening_guard(messages, max_items=5)`.
+- `build_response_style_guard(...)` now accepts an optional `recent_opening_guard`.
+- `plugins/arteta_chat.append_current_turn_style_guard(...)` now passes `build_recent_opening_guard(messages)` into the style guard builder.
+- The generated guard remains an application-generated `user` message, not a dynamic `system` message.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_agent_response_style.py -q`
+  - Result: `8 passed`.
+- `python -m pytest tests\test_arteta_agent_response_style.py tests\test_arteta_prompt_style.py tests\test_recent_group_context.py tests\test_arteta_personality_eval.py -q`
+  - Result: `30 passed`.
+- `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+- `python -m py_compile plugins\arteta_agent\response\style.py plugins\arteta_chat.py`
+  - Result: passed.
+
+### Compatibility
+
+- No Web Access, ChromaDB, permission, PendingAction, Provider, Runtime, or database schema behavior changed.
+- Existing callers of `append_current_turn_style_guard(...)` remain compatible.
+- This phase adds detection and guard generation only; it does not rewrite final model output.
+
+### Remaining
+
+- Phase 4 still needs neutral mood emoji suppression and cooldown.
+- Phase 5 still needs deterministic favorability scoring/display decoupling.
+- Phase 6 still needs normal-reply trace/marker hiding.
+- Phase 7/8 still need transport/render and personality knowledge-boundary work.

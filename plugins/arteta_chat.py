@@ -58,7 +58,11 @@ from plugins.arteta_agent.context import ToolContext
 from plugins.arteta_agent.activation import decide_activation_with_agent, is_activation_candidate
 from plugins.arteta_agent.planner import run_agent_loop
 from plugins.arteta_agent.prompts import ARTETA_DEFAULT_PROMPT
-from plugins.arteta_agent.response.style import build_response_style_guard, detect_response_style_profile
+from plugins.arteta_agent.response.style import (
+    build_recent_opening_guard,
+    build_response_style_guard,
+    detect_response_style_profile,
+)
 try:
     from plugins.arteta_agent.planner import ProviderResponseError
 except ImportError:
@@ -1383,7 +1387,7 @@ def append_current_turn_style_guard(
             "APP_GENERATED_RESPONSE_STYLE:\n"
             "{0}\n\n"
             "以上为应用根据结构化上下文生成的本轮写作约束，不包含外部网页、PDF、群消息或工具结果。"
-        ).format(build_response_style_guard(profile)),
+        ).format(build_response_style_guard(profile, recent_opening_guard=build_recent_opening_guard(messages))),
     })
 
 

@@ -1,7 +1,19 @@
 from plugins.arteta_agent.response.style import (
     build_response_style_guard,
+    build_recent_opening_guard,
     detect_response_style_profile,
+    extract_opening_signature,
+    opening_has_fixed_action,
 )
+
+
+def _ensure_nonebot_initialized():
+    import nonebot
+
+    try:
+        nonebot.get_driver()
+    except ValueError:
+        nonebot.init()
 
 
 def test_response_style_profile_classifies_core_modes():
@@ -73,6 +85,7 @@ def test_build_response_style_guard_is_short_and_mode_specific():
 
 
 def test_arteta_chat_appends_style_module_guard_for_current_turn():
+    _ensure_nonebot_initialized()
     from plugins import arteta_chat
 
     messages = [{"role": "system", "content": "BASE"}]
@@ -87,3 +100,45 @@ def test_arteta_chat_appends_style_module_guard_for_current_turn():
     assert "APP_GENERATED_RESPONSE_STYLE" in messages[-1]["content"]
     assert "【本轮表达模式：梗图轻互动】" in messages[-1]["content"]
     assert "120 字以内" in messages[-1]["content"]
+
+
+def test_extract_opening_signature_normalizes_first_sentence():
+    signature = extract_opening_signature("  **结论**：阿森纳该压上。\n\n第二段继续解释。")
+
+    assert signature == "结论：阿森纳该压上"
+
+
+def test_opening_has_fixed_action_detects_action_templates():
+    assert opening_has_fixed_action(("推开" + "更衣室门") + "，我先说结论。") is True
+    assert opening_has_fixed_action(("敲" + "战术板") + "，这事很清楚。") is True
+    assert opening_has_fixed_action("我的判断很直接：这不是好选择。") is False
+
+
+def test_build_recent_opening_guard_lists_recent_unique_assistant_openings():
+    messages = [
+        {"role": "assistant", "content": "好了，先说结论。后面解释。"},
+        {"role": "user", "content": "继续"},
+        {"role": "assistant", "content": "我的判断很直接：这事不该拖。"},
+        {"role": "assistant", "content": "好了，先说结论。另一个话题。"},
+    ]
+
+    guard = build_recent_opening_guard(messages)
+
+    assert "最近已使用过的开场" in guard
+    assert "好了，先说结论" in guard
+    assert "我的判断很直接" in guard
+    assert guard.count("好了，先说结论") == 1
+    assert "不要重复或只做同义改写" in guard
+
+
+def test_build_response_style_guard_includes_recent_opening_guard():
+    profile = detect_response_style_profile("罗杰斯适合阿森纳吗")
+    opening_guard = build_recent_opening_guard([
+        {"role": "assistant", "content": "我的判断很直接：先别急着下结论。"},
+    ])
+
+    guard = build_response_style_guard(profile, recent_opening_guard=opening_guard)
+
+    assert "最近已使用过的开场" in guard
+    assert "我的判断很直接" in guard
+    assert "不要重复或只做同义改写" in guard
