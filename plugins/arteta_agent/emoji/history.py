@@ -51,3 +51,21 @@ def automatic_cooldown_active(group_id: str) -> bool:
     recent = history[-AUTO_COOLDOWN_STREAK:]
     return all(item.automatic for item in recent)
 
+
+def recent_automatic_asset_names(group_id: str, limit: int = 5) -> List[str]:
+    names = []
+    for item in reversed(get_emoji_history(group_id)):
+        if not item.automatic:
+            continue
+        if item.asset_name and item.asset_name not in names:
+            names.append(item.asset_name)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def latest_reaction(group_id: str) -> str:
+    history = get_emoji_history(group_id)
+    if not history:
+        return ""
+    return history[-1].reaction
