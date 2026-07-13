@@ -5661,3 +5661,37 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - Post-restart log health:
   - `tail -120 logs/arteta_bot.log | grep -E 'ERROR|CRITICAL|Traceback'`
   - Result: no matches.
+
+## 2026-07-13 Implicit Transfer Interest Route Fix
+
+### Root Cause
+
+- User query: `塔子帮我查一下目前那些队伍对加纳乔感兴趣`.
+- Remote network was healthy: DNS resolved public hosts and HTTPS to `https://api.github.com` returned `200`.
+- The agent freshness route did not classify this wording as current football information:
+  - `freshness.mode == "none"`;
+  - no required web tool was planned.
+- Missing markers:
+  - `加纳乔` was not a known player alias;
+  - `队伍` / `俱乐部` were not football context markers;
+  - `感兴趣` / `有意` / `关注` were not current transfer-status markers;
+  - the lightweight activation gate also missed `目前哪些队伍对...感兴趣`.
+
+### Changes
+
+- Added transfer-interest markers to the football freshness detector.
+- Added `加纳乔 -> Alejandro Garnacho` alias.
+- Added `队伍` and `俱乐部` as football context markers.
+- Added activation gate markers for implicit transfer-interest questions.
+
+### Verification
+
+- RED:
+  - `python -m pytest tests\test_arteta_agent_football_freshness.py::test_implicit_current_football_questions_require_web_plan tests\test_arteta_agent_football_freshness.py::test_implicit_current_football_questions_pass_activation_candidate_gate -q`
+  - Result before implementation: 2 failed for `freshness.mode == "none"` and activation candidate `False`.
+- GREEN:
+  - Same focused command after implementation: `2 passed`.
+  - `python -m pytest tests\test_arteta_agent_football_freshness.py tests\test_arteta_agent_planning.py -q`
+  - Result: `20 passed`.
+  - `python -m compileall plugins\arteta_agent\activation.py plugins\arteta_agent\routing\freshness.py`
+  - Result: passed.

@@ -54,6 +54,12 @@ CURRENT_FACT_MARKERS = (
     "转会",
     "续约",
     "解约",
+    "感兴趣",
+    "有意",
+    "关注",
+    "报价",
+    "问价",
+    "接触",
     "官宣",
     "发布会",
     "赛程",
@@ -163,6 +169,8 @@ FOOTBALL_MARKERS = (
     "英格兰",
     "罗马诺",
     "球队",
+    "队伍",
+    "俱乐部",
     "球员",
     "比赛",
     "VAR",
@@ -228,6 +236,8 @@ PLAYER_ALIASES = {
     "蒂尔尼": "Kieran Tierney",
     "哲凯": "Viktor Gyokeres",
     "约克雷斯": "Viktor Gyokeres",
+    "加纳乔": "Alejandro Garnacho",
+    "garnacho": "Alejandro Garnacho",
 }
 
 TEAM_ALIASES = {
@@ -372,7 +382,7 @@ def _intent_for_current_text(text: str, context_text: str) -> str:
         return "injury_status"
     if _has_any(combined, ("首发", "大名单", "名单", "没上", "不上", "缺席")):
         return "lineup"
-    if _has_any(combined, ("转会", "续约", "解约", "成没成", "签约")):
+    if _has_any(combined, ("转会", "续约", "解约", "成没成", "签约", "感兴趣", "有意", "关注", "报价", "问价", "接触")):
         return "transfer_status"
     if _extract_x_status_url(combined) or _has_any(combined, NEWS_OR_X_MARKERS):
         return "breaking_football_news"

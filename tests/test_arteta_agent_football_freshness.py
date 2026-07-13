@@ -49,6 +49,7 @@ def test_implicit_current_football_questions_require_web_plan():
         ("阿森纳积分榜排名多少", "current_standings"),
         ("阿森纳伤病名单现在怎么样", "injury_status"),
         ("塔子你了解西班牙和比利时最近的一场比赛吗", "recent_match_result"),
+        ("塔子帮我查一下目前那些队伍对加纳乔感兴趣", "transfer_status"),
     ]
 
     for text, expected_intent in examples:
@@ -385,7 +386,7 @@ def test_required_current_information_tool_success_allows_model_answer():
 def test_implicit_current_football_questions_pass_activation_candidate_gate():
     from plugins.arteta_agent.activation import is_activation_candidate
 
-    for text in ("萨卡怎么没上", "下一场呢", "这笔转会到底成没成", "罗马诺又发什么了"):
+    for text in ("萨卡怎么没上", "下一场呢", "这笔转会到底成没成", "罗马诺又发什么了", "目前哪些队伍对加纳乔感兴趣"):
         assert is_activation_candidate(text) is True, text
 
 
