@@ -6,7 +6,13 @@ Task: `Docs/tasks/arteta_personality_response_optimization_plan.md`
 
 Branch: `feat/chromadb-memory`
 
-Latest local/remote commit for this acceptance: `bde6cfe test: record personality response acceptance`
+Latest code acceptance commit: `bde6cfe test: record personality response acceptance`
+
+Latest documentation commit at the time of the manual-evidence handoff:
+
+```text
+37eb0d0 docs: refresh readme for latest agent architecture
+```
 
 ## Completed Implementation
 
@@ -164,6 +170,8 @@ The following task-plan evidence remains manual-only and was not fabricated:
 - human notes for each live reply: first sentence, word count, paragraph count, emoji, image/text transport, trace visibility, favorability visibility, and source display.
 
 Reason: the local environment can deploy and run remote smoke tests, but it cannot safely trigger real QQ group conversations or recover pre-change visual screenshots without operator input. The automated evaluator and ECS smoke prove the code paths and risk flags, but they are not a substitute for live QQ screenshot review.
+
+Use `Docs/dev/personality-response-manual-evidence.md` as the required evidence table for the remaining live QQ observations. The goal should not be marked fully complete until that table is filled from real post-deployment QQ replies and operator-provided before/after screenshots.
 
 ## Residual Risk
 

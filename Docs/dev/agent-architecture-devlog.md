@@ -5229,3 +5229,28 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 - Added `Docs/dev/personality-response-acceptance.md` with implementation evidence, local verification, ECS smoke, and acceptance matrix mapping.
 - The task-plan request for 12 live QQ reply screenshots and before/after screenshots remains operator-manual evidence. It was not fabricated from automated fixtures.
+
+## 2026-07-13 Personality Response Manual Evidence Handoff
+
+### Scope
+
+- Added an operator-facing manual evidence checklist for the remaining live QQ screenshot acceptance items in `Docs/tasks/arteta_personality_response_optimization_plan.md`.
+- Kept this as documentation only: no runtime behavior, Web Access, ChromaDB, permissions, PendingAction, Provider, Runtime, render transport, or database schema changed.
+
+### Changes
+
+- Added `Docs/dev/personality-response-manual-evidence.md` with:
+  - the 12 required live QQ reply rows;
+  - fields for first sentence, character count, paragraph count, emoji, transport, Trace, favorability, and source display;
+  - before/after screenshot slots;
+  - explicit pass/fail rules for raw Trace, `[grok]`, markers, and ordinary favorability display.
+- Updated `Docs/dev/personality-response-acceptance.md` to distinguish the latest code acceptance commit from later documentation commits and to point to the manual evidence sheet.
+
+### Verification
+
+- `git diff --check -- Docs/dev/personality-response-acceptance.md Docs/dev/personality-response-manual-evidence.md Docs/dev/agent-architecture-devlog.md`
+  - Result: passed.
+
+### Remaining
+
+- The actual 12 live QQ observations and before/after screenshots still require operator-provided evidence. They were not fabricated from automated fixtures.
