@@ -63,9 +63,10 @@ After filling the table, run:
 
 ```powershell
 python tools\validate_personality_manual_evidence.py
+python tools\verify_features.py --suite personality_manual
 ```
 
-The command must pass before the manual acceptance item can be treated as complete. It verifies:
+Both commands must pass before the manual acceptance item can be treated as complete. They verify:
 
 - all 12 required sample rows are filled;
 - required category counts match the task plan;
@@ -73,6 +74,8 @@ The command must pass before the manual acceptance item can be treated as comple
 - transport is `text` or `image`;
 - pass/fail fields are `Pass`;
 - all sample, before, and after screenshot files exist.
+
+`personality_manual` is intentionally not part of the default `core` or `all` verification suites because it depends on operator-provided live QQ screenshots. Run it explicitly when closing this task.
 
 ## Current Status
 

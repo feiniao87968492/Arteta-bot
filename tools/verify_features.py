@@ -1997,6 +1997,44 @@ def agent_loop_forces_explicit_memory_tool(ctx: RunContext) -> CaseResult:
 
 
 # ---------------------------------------------------------------------------
+# Personality manual acceptance suite
+# ---------------------------------------------------------------------------
+
+
+def personality_manual_evidence_complete(ctx: RunContext) -> CaseResult:
+    start = time.time()
+    validator = import_module("tools.validate_personality_manual_evidence")
+    evidence_path = os.path.join(ctx.repo_root, "Docs", "dev", "personality-response-manual-evidence.md")
+    result = validator.validate_manual_evidence(evidence_path, repo_root=ctx.repo_root)
+    artifact = ctx.artifact_path("personality_manual", "manual_evidence_validation.json")
+    write_text(artifact, json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    details = {
+        "sample_rows": result.get("sample_rows", 0),
+        "before_after_rows": result.get("before_after_rows", 0),
+        "category_counts": result.get("category_counts", {}),
+        "errors": result.get("errors", []),
+        "evidence": relative(evidence_path),
+    }
+    if result.get("ok"):
+        return pass_result(
+            "personality_manual",
+            "manual_evidence_complete",
+            "manual evidence complete",
+            start,
+            artifacts=[relative(artifact)],
+            details=details,
+        )
+    return fail_result(
+        "personality_manual",
+        "manual_evidence_complete",
+        "manual evidence incomplete: {0} validation error(s)".format(len(result.get("errors", []))),
+        start,
+        artifacts=[relative(artifact)],
+        details=details,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Online suite
 # ---------------------------------------------------------------------------
 
@@ -2149,6 +2187,13 @@ def build_registry() -> Dict[str, SuiteSpec]:
             [
                 ("image_api_config", safe_case("online", "image_api_config", online_image_api_config)),
                 ("side_effects_gate", safe_case("online", "side_effects_gate", online_side_effects_gate)),
+            ],
+        ),
+        "personality_manual": SuiteSpec(
+            "personality_manual",
+            "Manual personality response screenshot acceptance gate",
+            [
+                ("manual_evidence_complete", safe_case("personality_manual", "manual_evidence_complete", personality_manual_evidence_complete)),
             ],
         ),
     }

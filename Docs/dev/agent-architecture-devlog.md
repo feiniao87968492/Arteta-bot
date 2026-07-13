@@ -5291,3 +5291,35 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - Fill the evidence table from real QQ observations and redacted screenshots.
 - Re-run `python tools\validate_personality_manual_evidence.py`.
 - Only after it passes can the task-book manual acceptance item be treated as satisfied.
+
+## 2026-07-13 Personality Response Manual Evidence Verify Suite
+
+### Scope
+
+- Connected the manual evidence validator to the standard `tools/verify_features.py` runner as an explicit suite.
+- Kept it out of default `core` and `all` suites because it depends on operator-provided live QQ screenshots.
+
+### Changes
+
+- Added `personality_manual` suite with `manual_evidence_complete` case.
+- Updated `tests/test_verify_features.py` to assert:
+  - the suite is registered;
+  - the case is not included in `core` or `all`;
+  - the current blank evidence checklist fails with structured validation errors.
+- Updated manual evidence and acceptance docs with:
+  - `python tools\validate_personality_manual_evidence.py`;
+  - `python tools\verify_features.py --suite personality_manual`.
+
+### RED/GREEN Verification
+
+- RED:
+  - `python -m pytest tests\test_verify_features.py::VerifyFeaturesTests::test_registry_contains_explicit_personality_manual_suite_only tests\test_verify_features.py::VerifyFeaturesTests::test_personality_manual_suite_fails_until_real_evidence_is_filled -q`
+  - Result before implementation: failed because `personality_manual` was not registered and `personality_manual_evidence_complete` did not exist.
+- GREEN:
+  - Same command after implementation: `2 passed`.
+  - `python tools\verify_features.py --suite personality_manual --json-only`
+  - Result: exit code `1`, as expected for the current blank manual evidence table.
+
+### Remaining
+
+- Fill real QQ evidence, re-run `python tools\verify_features.py --suite personality_manual`, and require exit code `0` before final task completion.

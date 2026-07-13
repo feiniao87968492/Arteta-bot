@@ -175,6 +175,7 @@ Use `Docs/dev/personality-response-manual-evidence.md` as the required evidence 
 
 ```powershell
 python tools\validate_personality_manual_evidence.py
+python tools\verify_features.py --suite personality_manual
 ```
 
 ## Residual Risk

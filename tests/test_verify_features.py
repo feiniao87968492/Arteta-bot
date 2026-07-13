@@ -162,6 +162,28 @@ class VerifyFeaturesTests(unittest.TestCase):
         loop_case_names = [name for name, _case in registry["agent_loop"].cases]
         self.assertIn("executor_error_paths", loop_case_names)
 
+    def test_registry_contains_explicit_personality_manual_suite_only(self):
+        registry = verify_features.build_registry()
+
+        self.assertIn("personality_manual", registry)
+        case_names = [name for name, _case in registry["personality_manual"].cases]
+        self.assertIn("manual_evidence_complete", case_names)
+        self.assertNotIn("manual_evidence_complete", [name for name, _case in registry["core"].cases])
+        self.assertNotIn("manual_evidence_complete", [name for name, _case in registry["all"].cases])
+
+    def test_personality_manual_suite_fails_until_real_evidence_is_filled(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ctx = self.make_context(tmpdir)
+            ctx.repo_root = verify_features.REPO_ROOT
+
+            result = verify_features.personality_manual_evidence_complete(ctx)
+
+            self.assertEqual(verify_features.STATUS_FAIL, result.status)
+            self.assertIn("manual evidence incomplete", result.message)
+            self.assertEqual(12, result.details["sample_rows"])
+            self.assertEqual(5, result.details["before_after_rows"])
+            self.assertGreater(len(result.details["errors"]), 0)
+
     def test_agent_registry_web_access_offline_ignores_live_grok_env(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             ctx = self.make_context(tmpdir)
