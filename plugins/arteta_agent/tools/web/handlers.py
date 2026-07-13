@@ -234,7 +234,7 @@ async def _fetch_bing_html(query: str, max_results: int, timeout_seconds: float 
         params={"q": query},
         headers=headers,
         timeout=timeout_seconds,
-        follow_redirects=False,
+        follow_redirects=True,
     )
     response.raise_for_status()
     return response.text

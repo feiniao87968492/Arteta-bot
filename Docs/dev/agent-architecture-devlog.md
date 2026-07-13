@@ -5671,6 +5671,10 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - The agent freshness route did not classify this wording as current football information:
   - `freshness.mode == "none"`;
   - no required web tool was planned.
+- Follow-up remote web tool probes found the search backend was also fragile:
+  - `grok_search` returned `ReadTimeout`;
+  - DuckDuckGo/Jina were unreachable from ECS;
+  - Bing itself returned `200` when redirects were followed, but `_fetch_bing_html(...)` used `follow_redirects=False`, so the normal ECS-region `302 -> https://cn.bing.com/...` response became `HTTPStatusError`.
 - Missing markers:
   - `加纳乔` was not a known player alias;
   - `队伍` / `俱乐部` were not football context markers;
@@ -5683,6 +5687,7 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - Added `加纳乔 -> Alejandro Garnacho` alias.
 - Added `队伍` and `俱乐部` as football context markers.
 - Added activation gate markers for implicit transfer-interest questions.
+- Allowed Bing search helper redirects so the legacy web-search fallback can follow Bing's regional redirect.
 
 ### Verification
 
@@ -5694,4 +5699,10 @@ This policy aligns the offline labels with Activation scope: pure current-footba
   - `python -m pytest tests\test_arteta_agent_football_freshness.py tests\test_arteta_agent_planning.py -q`
   - Result: `20 passed`.
   - `python -m compileall plugins\arteta_agent\activation.py plugins\arteta_agent\routing\freshness.py`
+  - Result: passed.
+  - `python -m pytest tests\test_arteta_agent_provider.py::test_web_access_fetch_helpers_reuse_shared_client -q`
+  - Result before implementation: failed because Bing search was still called with `follow_redirects=False`.
+  - `python -m pytest tests\test_arteta_agent_provider.py::test_web_access_fetch_helpers_reuse_shared_client tests\test_arteta_agent_web_search.py tests\test_arteta_agent_web_modules.py -q`
+  - Result: `21 passed`.
+  - `python -m compileall plugins\arteta_agent\tools\web\handlers.py`
   - Result: passed.
