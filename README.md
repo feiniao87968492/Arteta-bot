@@ -2,7 +2,7 @@
 
 Arteta Bot 是一个基于 NoneBot2、OneBot V11 和 NapCat 的 QQ 群聊机器人。它以阿森纳主教练米克尔·阿尔特塔的口吻参与群聊，同时具备群记忆、实时足球信息核验、图片识别、图片生成、渲染、权限确认、行为策略和审计能力。
 
-项目当前已经从早期的单体 `run_tool_loop()` 演进为模块化 Agent 架构：`planner.py` 只保留兼容入口，真正的决策、计划、运行、工具执行、模型调用、回复生成和策略持久化分别由独立模块负责。
+项目当前已经从早期的单体 `run_tool_loop()` 演进为模块化 Agent 架构：`planner.py` 只保留 `run_agent_loop(...)` 兼容入口，并把旧参数封装成 `AgentRequest`；真正的决策、计划、运行、工具执行、模型调用、回复生成和策略持久化分别由独立模块负责。
 
 ## 核心能力
 
@@ -25,11 +25,12 @@ QQ / NapCat
   -> NoneBot2
   -> plugins/arteta_chat.py
   -> plugins/arteta_agent/planner.py        # 兼容入口 run_agent_loop(...)
-  -> plugins/arteta_agent/service.py        # AgentRequest 编排
+  -> AgentRequest
+  -> plugins/arteta_agent/service.py        # 请求准备、确认消费、策略 TTL 和最终组合
   -> activation.py                          # 群聊自主唤醒 cheap gate + LLM gate
   -> routing/                               # Intent / RouteDecision / FreshnessDecision
-  -> planning/                              # AgentPlan / required tools / dependencies
-  -> runtime/                               # AgentState / LoopGuard / unified loop
+  -> planning/                              # AgentPlan / required tools / explicit dependencies
+  -> runtime/                               # AgentState / LoopGuard / unified execution loop
   -> registry.py + executor.py              # ToolSpec / Schema / permission / handler
   -> providers/                             # OpenAI-compatible provider / shared HTTP client
   -> response/                              # final text / artifacts / trace / mood
@@ -66,6 +67,18 @@ QQ / NapCat
 | Policy | `plugins/arteta_agent/behavior_policy.py` / `policy/` | 管理 SQLite 行为策略、TTL 消耗和旧 JSON 迁移兼容。 |
 | Web Access | `plugins/arteta_agent/tools/web/` | 搜索、网页抓取、X/Twitter 读取、SSRF 校验、响应限制、格式化和事实证据收集。 |
 | Audit | `plugins/arteta_agent/audit.py` | 持久化确认、拒绝、执行、异常、超时和管理动作的脱敏审计记录。 |
+
+### 关键结构化对象
+
+| 对象 | 位置 | 用途 |
+| --- | --- | --- |
+| `AgentRequest` | `plugins/arteta_agent/service.py` | `planner.py` 的兼容参数被封装成请求对象，供 Service 统一调度。 |
+| `RouteDecision` / `Intent` | `plugins/arteta_agent/routing/models.py` | 表达多意图、工具约束、上下文排除和足球时效性判断。 |
+| `AgentPlan` | `plugins/arteta_agent/planning/models.py` | 保存 required tools、excluded tools、constraints 和显式依赖关系。 |
+| `AgentState` | `plugins/arteta_agent/runtime/state.py` | 记录运行中消息、工具结果、预算、当前事实状态和停止原因。 |
+| `ToolSpec` | `plugins/arteta_agent/registry.py` | 定义工具 schema、权限等级、幂等性、并发安全能力和 handler。 |
+| `ToolResult` | `plugins/arteta_agent/result.py` | 结构化承载工具状态、错误码、artifact、marker、pending action 和耗时。 |
+| `ProviderCapabilities` | `plugins/arteta_agent/providers/openai_compatible.py` | 声明模型供应商是否支持 tool history、JSON schema、reasoning content 等能力。 |
 
 ## 当前足球事实链路
 
