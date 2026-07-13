@@ -621,14 +621,24 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
         finally:
             restore_modules(previous)
 
-    def test_send_agent_answer_message_uses_text_for_short_plain_reply(self):
+    def test_send_agent_answer_message_uses_image_for_short_plain_reply(self):
         arteta_chat, previous = load_arteta_chat_module()
         try:
             sent = []
+            image_called = []
 
             class FakeBot(object):
                 async def send(self, event, message):
                     sent.append(message)
+
+            class FakeMessageSegment(object):
+                @staticmethod
+                def image(data):
+                    image_called.append(data)
+                    return data
+
+            arteta_chat.MessageSegment = FakeMessageSegment
+            arteta_chat.text_to_tactical_board = lambda text: text
 
             result = asyncio.run(arteta_chat.send_agent_answer_message(
                 FakeBot(),
@@ -637,7 +647,9 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
                 [],
             ))
 
-            self.assertEqual(result.mode, "text")
+            self.assertEqual(result.mode, "image")
+            self.assertEqual(result.reason, "default_ui_image")
+            self.assertEqual(image_called, sent)
             self.assertEqual(sent, ["早，今天先把节奏稳住。"])
         finally:
             restore_modules(previous)
@@ -678,6 +690,11 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
                 async def send(self, event, message):
                     sent.append(str(message))
 
+            class FakeMessageSegment(object):
+                @staticmethod
+                def image(data):
+                    return data
+
             async def no_op(*args, **kwargs):
                 return None
 
@@ -710,6 +727,8 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
                 return task
 
             arteta_chat.asyncio.create_task = tracking_create_task
+            arteta_chat.MessageSegment = FakeMessageSegment
+            arteta_chat.text_to_tactical_board = lambda text: text
             arteta_chat.refresh_group_name = no_op
             arteta_chat.save_message = no_op
             arteta_chat.get_player_data = fake_get_player_data
@@ -780,6 +799,11 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
                 async def send(self, event, message):
                     sent.append(str(message))
 
+            class FakeMessageSegment(object):
+                @staticmethod
+                def image(data):
+                    return data
+
             async def no_op(*args, **kwargs):
                 return None
 
@@ -814,6 +838,8 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
                 return task
 
             arteta_chat.asyncio.create_task = tracking_create_task
+            arteta_chat.MessageSegment = FakeMessageSegment
+            arteta_chat.text_to_tactical_board = lambda text: text
             arteta_chat.refresh_group_name = no_op
             arteta_chat.save_message = no_op
             arteta_chat.get_player_data = fake_get_player_data

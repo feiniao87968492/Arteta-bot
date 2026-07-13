@@ -67,7 +67,7 @@ from plugins.arteta_agent.response.favorability import (
     format_favorability_notice,
     strip_legacy_favor_markers,
 )
-from plugins.arteta_agent.response.transport import choose_reply_transport
+from plugins.arteta_agent.response.transport import ReplyTransportDecision, choose_reply_transport
 try:
     from plugins.arteta_agent.planner import ProviderResponseError
 except ImportError:
@@ -219,8 +219,7 @@ async def send_agent_answer_message(
         user_requested_image=user_requested_image,
     )
     if decision.mode == "text":
-        await bot.send(event, Message(str(answer or "")))
-        return decision
+        decision = ReplyTransportDecision("image", "default_ui_image")
 
     should_use_html = needs_html_render(answer) or decision.reason in {
         "long_structured_content",

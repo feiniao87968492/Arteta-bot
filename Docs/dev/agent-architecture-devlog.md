@@ -5503,3 +5503,39 @@ This policy aligns the offline labels with Activation scope: pure current-footba
   - `./venv/bin/python tools/verify_features.py --suite agent_loop --json-only`
   - Result: `14 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-160256/report.json`.
 - Remote focused pytest was not run because the production venv does not include `pytest`.
+
+## 2026-07-13 Default Main Replies to UI Images
+
+### Scope
+
+- Changed the main Agent reply transport so all normal group replies use the UI image path by default.
+- Kept direct operational messages outside this helper unchanged: timeout/error text, permission confirmation prompts, `[NO_REPLY]` silence, and separate image artifacts keep their existing behavior.
+- This removes the previous group-by-group difference where only groups with `render.reply_body` style policies produced image replies.
+
+### Changes
+
+- `send_agent_answer_message(...)` now upgrades a short plain-text `ReplyTransportDecision("text", "short_plain_text")` into `ReplyTransportDecision("image", "default_ui_image")`.
+- Existing rich-style/code/math/table/long-content image routing remains unchanged.
+- Updated chat command tests so short plain replies assert the image route and process-level tests use a fake image segment.
+
+### RED/GREEN Verification
+
+- RED:
+  - `python -m pytest tests\test_arteta_chat_commands.py::ClearGroupMemoryCommandTests::test_send_agent_answer_message_uses_image_for_short_plain_reply -q`
+  - Result before implementation: failed because mode was `text`.
+- GREEN:
+  - Same focused command after implementation: `1 passed`.
+  - `python -m pytest tests\test_arteta_chat_commands.py tests\test_arteta_agent_response_transport.py tests\test_arteta_favorability.py tests\test_arteta_agent_response_style.py -q`
+  - Result: `41 passed`.
+  - `python -m py_compile plugins\arteta_chat.py tests\test_arteta_chat_commands.py`
+  - Result: passed.
+  - `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+  - `python tools\verify_features.py --suite chat --json-only`
+  - Result: `4 passed`.
+  - `python tools\verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`.
+
+### Deployment
+
+- Pending ECS deployment for this slice.
