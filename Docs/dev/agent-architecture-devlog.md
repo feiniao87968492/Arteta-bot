@@ -4589,3 +4589,62 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 - The task-plan manual smoke matrix is now covered by automated routing/planning acceptance tests.
 - No football freshness plan acceptance item remains open from this follow-up.
+
+## 2026-07-13 Personality Response Optimization Phase 0 Baseline
+
+### Scope
+
+- Started `docs/tasks/arteta_personality_response_optimization_plan.md`.
+- Added the Phase 0 baseline dataset and evaluator only; no runtime response behavior changed in this slice.
+- Kept the dataset repo-safe by using anonymized/synthetic group-chat cases instead of raw private messages.
+
+### RED Check
+
+- Added `tests/test_arteta_personality_eval.py`.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_personality_eval.py -q`
+  - Result: failed with `ModuleNotFoundError: No module named 'tools.evaluate_personality_style'`, proving the Phase 0 evaluator did not exist yet.
+
+### Changes
+
+- Added `tests/fixtures/personality_eval_cases.json` with 41 anonymized cases covering:
+  - casual chat;
+  - meme/image replies;
+  - football opinion;
+  - current news/transfer/injury/fixture checks;
+  - tactical deep dives;
+  - serious/debug/privacy/math cases;
+  - explicit emoji requests;
+  - trace queries;
+  - two screenshot-regression placeholders from the task-plan problem class.
+- Added `tools/evaluate_personality_style.py`.
+- The evaluator validates dataset shape and records current baseline risk flags without changing production behavior.
+
+### Baseline Result
+
+- `python tools\evaluate_personality_style.py --output artifacts\personality_style_eval_report.json`
+- Result:
+  - `total=41`;
+  - mode counts: casual `7`, meme `6`, football_opinion `8`, current_news `7`, tactical_deep_dive `6`, serious `7`;
+  - `mood_forces_positive_neutral=true`;
+  - `favorability_prompt_marker_required=true`;
+  - `trace_prefixes_grok_marker=true`;
+  - `fixed_opening_prompt_hits=3`;
+  - risk flags: forced neutral emoji cases `36`, visible favorability cases `39`, visible trace marker cases `39`.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_personality_eval.py -q`
+  - Result: `2 passed`.
+- `python -m py_compile tools\evaluate_personality_style.py tests\test_arteta_personality_eval.py`
+  - Result: passed.
+
+### Compatibility
+
+- Python 3.8 typing style is used in the new evaluator.
+- No Web Access, ChromaDB, permission, PendingAction, Provider, or Runtime behavior was changed.
+
+### Remaining
+
+- Phase 1 still needs to centralize the Arteta persona prompt defaults and remove fixed-action/high-energy prompt repetition.
+- Later phases still need style profiles, emoji policy, favorability decoupling, trace hiding, transport decisions, render template work, and final ECS smoke.
