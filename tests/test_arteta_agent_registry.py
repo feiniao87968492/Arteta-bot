@@ -2186,7 +2186,7 @@ def test_agent_loop_forces_negative_mood_emoji_when_llm_skips_tool(monkeypatch):
     assert trace["tools"][0]["status"] == "ok"
 
 
-def test_agent_loop_forces_positive_neutral_mood_emoji_for_non_negative_reply(monkeypatch):
+def test_agent_loop_does_not_force_positive_neutral_mood_emoji_for_plain_reply(monkeypatch):
     from plugins.arteta_agent import planner
     from plugins.arteta_agent.trace import new_trace
 
@@ -2228,8 +2228,8 @@ def test_agent_loop_forces_positive_neutral_mood_emoji_for_non_negative_reply(mo
     ))
 
     assert result == "在。说吧，训练场已经准备好了。"
-    assert calls == [("positive_neutral", "检测到积极或中立情绪，补发表情。", "", "1104602373")]
-    assert trace["tools"][0]["name"] == "send_mood_emoji"
+    assert calls == []
+    assert trace["tools"] == []
 
 
 def test_agent_loop_does_not_force_mood_emoji_after_behavior_policy_query(monkeypatch):

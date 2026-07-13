@@ -5,14 +5,14 @@ from plugins.arteta_agent.response.mood import maybe_send_mood_emoji
 from plugins.arteta_agent.runtime.state import AgentState, FinalizedResponse
 
 
-def make_runtime_state(messages, trace=None, policy_disabled_tools=None):
+def make_runtime_state(messages, trace=None, policy_disabled_tools=None, group_id="group-1"):
     return AgentState(
         messages=list(messages),
         ctx=ToolContext(
             bot=None,
             event=None,
             user_id="user-1",
-            group_id="group-1",
+            group_id=group_id,
             nickname="tester",
             raw_message="",
             is_group=True,
@@ -45,6 +45,116 @@ def test_mood_finalizer_sends_negative_emoji_when_reply_skips_tool():
     assert calls[0][0]["function"]["name"] == "send_mood_emoji"
     assert '"mood": "negative"' in calls[0][0]["function"]["arguments"]
     assert calls[0][1] == "group-1"
+
+
+def test_mood_finalizer_does_not_send_positive_neutral_for_plain_reply():
+    calls = []
+    state = make_runtime_state([
+        {"role": "user", "content": "塔子在吗"},
+    ], group_id="plain-group")
+
+    async def execute_tool_call(tool_call, ctx):
+        calls.append(tool_call)
+        return "emoji sent"
+
+    result = asyncio.run(maybe_send_mood_emoji(
+        "在。",
+        state,
+        get_tool=lambda name: object() if name == "send_mood_emoji" else None,
+        execute_tool_call=execute_tool_call,
+        emoji_enabled=lambda group_id: True,
+    ))
+
+    assert result == FinalizedResponse("在。", 0)
+    assert calls == []
+
+
+def test_mood_finalizer_sends_positive_emoji_for_explicit_request():
+    calls = []
+    state = make_runtime_state([
+        {"role": "user", "content": "发个开心表情"},
+    ], group_id="explicit-emoji-group")
+
+    async def execute_tool_call(tool_call, ctx):
+        calls.append(tool_call)
+        return "emoji sent"
+
+    result = asyncio.run(maybe_send_mood_emoji(
+        "今天气氛不错。",
+        state,
+        get_tool=lambda name: object() if name == "send_mood_emoji" else None,
+        execute_tool_call=execute_tool_call,
+        emoji_enabled=lambda group_id: True,
+    ))
+
+    assert result == FinalizedResponse("今天气氛不错。", 1)
+    assert calls[0]["function"]["name"] == "send_mood_emoji"
+    assert '"mood": "positive_neutral"' in calls[0]["function"]["arguments"]
+
+
+def test_mood_finalizer_cooldown_skips_auto_emoji_but_not_explicit_request():
+    calls = []
+    group_id = "cooldown-group"
+
+    async def execute_tool_call(tool_call, ctx):
+        calls.append(tool_call)
+        return "emoji sent"
+
+    for index in range(3):
+        state = make_runtime_state([
+            {"role": "user", "content": "赢了！太爽了！"},
+        ], group_id=group_id)
+        result = asyncio.run(maybe_send_mood_emoji(
+            "这就是我们要的能量。",
+            state,
+            get_tool=lambda name: object(),
+            execute_tool_call=execute_tool_call,
+            emoji_enabled=lambda group_id: True,
+        ))
+        assert result.tool_call_count == 1, index
+
+    state = make_runtime_state([
+        {"role": "user", "content": "赢了！太爽了！"},
+    ], group_id=group_id)
+    result = asyncio.run(maybe_send_mood_emoji(
+        "继续保持。",
+        state,
+        get_tool=lambda name: object(),
+        execute_tool_call=execute_tool_call,
+        emoji_enabled=lambda group_id: True,
+    ))
+    assert result == FinalizedResponse("继续保持。", 0)
+
+    explicit_state = make_runtime_state([
+        {"role": "user", "content": "赢了！发个表情庆祝一下"},
+    ], group_id=group_id)
+    explicit_result = asyncio.run(maybe_send_mood_emoji(
+        "可以，庆祝一下。",
+        explicit_state,
+        get_tool=lambda name: object(),
+        execute_tool_call=execute_tool_call,
+        emoji_enabled=lambda group_id: True,
+    ))
+    assert explicit_result == FinalizedResponse("可以，庆祝一下。", 1)
+
+
+def test_mood_finalizer_emoji_failure_does_not_affect_main_reply():
+    state = make_runtime_state([
+        {"role": "user", "content": "发个开心表情"},
+    ], group_id="emoji-failure-group")
+
+    async def execute_tool_call(tool_call, ctx):
+        raise RuntimeError("emoji failed")
+
+    result = asyncio.run(maybe_send_mood_emoji(
+        "可以。",
+        state,
+        get_tool=lambda name: object(),
+        execute_tool_call=execute_tool_call,
+        emoji_enabled=lambda group_id: True,
+    ))
+
+    assert result == FinalizedResponse("可以。", 0)
 
 
 def test_mood_finalizer_skips_operational_trace_or_policy_turns():

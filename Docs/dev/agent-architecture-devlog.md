@@ -4839,3 +4839,70 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - Phase 5 still needs deterministic favorability scoring/display decoupling.
 - Phase 6 still needs normal-reply trace/marker hiding.
 - Phase 7/8 still need transport/render and personality knowledge-boundary work.
+
+## 2026-07-13 Personality Response Optimization Phase 4 Mood Emoji Policy
+
+### Scope
+
+- Stopped forcing `positive_neutral` mood emojis for ordinary non-negative replies.
+- Kept explicit emoji requests and strong emotional replies eligible for the existing `send_mood_emoji` tool.
+- Added a bounded per-group cooldown for automatic mood emojis.
+- Made emoji tool failures non-fatal to the main reply.
+
+### RED Check
+
+- Extended `tests/test_arteta_agent_mood_response.py`.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_agent_mood_response.py -q`
+  - Result: failed because:
+    - plain `塔子在吗` still forced a `positive_neutral` emoji;
+    - emoji tool exceptions propagated and broke the main reply;
+    - the new cooldown test initially used the wrong `FinalizedResponse` field name and was corrected to `tool_call_count`.
+- Running evaluator and registry tests exposed stale expectations:
+  - `tests/test_arteta_personality_eval.py` still expected `mood_forces_positive_neutral=true`;
+  - `tests/test_arteta_agent_registry.py` still expected plain replies to call `send_mood_emoji`.
+
+### Changes
+
+- Updated `plugins/arteta_agent/response/mood.py`:
+  - `detect_forced_mood_emoji_args(...)` now returns `{}` for ordinary neutral/positive replies;
+  - explicit emoji requests and strong positive/negative emotions still generate mood args;
+  - current-news, trace, policy, error, permission, and source-check turns are excluded from automatic mood emoji;
+  - added per-group recent auto-emoji history with a 3-reply cooldown window;
+  - explicit emoji requests bypass cooldown;
+  - failures from `execute_tool_call(...)` are caught and do not affect the main response.
+- Updated registry and evaluator tests to assert the new non-forcing behavior.
+
+### Baseline Result After Phase 4
+
+- `python tools\evaluate_personality_style.py --output artifacts\personality_style_eval_report_phase4.json`
+- Result:
+  - `mood_forces_positive_neutral=false`;
+  - `forced_neutral_emoji_cases=0`;
+  - `favorability_prompt_marker_required=false`;
+  - `fixed_opening_prompt_hits=0`;
+  - `trace_prefixes_grok_marker=true`;
+  - `visible_trace_marker_cases=39`.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_agent_mood_response.py -q`
+  - Result: `8 passed`.
+- `python -m pytest tests\test_arteta_agent_mood_response.py tests\test_arteta_personality_eval.py tests\test_arteta_agent_registry.py -q`
+  - Result: `203 passed`.
+- `python -m pytest tests\test_arteta_agent_response_style.py tests\test_arteta_prompt_style.py tests\test_recent_group_context.py -q`
+  - Result: `27 passed`.
+- `python -m py_compile plugins\arteta_agent\response\mood.py tests\test_arteta_agent_mood_response.py`
+  - Result: passed.
+
+### Compatibility
+
+- Tool name, schema, permission level, and handler for `send_mood_emoji` are unchanged.
+- Existing model-selected emoji tool calls still go through registry/executor permissions.
+- This phase only changes the runtime finalizer's forced emoji behavior.
+
+### Remaining
+
+- Phase 5 still needs deterministic favorability scoring/display decoupling.
+- Phase 6 still needs normal-reply trace/marker hiding.
+- Phase 7/8 still need transport/render and personality knowledge-boundary work.
