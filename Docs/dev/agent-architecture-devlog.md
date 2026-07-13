@@ -5538,4 +5538,19 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 ### Deployment
 
-- Pending ECS deployment for this slice.
+- Deployed archive: `/tmp/arteta_default_ui_image_2898f9a.tar.gz`.
+- Remote backup directory: `/opt/arteta_bot/backups/default_ui_image_2898f9a_20260713162910`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_chat.py`;
+  - `tests/test_arteta_chat_commands.py`.
+- Restarted `arteta_bot` and `arteta_dashboard`.
+- Final service state:
+  - `arteta_bot RUNNING pid 5284`;
+  - `arteta_dashboard RUNNING pid 5287`;
+  - `0.0.0.0:8088` owned by supervisor bot process `pid=5284`;
+  - `pm2 list` empty.
+- Remote smoke:
+  - `./venv/bin/python tools/verify_features.py --suite chat --json-only`
+  - Result: `4 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-162955/report.json`.
+  - `./venv/bin/python tools/verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-162955/report.json`.
