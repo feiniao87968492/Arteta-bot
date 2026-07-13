@@ -5391,3 +5391,33 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 - The templates still need to be filled with real QQ observations and screenshot paths.
 - Final acceptance still requires `python tools\verify_features.py --suite personality_manual` to exit `0`.
+
+## 2026-07-13 Personality Response Reply Processing Scope Fix
+
+### Scope
+
+- Fixed a live QQ reply-processing regression reported after a normal message: `local variable 'lvl' referenced before assignment`.
+- Kept the change limited to the `process_chat(...)` delayed reply closure and a regression test.
+
+### Root Cause
+
+- `process_chat(...)` loaded `lvl` and `fav` before scheduling `delayed_response()`.
+- Inside `delayed_response()`, favorability handling assigned back to `lvl, fav`.
+- Python therefore treated `lvl` and `fav` as local variables inside the closure, so `old_level = lvl` executed before the local assignment and raised `UnboundLocalError`.
+
+### Changes
+
+- Declared `nonlocal lvl, fav` at the start of `delayed_response()`.
+- Added a regression test that runs `process_chat(...)` through the Agent Registry reply path and verifies a normal reply is sent instead of `回复处理出错`.
+
+### RED/GREEN Verification
+
+- RED:
+  - `python -m pytest tests\test_arteta_chat_commands.py::ClearGroupMemoryCommandTests::test_process_chat_reply_processing_uses_outer_player_level -q`
+  - Result before implementation: failed with `回复处理出错：local variable 'lvl' referenced before assignment`.
+- GREEN:
+  - Same command after implementation: `1 passed`.
+  - `python -m pytest tests\test_arteta_chat_commands.py tests\test_arteta_favorability.py tests\test_arteta_agent_response_transport.py -q`
+  - Result: `31 passed`.
+  - `python -m py_compile plugins\arteta_chat.py tests\test_arteta_chat_commands.py`
+  - Result: passed.

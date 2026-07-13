@@ -2037,6 +2037,7 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
 
     # 立即发送提示消息（不阻塞心跳）
     async def delayed_response():
+        nonlocal lvl, fav
         print(f"[delayed_response] 后台任务开始 group={group_id} user={user_id}")
         trace = None
         show_trace = agent_visual_trace_enabled(group_id)
