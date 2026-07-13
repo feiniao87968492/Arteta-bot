@@ -5478,3 +5478,28 @@ This policy aligns the offline labels with Activation scope: pure current-footba
   - Result: `Connection timed out during banner exchange`.
 - `deploy/deploy_quick.py` could not be used because `ARTETA_DEPLOY_HOST` and `ARTETA_DEPLOY_PASSWORD` were not set in the local shell.
 - Live log inspection for the unprefixed `今天状态怎么样` screenshot could not be completed in this pass for the same SSH reason.
+
+### ECS Deployment Follow-up
+
+- ECS was rebooted by the operator and SSH recovered.
+- Deployed archive: `/tmp/arteta_personality_reply_fix_bbc0ced.tar.gz`.
+- Source archive on local machine: `arteta_personality_reply_fix_bbc0ced.tar.gz`.
+- Remote backup directory: `/opt/arteta_bot/backups/personality_reply_fix_bbc0ced_20260713155658`.
+- Remote `py_compile` passed for:
+  - `plugins/arteta_agent/response/transport.py`;
+  - `plugins/arteta_chat.py`;
+  - `tests/test_arteta_agent_response_transport.py`;
+  - `tests/test_arteta_chat_commands.py`.
+- Initial restart exposed an environment issue unrelated to the code slice: PM2 was auto-running an old bot from `/home/admin/arteta_bot/bot.py`, which occupied `0.0.0.0:8088` and forced the supervisor-managed `/opt/arteta_bot` bot into a restart loop.
+- Resolved the conflict by deleting PM2 process `ArtetaBot` and saving the empty PM2 state with `pm2 save --force`.
+- Final service state:
+  - `arteta_bot RUNNING pid 3939`;
+  - `arteta_dashboard RUNNING pid 2365`;
+  - `0.0.0.0:8088` owned by supervisor bot process `pid=3939`;
+  - `pm2 list` empty.
+- Remote smoke:
+  - `./venv/bin/python tools/verify_features.py --suite chat --json-only`
+  - Result: `4 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-160256/report.json`.
+  - `./venv/bin/python tools/verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-160256/report.json`.
+- Remote focused pytest was not run because the production venv does not include `pytest`.
