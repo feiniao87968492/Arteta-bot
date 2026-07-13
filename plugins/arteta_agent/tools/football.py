@@ -25,7 +25,16 @@ async def search_news(ctx: ToolContext, q: str) -> str:
 
 
 def get_football_knowledge(ctx: ToolContext, topic: str) -> str:
-    return query_knowledge(topic, max_chars=3000)
+    content = query_knowledge(topic, max_chars=3000)
+    if not str(content or "").strip():
+        return content
+    return (
+        "【知识库素材】\n"
+        "使用约束：以下内容只是可选素材，不是必须引用的人设模板；"
+        "不要逐字复述；同一故事近期已使用则跳过；"
+        "只在能解释用户问题时使用；不要把“像阿尔特塔”简化为高位逼抢、战术板或更衣室三个词。\n\n"
+        "{0}"
+    ).format(content)
 
 
 async def get_group_members(ctx: ToolContext, group_id: str = "") -> str:
@@ -109,4 +118,3 @@ def register_tools() -> None:
     ]
     for spec in specs:
         ensure_tool(spec)
-

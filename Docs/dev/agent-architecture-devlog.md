@@ -5098,3 +5098,59 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 - Phase 8 still needs personality knowledge-boundary work.
 - Final acceptance still needs broader personality evaluator and registry regression runs after Phase 8.
+
+## 2026-07-13 Personality Response Optimization Phase 8 Personality Knowledge Boundaries
+
+### Scope
+
+- Tightened the default persona prompt around when to use classic Arteta stories, quotes, and tactical concepts.
+- Added a knowledge-tool wrapper that marks retrieved knowledge as optional writing material rather than mandatory persona text.
+- Preserved current knowledge retrieval behavior and did not change ChromaDB or the local knowledge-base file layout.
+
+### RED Check
+
+- Extended `tests/test_arteta_prompt_style.py`:
+  - default prompt must include the role core of control, standards, detail, responsibility, player protection, and transfer/rumor caution;
+  - default prompt must say knowledge materials are optional, only used when they explain the question, and repeated stories should be skipped.
+- Added `tests/test_arteta_knowledge_boundaries.py`:
+  - `get_football_knowledge(...)` must wrap retrieved content with usage constraints.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_prompt_style.py::test_arteta_default_prompt_sets_personality_knowledge_boundaries tests\test_arteta_knowledge_boundaries.py -q`
+  - Result: failed because the prompt did not include the full repeated-story boundary and `get_football_knowledge(...)` returned raw knowledge text.
+
+### Changes
+
+- Updated `plugins/arteta_agent/prompts.py`:
+  - clarified that classic speeches, quotes, and tactical concepts are optional materials;
+  - added "only use when it explains the question";
+  - added "skip recently used stories/quotes/metaphors".
+- Updated `plugins/arteta_agent/tools/football.py`:
+  - `get_football_knowledge(...)` now wraps non-empty query results in `【知识库素材】`;
+  - the wrapper tells the model not to quote verbatim, not to repeat recently used stories, and not to reduce Arteta personality to high press / tactics board / dressing room.
+- Updated `tests/test_arteta_prompt_style.py` test setup so direct imports of `plugins.arteta_chat` initialize NoneBot when the file is run in isolation.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_prompt_style.py::test_arteta_default_prompt_sets_personality_knowledge_boundaries tests\test_arteta_knowledge_boundaries.py -q`
+  - Result after implementation: `2 passed`.
+- `python -m pytest tests\test_arteta_prompt_style.py tests\test_arteta_knowledge_boundaries.py tests\test_arteta_agent_registry.py -q`
+  - Result: `198 passed`.
+- `python tools\evaluate_personality_style.py --output artifacts\personality_style_eval_report_phase8.json`
+  - Result:
+    - `fixed_opening_prompt_hits=0`;
+    - `forced_neutral_emoji_cases=0`;
+    - `visible_favorability_cases=0`;
+    - `visible_trace_marker_cases=0`;
+    - `trace_prefixes_grok_marker=false`.
+- `python -m py_compile plugins\arteta_agent\prompts.py plugins\arteta_agent\tools\football.py tests\test_arteta_knowledge_boundaries.py tests\test_arteta_prompt_style.py`
+  - Result: passed.
+
+### Compatibility
+
+- Tool name, schema, category, and retrieval source for `get_football_knowledge` are unchanged.
+- Empty knowledge results are still returned unchanged.
+- No Web Access, ChromaDB storage, permissions, PendingAction, Provider, Runtime, render transport, or database schema behavior changed.
+
+### Remaining
+
+- Final acceptance should run the combined personality-related tests, registry regression, evaluator, and a broader test pass.

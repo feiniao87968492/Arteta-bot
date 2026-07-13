@@ -8,11 +8,21 @@ from plugins.arteta_agent import prompts
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _ensure_nonebot_initialized():
+    import nonebot
+
+    try:
+        nonebot.get_driver()
+    except ValueError:
+        nonebot.init()
+
+
 def _read(rel_path):
     return (ROOT / rel_path).read_text(encoding="utf-8")
 
 
 def test_arteta_prompt_defaults_are_centralized():
+    _ensure_nonebot_initialized()
     from plugins import arteta_chat
     from dashboard.api.services import bot_chat_service
     from dashboard.api.services import prompt_service
@@ -56,7 +66,19 @@ def test_arteta_default_prompt_blocks_fixed_actions_and_favor_marker_dead_comman
     assert "新闻回答先区分已确认事实、传闻和个人判断" in prompt
 
 
+def test_arteta_default_prompt_sets_personality_knowledge_boundaries():
+    prompt = prompts.ARTETA_DEFAULT_PROMPT
+
+    assert "标准、细节、责任和控制" in prompt
+    assert "保护球员" in prompt
+    assert "经典演讲、语录和战术概念只是可选素材" in prompt
+    assert "只在能解释问题时使用" in prompt
+    assert "同一故事近期已使用则跳过" in prompt
+    assert "不要为了证明身份而强行加入更衣室、战术板或高位逼抢" in prompt
+
+
 def test_current_turn_style_guard_does_not_reintroduce_fixed_action_template():
+    _ensure_nonebot_initialized()
     from plugins import arteta_chat
 
     messages = [{"role": "system", "content": "BASE"}]
