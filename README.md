@@ -1,8 +1,10 @@
 # Arteta Bot
 
-Arteta Bot 是一个基于 NoneBot2、OneBot V11 和 NapCat 的 QQ 群聊机器人。它以阿森纳主教练米克尔·阿尔特塔的口吻参与群聊，同时具备群记忆、实时足球信息核验、图片识别、图片生成、HTML/Markdown 渲染、权限确认、行为策略和审计能力。
+Arteta Bot 是一个基于 NoneBot2、OneBot V11 和 NapCat 的 QQ 群聊机器人。它以阿森纳主教练米克尔·阿尔特塔的口吻参与群聊，同时具备群记忆、实时足球信息核验、图片识别、图片生成、HTML/Markdown 渲染、权限确认、行为策略、审计和开发者 Dashboard 能力。
 
-项目已经从早期集中式 `run_tool_loop()` 演进为模块化 Agent 架构。当前 `plugins/arteta_agent/planner.py` 只保留 `run_agent_loop(...)` 兼容入口，实际请求会被封装为 `AgentRequest`，再交给 Routing、Planning、Runtime、Provider、Response、Policy、Executor 和 Tools 等模块协作完成。
+当前版本的核心是模块化 Arteta Agent 架构。早期集中式 `run_tool_loop()` 已被拆分为 Activation、Routing、Planning、Runtime、Provider、Executor、Policy、Response 和 Tools 等职责层；`plugins/arteta_agent/planner.py` 只保留 `run_agent_loop(...)` 兼容入口，实际请求会被封装为 `AgentRequest`，再交给 `plugins/arteta_agent/service.py` 统一编排。
+
+最近一轮人格响应优化已经并入主线：默认人格 prompt 集中管理，回复风格由 `ResponseStyleProfile` 驱动，普通短回复优先走 QQ 原生文本，代码、公式、表格、长结构化内容和图片产物走渲染图片；表情、好感度、Trace 标记和知识库素材都从主回复正文中解耦。
 
 ## 核心能力
 
@@ -13,7 +15,9 @@ Arteta Bot 是一个基于 NoneBot2、OneBot V11 和 NapCat 的 QQ 群聊机器�
 - **服务端权限边界**：工具按 `safe_read`、`safe_write`、`confirm_write`、`admin_action` 分级，写操作和管理动作必须经过服务端 PendingAction 确认。
 - **结构化工具结果**：工具通过 `ToolResult` 返回状态、错误码、artifact、pending action、耗时和脱敏 trace，不依赖正文伪造控制协议。
 - **响应人格层**：默认人格 prompt 已集中到 `plugins/arteta_agent/prompts.py`，并通过 response style profile 区分日常短答、梗图、足球观点、当前新闻、战术深聊和严肃问题。
+- **文本/图片传输策略**：短纯文本回复走 QQ 原生文本；代码块、公式、表格、长结构化内容、富样式内容和图片 artifact 走 HTML/Markdown 渲染图片。
 - **表情与好感度后处理**：普通中性回复不再强制发表情；好感度评分与主回复生成解耦，旧 `【好感度...】` 标记会被清理但不再驱动随机大幅加减。
+- **人格知识边界**：经典发言、战术概念和本地知识库只作为可选素材，只有能解释问题时才使用，避免固定口头禅、固定故事和知识库复读。
 - **SQLite 行为策略**：回复风格、表情、工具禁用、UI 偏好等行为偏好由 Behavior Policy 持久化，支持 TTL、迁移和并发安全更新。
 - **Provider Adapter**：兼容 DeepSeek 与 OpenAI-compatible API，Provider 层负责能力标记、重试、reasoning content、tool history 降级和共享 HTTP client。
 - **Web Access 安全收口**：搜索、网页抓取、X/Twitter 读取和事实证据收集已拆分模块，并带 SSRF best-effort 校验、重定向校验、Content-Type 与响应大小限制。
@@ -35,7 +39,8 @@ QQ / NapCat
   -> runtime/                               # AgentState / LoopGuard / unified execution loop
   -> registry.py + executor.py              # ToolSpec / Schema / permission / handler
   -> providers/                             # OpenAI-compatible provider / shared HTTP client
-  -> response/                              # final text / style / favorability / mood / artifacts / trace
+  -> response/                              # final text / style / transport / favorability / mood / artifacts / trace
+  -> arteta_chat.py                         # text/image 发送、群记忆写入、好感度入库
 ```
 
 ### 主请求数据流
@@ -48,8 +53,8 @@ QQ / NapCat
   -> Runtime 执行计划、调用模型、处理预算、确认等待和终止条件
   -> Executor 做参数校验、权限判断、PendingAction 和 Audit
   -> Tools / Provider 读取外部信息或调用模型
-  -> Response 层组合最终文本、artifact、trace、表情和好感度展示
-  -> arteta_chat.py 继续处理群记忆写入、好感度入库和 QQ 发送
+  -> Response 层组合最终文本、artifact、trace、表情、好感度和传输建议
+  -> arteta_chat.py 选择 QQ 文本或图片渲染发送，并继续处理群记忆写入、好感度入库
 ```
 
 ### 分层职责
@@ -65,7 +70,7 @@ QQ / NapCat
 | Runtime | `plugins/arteta_agent/runtime/` | 统一执行工具和模型循环，处理预算、LoopGuard、确认等待、只读并行和降级。 |
 | Registry / Executor | `plugins/arteta_agent/registry.py` / `executor.py` | 注册 `ToolSpec`，执行 JSON Schema 校验、权限检查、PendingAction 和 handler 调用。 |
 | Provider | `plugins/arteta_agent/providers/` | 负责 LLM 请求编码、响应解析、能力标记、重试、tool history 降级和共享 `httpx.AsyncClient`。 |
-| Response | `plugins/arteta_agent/response/` | 生成最终回复，处理 style profile、structured artifacts、trace、mood emoji 和好感度展示。 |
+| Response | `plugins/arteta_agent/response/` | 生成最终回复，处理 style profile、传输决策、structured artifacts、trace、mood emoji 和好感度展示。 |
 | Policy | `plugins/arteta_agent/behavior_policy.py` / `policy/` | 管理 SQLite 行为策略、TTL 消耗和旧 JSON 迁移兼容。 |
 | Web Access | `plugins/arteta_agent/tools/web/` | 搜索、网页抓取、X/Twitter 读取、SSRF 校验、响应限制、格式化和事实证据收集。 |
 | Audit | `plugins/arteta_agent/audit.py` | 持久化确认、拒绝、执行、异常、超时和管理动作的脱敏审计记录。 |
@@ -82,6 +87,7 @@ QQ / NapCat
 | `ToolResult` | `plugins/arteta_agent/result.py` | 结构化承载工具状态、错误码、artifact、marker、pending action 和耗时。 |
 | `ProviderCapabilities` | `plugins/arteta_agent/providers/openai_compatible.py` | 声明模型供应商是否支持 tool history、JSON schema、reasoning content 等能力。 |
 | `ResponseStyleProfile` | `plugins/arteta_agent/response/style.py` | 描述当前回复的模式、人格强度、目标长度、是否允许表情和是否偏向图片渲染。 |
+| `ReplyTransportDecision` | `plugins/arteta_agent/response/transport.py` | 决定最终回复使用 QQ 原生文本还是 HTML/Markdown 图片渲染。 |
 | `FavorabilityDecision` | `plugins/arteta_agent/response/favorability.py` | 将好感度评分从模型主回复中解耦，使用确定性小幅调整。 |
 
 ## 当前足球事实链路
@@ -116,6 +122,7 @@ QQ / NapCat
 - `build_recent_opening_guard(...)`：记录最近开场签名，减少固定动作和固定口头禅重复。
 - `response/mood.py`：只在明确请求或强烈情绪场景下尝试发送表情，普通中性回复不再强制 `positive_neutral`。
 - `response/favorability.py`：清理旧好感度标记，并用确定性规则做小幅好感度变化；普通 0 或小变化默认不占用正文。
+- `response/transport.py`：根据内容长度、代码块、公式、表格、富样式和图片产物决定文本发送或图片渲染。
 - `response/composer.py`：组合最终文本、artifact 和 trace 展示，不执行工具，也不修改权限状态。
 
 ## 工具体系
@@ -221,6 +228,21 @@ python -m compileall -q bot.py plugins tests tools dashboard
 
 最近的 Agent 架构、Web Access、足球时效性和人格响应验收记录见 [Docs/dev/agent-architecture-devlog.md](Docs/dev/agent-architecture-devlog.md)。
 
+最近一次人格响应优化自动验收基线：
+
+```text
+personality focused tests: 91 passed
+agent registry regression: 192 passed
+full pytest suite: 657 passed
+compileall: passed
+personality evaluator:
+  fixed_opening_prompt_hits=0
+  forced_neutral_emoji_cases=0
+  visible_favorability_cases=0
+  visible_trace_marker_cases=0
+  trace_prefixes_grok_marker=false
+```
+
 ## 文档导航
 
 - [用户功能概览](Docs/user/features.md)
@@ -248,4 +270,4 @@ python -m compileall -q bot.py plugins tests tools dashboard
 
 ## 项目状态
 
-项目处于活跃开发和线上运行状态。当前主线已经完成 Agent 架构重构、Web Access 安全收口、当前足球事实主动联网链路，以及人设 prompt 集中、响应风格 profile、开场去重、表情降噪和好感度解耦。后续重点是继续用真实群聊评测集校准回复呈现、Trace 展示、渲染决策和知识边界，同时保持安全边界、测试覆盖、GitHub 提交纪律和 ECS 部署可回滚性。
+项目处于活跃开发和线上运行状态。当前主线已经完成 Agent 架构重构、Web Access 安全收口、当前足球事实主动联网链路，以及人设 prompt 集中、响应风格 profile、开场去重、表情降噪、好感度解耦、Trace 标记隐藏、文本/图片传输决策和知识边界收口。后续重点是继续用真实群聊评测集校准回复呈现、Trace 展示、渲染决策和事实核验质量，同时保持安全边界、测试覆盖、GitHub 提交纪律和 ECS 部署可回滚性。
