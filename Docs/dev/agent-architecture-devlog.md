@@ -19,7 +19,7 @@
 - Added runtime progress events for run start, model rounds, tool batch start/finish, individual tool finish, confirmation, synthesis start, runtime stop, and finish.
 - Added `LongFormResponsePolicy` and dynamic constraints so short input defaults to expanded replies, while explicit concise requests and controlled failure/confirmation states remain concise.
 - Removed old prompt/style guidance that made casual and meme replies default short.
-- Restored content-based final transport selection: short plain final content may be sent as native text; structured/long/math/code/table/style-tag content routes to image.
+- Restored content-based final transport selection at this point in the history: short plain final content could be sent as native text; structured/long/math/code/table/style-tag content routed to image. This was superseded later on 2026-07-13 by the default UI image fixes below.
 - Allowed `progress.*` behavior policy keys and documented `reply.*` long-form policy usage.
 
 ### Verification
@@ -5616,3 +5616,27 @@ This policy aligns the offline labels with Activation scope: pure current-footba
   - Result: `4 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-162955/report.json`.
   - `./venv/bin/python tools/verify_features.py --suite agent_loop --json-only`
   - Result: `14 passed`, report `/opt/arteta_bot/artifacts/verify/20260713-162955/report.json`.
+
+## 2026-07-13 Default UI Image Regression Fix
+
+### Root Cause
+
+- Commit `2898f9a` correctly changed normal Agent final replies to default to rendered images.
+- Commit `59357c7` later added progress and long-form behavior, but restored the short plain reply early return in `send_agent_answer_message(...)`.
+- Result: short or medium plain final answers could be sent as native QQ text even though group UX requires unified image replies.
+
+### Changes
+
+- Restored the final-answer upgrade from `ReplyTransportDecision("text", "short_plain_text")` to `ReplyTransportDecision("image", "default_ui_image")`.
+- Kept progress updates, timeout/error notices, permission confirmation prompts, and `[NO_REPLY]` silence outside the final reply renderer.
+- Tightened the Agent progress manual evidence validator so every live sample must record final `Transport` as `image`.
+
+### Verification
+
+- RED:
+  - `python -m pytest tests\test_arteta_chat_commands.py::ClearGroupMemoryCommandTests::test_send_agent_answer_message_uses_image_for_short_plain_reply -q`
+  - Result before implementation: failed because mode was `text`.
+- GREEN:
+  - Same focused command after implementation: `1 passed`.
+  - `python -m pytest tests\test_agent_progress_longform_manual_evidence.py -q`
+  - Result: `4 passed`.

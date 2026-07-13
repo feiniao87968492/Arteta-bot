@@ -95,7 +95,7 @@ NO_TOOL_VALUES = set(["n/a", "na", "none", "no", "-"])
 PASS_VALUES = set(["pass", "passed", "yes", "ok", "\u901a\u8fc7"])
 TRUE_VALUES = set(["yes", "y", "true", "pass", "passed", "ok", "\u662f", "\u901a\u8fc7"])
 FALSE_VALUES = set(["no", "n", "false", "none", "n/a", "na", "\u5426"])
-TRANSPORT_VALUES = set(["text", "image"])
+TRANSPORT_VALUE = "image"
 
 
 def _split_table_line(line: str) -> List[str]:
@@ -218,8 +218,8 @@ def _validate_sample_row(row: Dict[str, str], repo_root: str, evidence_file: str
     if normalized_scenario not in NO_TOOL_SCENARIOS and tool_order in NO_TOOL_VALUES:
         errors.append("{0}: real tool order is required for tool-backed scenario {1!r}".format(prefix, scenario))
 
-    if _normalize(row.get("transport", "")) not in TRANSPORT_VALUES:
-        errors.append("{0}: transport must be text or image".format(prefix))
+    if _normalize(row.get("transport", "")) != TRANSPORT_VALUE:
+        errors.append("{0}: transport must be image".format(prefix))
     if _normalize(row.get("reporter closed before final reply", "")) not in TRUE_VALUES:
         errors.append("{0}: reporter closed before final reply must be yes/pass".format(prefix))
     if _normalize(row.get("internal parameter leak", "")) not in FALSE_VALUES:

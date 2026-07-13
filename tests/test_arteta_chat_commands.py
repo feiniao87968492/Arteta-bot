@@ -621,7 +621,7 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
         finally:
             restore_modules(previous)
 
-    def test_send_agent_answer_message_uses_text_for_short_plain_reply(self):
+    def test_send_agent_answer_message_uses_image_for_short_plain_reply(self):
         arteta_chat, previous = load_arteta_chat_module()
         try:
             sent = []
@@ -647,9 +647,9 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
                 [],
             ))
 
-            self.assertEqual(result.mode, "text")
-            self.assertEqual(result.reason, "short_plain_text")
-            self.assertEqual(image_called, [])
+            self.assertEqual(result.mode, "image")
+            self.assertEqual(result.reason, "default_ui_image")
+            self.assertEqual(image_called, sent)
             self.assertEqual(sent, ["早，今天先把节奏稳住。"])
         finally:
             restore_modules(previous)

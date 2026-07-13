@@ -48,7 +48,7 @@ def _write_complete_evidence(tmp_path, mutate_sample=None):
             "Progress sequence": "[Agent] received > [Action] checked > [Observation] summarized",
             "Real tool order": "n/a" if scenario in no_tool_scenarios else "tool_%02d" % index,
             "Final answer structure and length": "structured final reply with enough detail",
-            "Transport": "text" if index != 3 else "image",
+            "Transport": "image",
             "Reporter closed before final reply": "yes",
             "Internal parameter leak": "no",
             "Pass/Fail": "Pass",
@@ -126,3 +126,18 @@ def test_agent_progress_manual_evidence_rejects_trace_leaks_and_missing_tool_ord
     assert "[thought]" in joined_errors
     assert "real tool order" in joined_errors
     assert "internal parameter leak" in joined_errors
+
+
+def test_agent_progress_manual_evidence_rejects_text_final_transport(tmp_path):
+    from tools.validate_agent_progress_longform_manual_evidence import validate_manual_evidence
+
+    def mutate(index, scenario, row):
+        if scenario == "One-word greeting":
+            row["Transport"] = "text"
+
+    evidence_file = _write_complete_evidence(tmp_path, mutate_sample=mutate)
+
+    result = validate_manual_evidence(str(evidence_file), repo_root=str(tmp_path))
+
+    assert result["ok"] is False
+    assert "transport must be image" in "\n".join(result["errors"]).lower()

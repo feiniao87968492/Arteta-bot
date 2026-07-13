@@ -44,6 +44,7 @@ The task plan asks for visual before/after evidence. Because old production beha
 - Progress messages use only `[Agent]`, `[Plan]`, `[Action]`, `[Observation]`, and `[Confirmation]`.
 - Progress messages do not contain emoji, `[Thought]`, tool argument values, URLs with query parameters, user IDs, group IDs, prompt text, raw tool results, or raw exception bodies.
 - Progress messages are native QQ text and do not appear inside the final reply image/card.
+- Final reply transport must be image for every live sample.
 - Final replies do not include progress tags, hidden trace details, raw tool markers, or forced favorability markers.
 - Short inputs default to expanded replies unless the user explicitly asks for a concise answer.
 - Math, algorithm, code, document, and tactical/detail requests include method, key steps, validation, and answer where applicable.

@@ -41,10 +41,10 @@ The core policy lives in `plugins/arteta_agent/response/length_policy.py`:
 
 QQ Agent replies use `choose_reply_transport(...)` based on final output content:
 
-- short plain replies can stay native text;
+- normal final replies render as images in QQ, including short plain replies;
 - code, formulas, tables, style tags, long structured content, and image artifacts route to image rendering.
 
-Input length no longer forces text or compact mode.
+Input length no longer forces text or compact mode. Progress updates, timeout/error notices, permission confirmation prompts, and `[NO_REPLY]` silence remain outside the final reply renderer.
 
 ## Behavior Policy And Environment
 
