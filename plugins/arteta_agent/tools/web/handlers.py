@@ -120,6 +120,8 @@ MAX_EXCERPT_CHARS = 1800
 
 # GrokSearch API 超时秒数
 GROKSEARCH_TIMEOUT = 80.0
+WEB_SEARCH_GROK_TIMEOUT = 10.0
+WEB_SEARCH_LEGACY_TIMEOUT = 24.0
 
 # ---------------------------------------------------------------------------
 # GrokSearch / X Fetch 配置（环境变量优先）
@@ -288,6 +290,21 @@ def _groksearch_timeout() -> float:
         or GROKSEARCH_TIMEOUT
     )
     return _safe_float(value, GROKSEARCH_TIMEOUT, 5.0, 170.0)
+
+
+def _web_search_grok_timeout() -> float:
+    """
+    Bounded GrokSearch first-hop timeout for generic web_search fallback.
+    Standalone grok_search keeps the full GrokSearch timeout.
+    """
+    value = (
+        os.environ.get("ARTETA_WEB_SEARCH_GROK_TIMEOUT", "").strip()
+        or os.environ.get("WEB_SEARCH_GROK_TIMEOUT", "").strip()
+        or _config_attr("ARTETA_WEB_SEARCH_GROK_TIMEOUT")
+        or WEB_SEARCH_GROK_TIMEOUT
+    )
+    configured = _safe_float(value, WEB_SEARCH_GROK_TIMEOUT, 0.05, 60.0)
+    return min(configured, _groksearch_timeout() + 2.0)
 
 
 def _groksearch_config() -> tuple:
@@ -653,27 +670,34 @@ async def _search_web(query: str, max_results: int = 5, freshness: str = "recent
     若 GrokSearch 已配置，优先使用；失败或超时则回退到 DuckDuckGo。
     """
     limit = _safe_int(max_results, 5, 1, MAX_SEARCH_RESULTS)
+    grok_timeout = _web_search_grok_timeout()
     hits = await run_search_backends(
-        _search_backends_for_request(freshness=freshness, timelimit=timelimit),
+        _search_backends_for_request(
+            freshness=freshness,
+            timelimit=timelimit,
+            grok_timeout_seconds=grok_timeout,
+        ),
         query=query,
         max_results=limit,
         freshness=freshness,
-        total_timeout_seconds=_groksearch_timeout() + 2.0,
+        total_timeout_seconds=grok_timeout + WEB_SEARCH_LEGACY_TIMEOUT,
     )
     return [hit.to_legacy_dict() for hit in hits]
 
 
-def _search_backends_for_request(freshness: str = "recent", timelimit=None) -> list:
+def _search_backends_for_request(freshness: str = "recent", timelimit=None, grok_timeout_seconds=None) -> list:
     backends = []
 
     if _groksearch_enabled():
+        timeout_seconds = float(grok_timeout_seconds) if grok_timeout_seconds is not None else _web_search_grok_timeout()
+
         async def _run_grok(query: str, max_results: int, freshness_arg: str, budget: Optional[TimeBudget]):
             return await _groksearch_search(query, max_results=max_results, freshness=freshness_arg)
 
         backends.append(CallableSearchBackend(
             name="grok",
             func=_run_grok,
-            timeout_seconds=_groksearch_timeout() + 2.0,
+            timeout_seconds=timeout_seconds,
             result_backend="grok",
         ))
 

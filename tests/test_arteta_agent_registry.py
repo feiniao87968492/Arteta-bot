@@ -3045,24 +3045,24 @@ def test_agent_loop_routes_recent_news_to_available_verifier(monkeypatch):
     assert trace["tools"][0]["name"] == "verify_recent_claim"
     assert trace["tools"][0]["arg_keys"] == ["claim", "max_results", "preferred_sources"]
 
-def test_agent_loop_forces_groksearch_for_public_current_transfer_questions(monkeypatch):
+def test_agent_loop_forces_web_search_for_public_current_transfer_questions(monkeypatch):
     from plugins.arteta_agent import planner
     from plugins.arteta_agent.trace import new_trace
 
     clear_registry()
     trace = new_trace("agent_registry")
 
-    async def grok_handler(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5):
-        return "[grok]\nArsenal transfer leads from GrokSearch: {0}".format(query)
+    async def web_search_handler(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5):
+        return "Arsenal transfer leads from web search: {0}".format(query)
 
     async def search_news_handler(ctx: ToolContext, q: str):
         raise AssertionError("public current transfer questions must not start with legacy search_news")
 
     register_tool(ToolSpec(
-        name="grok_search",
-        description="grok search",
+        name="web_search",
+        description="web search",
         parameters=GROK_SEARCH_SCHEMA,
-        handler=grok_handler,
+        handler=web_search_handler,
         permission="safe_read",
         category="web",
     ))
@@ -3079,8 +3079,8 @@ def test_agent_loop_forces_groksearch_for_public_current_transfer_questions(monk
 
     async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
-        assert_tool_observation_without_system_leak(messages, "Arsenal transfer leads from GrokSearch")
-        return {"role": "assistant", "content": "[grok]\nArsenal transfer status checked through GrokSearch."}
+        assert_tool_observation_without_system_leak(messages, "Arsenal transfer leads from web search")
+        return {"role": "assistant", "content": "Arsenal transfer status checked through web search."}
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
 
@@ -3092,27 +3092,27 @@ def test_agent_loop_forces_groksearch_for_public_current_transfer_questions(monk
         max_rounds=2,
     ))
 
-    assert result.startswith("[grok]")
-    assert trace["tools"][0]["name"] == "grok_search"
+    assert result == "Arsenal transfer status checked through web search."
+    assert trace["tools"][0]["name"] == "web_search"
     assert trace["tools"][0]["arg_keys"] == ["freshness", "max_results", "query"]
     assert len(calls) == 1
 
 
-def test_agent_loop_forces_groksearch_for_recent_team_match_questions(monkeypatch):
+def test_agent_loop_forces_web_search_for_recent_team_match_questions(monkeypatch):
     from plugins.arteta_agent import planner
     from plugins.arteta_agent.trace import new_trace
 
     clear_registry()
     trace = new_trace("agent_registry")
 
-    async def grok_handler(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5):
-        return "[grok]\nRecent Spain Belgium match research: {0}".format(query)
+    async def web_search_handler(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5):
+        return "Recent Spain Belgium match research: {0}".format(query)
 
     register_tool(ToolSpec(
-        name="grok_search",
-        description="grok search",
+        name="web_search",
+        description="web search",
         parameters=GROK_SEARCH_SCHEMA,
-        handler=grok_handler,
+        handler=web_search_handler,
         permission="safe_read",
         category="web",
     ))
@@ -3122,7 +3122,7 @@ def test_agent_loop_forces_groksearch_for_recent_team_match_questions(monkeypatc
     async def fake_call(messages, model, api_key, api_url="", allowed_permissions=None, disabled_tools=None, temperature=0.9, request_timeout=80.0):
         calls.append(messages)
         assert_tool_observation_without_system_leak(messages, "Recent Spain Belgium match research")
-        return {"role": "assistant", "content": "[grok]\nRecent Spain Belgium match checked through GrokSearch."}
+        return {"role": "assistant", "content": "Recent Spain Belgium match checked through web search."}
 
     monkeypatch.setattr(planner, "call_llm_with_tools", fake_call)
 
@@ -3134,8 +3134,8 @@ def test_agent_loop_forces_groksearch_for_recent_team_match_questions(monkeypatc
         max_rounds=2,
     ))
 
-    assert result.startswith("[grok]")
-    assert trace["tools"][0]["name"] == "grok_search"
+    assert result == "Recent Spain Belgium match checked through web search."
+    assert trace["tools"][0]["name"] == "web_search"
     assert trace["tools"][0]["arg_keys"] == ["freshness", "max_results", "query"]
     assert len(calls) == 1
 
@@ -4462,6 +4462,46 @@ def test_web_search_falls_back_when_groksearch_returns_empty(monkeypatch):
     assert result.status == "ok"
     assert "Legacy Arsenal source" in result.content
     assert "https://www.arsenal.com/news/legacy" in result.content
+
+
+def test_web_search_falls_back_when_groksearch_exceeds_first_hop_budget(monkeypatch):
+    from plugins.arteta_agent.tools import web_access
+
+    calls = []
+
+    async def slow_grok_search(query, max_results, freshness="recent"):
+        calls.append("grok")
+        await asyncio.sleep(0.2)
+        return [
+            {
+                "title": "Slow GrokSearch source",
+                "href": "https://www.arsenal.com/news/slow-grok",
+                "body": "This should not block the generic web search fallback.",
+            }
+        ]
+
+    async def fake_legacy_search(query, max_results=5, timelimit=None, budget=None):
+        calls.append("legacy")
+        return [
+            {
+                "title": "Legacy Arsenal source",
+                "href": "https://www.arsenal.com/news/legacy",
+                "body": "Fallback result from existing search.",
+            }
+        ]
+
+    monkeypatch.setenv("ARTETA_WEB_SEARCH_GROK_TIMEOUT", "0.05")
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_URL", "https://grok.example")
+    monkeypatch.setattr(web_access, "GROKSEARCH_API_KEY", "sk-test")
+    monkeypatch.setattr(web_access, "_groksearch_search", slow_grok_search)
+    monkeypatch.setattr(web_access, "_duckduckgo_search", fake_legacy_search)
+
+    result = asyncio.run(web_access.web_search(make_context(), query="Arsenal official news", max_results=2))
+
+    assert result.status == "ok"
+    assert calls == ["grok", "legacy"]
+    assert "Legacy Arsenal source" in result.content
+    assert "Slow GrokSearch source" not in result.content
 
 
 def test_web_search_uses_bing_html_when_available(monkeypatch):

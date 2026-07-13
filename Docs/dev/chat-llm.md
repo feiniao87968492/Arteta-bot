@@ -112,13 +112,13 @@ at_cmd = on_message(rule=_message_mentions_bot, priority=11, block=True)
 
 ### Agent Registry 工具 schema 收窄
 
-`ARTETA_USE_AGENT_REGISTRY=true` 时，`plugins/arteta_agent/planner.py::detect_contextual_tool_exclusions()` 会按当前消息意图和 `ToolContext.extra` 收窄本轮暴露给 LLM 的工具 schema。普通闲聊默认不暴露工具；阿森纳/积分榜/伤病等足球实时意图会开放 `football`、`football_news`、`knowledge` 和 `web` 类工具，让模型优先使用 `grok_search` / `verify_recent_claim` 核实当前信息；链接、文档、图片、渲染、策略、QQ 动作和管理员工具只在对应意图或上下文出现时开放。
+`ARTETA_USE_AGENT_REGISTRY=true` 时，`plugins/arteta_agent/planner.py::detect_contextual_tool_exclusions()` 会按当前消息意图和 `ToolContext.extra` 收窄本轮暴露给 LLM 的工具 schema。普通闲聊默认不暴露工具；阿森纳/积分榜/伤病等足球实时意图会开放 `football`、`football_news`、`knowledge` 和 `web` 类工具，让模型使用 `web_search`、`grok_search` 或 `verify_recent_claim` 核实当前信息；链接、文档、图片、渲染、策略、QQ 动作和管理员工具只在对应意图或上下文出现时开放。
 
 工具注册时会校验 OpenAI-compatible 参数 schema 的本地子集：根节点必须是 object，`properties` 必须是对象，`required` 必须是字符串列表，`type` 只能使用 JSON Schema 基础类型，`additionalProperties` 只能是布尔值或对象 schema。坏 schema 会在 `register_tool()` 阶段 fail-fast，不会等到模型请求工具时才暴露。注册通过后，Registry 会把所有 object schema 归一化为默认 `additionalProperties=false`；工具如果确实需要动态键，必须显式写 `additionalProperties=true` 或声明对象 schema，避免模型多传未知参数进入 handler。
 
 `ToolSpec` 还保留三类 runtime 元数据：`parallel_safe` 表示未来是否允许和其他无依赖工具并行执行，`idempotent` 表示重复执行是否不会改变外部状态，`result_contains_untrusted_content` 表示工具结果是否可能包含网页、文档、搜索结果等不可信外部文本。当前这些字段只作为声明式元数据存储在 Registry 中，不会写入 OpenAI-compatible tool schema，也不会让 planner 自动并行执行；默认值保持保守：串行、非幂等、结果视为不可信。
 
-公网实时事实问题还有一层策略化首跳路由：`route.public_current_fact.preferred_tool`。默认值等价于 `grok_search`，可通过 `update_behavior_policy` 或自然语言偏好（如“以后类似这种实事性的问题统一走grok-research”）写入 Behavior Policy。planner 只在识别到公网当前事实且排除“还记得/群里/刚才”等本地记忆语境时使用这条策略；配置的工具不可用时会按 `grok_search`、`verify_recent_claim`、`web_search` 顺序回退。
+公网实时事实问题还有一层策略化首跳路由：`route.public_current_fact.preferred_tool`。默认值等价于 `web_search`，可通过 `update_behavior_policy` 或自然语言偏好（如“以后类似这种实事性的问题统一走grok-research”）写入 Behavior Policy。planner 只在识别到公网当前事实且排除“还记得/群里/刚才”等本地记忆语境时使用这条策略；配置的工具不可用时会按 `web_search`、`verify_recent_claim`、`grok_search` 顺序回退。`web_search` 会用 `ARTETA_WEB_SEARCH_GROK_TIMEOUT` 给 GrokSearch 一个短预算，超时后进入普通网页搜索兜底。
 
 这个过滤只影响模型“看得见哪些工具”，不承担安全边界。所有写操作、管理员动作、跨群/跨用户访问仍必须经过 `execute_tool_call()` 的参数校验、权限、确认、超时和 trace 记录。强制路由的文档、链接、科学解题、行为策略写入等路径仍可直接执行对应工具，并会在后续总结回答时把已用工具加入 `disabled_tools`，避免模型重复调用。
 

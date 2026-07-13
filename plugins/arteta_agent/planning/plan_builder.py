@@ -5,7 +5,7 @@ from ..routing.models import RouteDecision
 from .models import AgentPlan
 
 
-PUBLIC_CURRENT_FACT_TOOLS = ("grok_search", "verify_recent_claim", "web_search")
+PUBLIC_CURRENT_FACT_TOOLS = ("web_search", "verify_recent_claim", "grok_search")
 CURRENT_INFORMATION_TOOLS = ("grok_search", "verify_recent_claim", "web_search", "fetch_x_post", "web_fetch")
 DIRECT_TECHNICAL_TOOLS = {
     "solve_science_question",
@@ -21,7 +21,7 @@ def _preferred_public_current_fact_tool(ctx: ToolContext = None) -> str:
     tool_name = str(item.get("value") or "").strip()
     if tool_name in PUBLIC_CURRENT_FACT_TOOLS:
         return tool_name
-    return "grok_search"
+    return "web_search"
 
 
 def _public_current_fact_args(tool_name: str, planned: PlannedToolCall) -> dict:

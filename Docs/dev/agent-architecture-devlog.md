@@ -5706,3 +5706,28 @@ This policy aligns the offline labels with Activation scope: pure current-footba
   - Result: `21 passed`.
   - `python -m compileall plugins\arteta_agent\tools\web\handlers.py`
   - Result: passed.
+
+## 2026-07-13 Web Search Fallback Default
+
+### Root Cause
+
+- After the transfer-interest route fix, public current-fact plans still defaulted to the standalone `grok_search` tool.
+- The standalone `grok_search` tool is intentionally Grok-only and does not fall back to Bing/DuckDuckGo/Jina, so a GrokSearch `ReadTimeout` could still surface to users as "cannot verify online" even when the ECS host had general internet access.
+- Generic `web_search` also used the full `ARTETA_GROKSEARCH_TIMEOUT` as its first-hop GrokSearch timeout, which allowed GrokSearch to consume the whole search budget before the normal public-search fallback could run.
+
+### Changes
+
+- Changed default public current-fact routing to `web_search`.
+- Preserved Behavior Policy override support for `route.public_current_fact.preferred_tool` with supported values `web_search`, `verify_recent_claim`, and `grok_search`.
+- Added `ARTETA_WEB_SEARCH_GROK_TIMEOUT` for the bounded GrokSearch first hop inside generic `web_search`; standalone `grok_search` still uses the full `ARTETA_GROKSEARCH_TIMEOUT` and remains Grok-only.
+- Kept normal public-search fallback through Bing/DuckDuckGo/Jina after the bounded GrokSearch first hop.
+
+### Verification
+
+- RED:
+  - `python -m pytest tests\test_arteta_agent_routing.py::test_plan_builder_routes_recent_team_match_questions_to_web_search tests\test_arteta_agent_planning.py::test_document_read_and_web_verification_have_explicit_dependency tests\test_arteta_agent_registry.py::test_agent_loop_forces_web_search_for_public_current_transfer_questions tests\test_arteta_agent_registry.py::test_agent_loop_forces_web_search_for_recent_team_match_questions tests\test_arteta_agent_registry.py::test_web_search_falls_back_when_groksearch_exceeds_first_hop_budget -q`
+  - Result before implementation: 3 failed because default route was still `grok_search` and generic `web_search` did not fall back when GrokSearch exceeded the short first-hop budget.
+- GREEN:
+  - Same focused command after implementation: `5 passed`.
+  - `python -m pytest tests\test_arteta_agent_football_freshness.py tests\test_arteta_agent_planning.py tests\test_arteta_agent_routing.py tests\test_arteta_agent_provider.py::test_web_access_fetch_helpers_reuse_shared_client tests\test_arteta_agent_web_search.py tests\test_arteta_agent_web_modules.py tests\test_arteta_agent_registry.py::test_web_search_reads_groksearch_env_lazily tests\test_arteta_agent_registry.py::test_web_search_uses_groksearch_when_configured tests\test_arteta_agent_registry.py::test_web_search_falls_back_when_groksearch_returns_empty tests\test_arteta_agent_registry.py::test_web_search_falls_back_when_groksearch_exceeds_first_hop_budget tests\test_arteta_agent_registry.py::test_web_search_uses_bing_html_when_available tests\test_arteta_agent_registry.py::test_agent_loop_forces_web_search_for_public_current_transfer_questions tests\test_arteta_agent_registry.py::test_agent_loop_forces_web_search_for_recent_team_match_questions tests\test_arteta_agent_registry.py::test_agent_loop_uses_behavior_policy_route_for_public_current_questions tests\test_arteta_agent_registry.py::test_agent_loop_falls_back_to_grok_when_route_policy_tool_is_unavailable -q`
+  - Result: `86 passed`.

@@ -56,10 +56,13 @@ def test_plan_builder_combines_group_memory_and_latest_web_verification():
     assert any(name in tool_names(plan) for name in ("grok_search", "verify_recent_claim", "web_search"))
 
 
-def test_plan_builder_marks_document_verification_dependency():
+def test_plan_builder_marks_document_verification_dependency(tmp_path, monkeypatch):
     from plugins.arteta_agent.planning.execution import initial_tool_calls_from_plan, initial_tool_dependencies_from_plan
     from plugins.arteta_agent.planning.plan_builder import build_plan
     from plugins.arteta_agent.routing.models import Intent, PlannedToolCall, RouteDecision
+
+    monkeypatch.setenv("ARTETA_AGENT_BEHAVIOR_POLICY_PATH", str(tmp_path / "behavior_policy.json"))
+    monkeypatch.delenv("ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH", raising=False)
 
     decision = RouteDecision(
         intents=[
@@ -80,9 +83,9 @@ def test_plan_builder_marks_document_verification_dependency():
     calls = initial_tool_calls_from_plan(plan)
     dependencies = initial_tool_dependencies_from_plan(plan, calls)
 
-    assert plan.dependencies == {"grok_search": ["read_document"]}
-    assert [call["id"] for call in calls] == ["planned-read-document-1", "planned-grok-search-2"]
-    assert dependencies == {"planned-grok-search-2": ["planned-read-document-1"]}
+    assert plan.dependencies == {"web_search": ["read_document"]}
+    assert [call["id"] for call in calls] == ["planned-read-document-1", "planned-web-search-2"]
+    assert dependencies == {"planned-web-search-2": ["planned-read-document-1"]}
 
 
 def test_plan_builder_keeps_memory_score_recall_out_of_forced_web():
@@ -274,16 +277,19 @@ def test_plan_builder_applies_public_current_fact_route_policy(tmp_path, monkeyp
     }
 
 
-def test_plan_builder_routes_recent_team_match_questions_to_grok_search():
+def test_plan_builder_routes_recent_team_match_questions_to_web_search(tmp_path, monkeypatch):
     from plugins.arteta_agent.planning.plan_builder import build_plan
     from plugins.arteta_agent.routing.heuristic_router import route_message
+
+    monkeypatch.setenv("ARTETA_AGENT_BEHAVIOR_POLICY_PATH", str(tmp_path / "behavior_policy.json"))
+    monkeypatch.delenv("ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH", raising=False)
 
     messages = [{"role": "user", "content": "塔子你了解西班牙和比利时最近的一场比赛吗"}]
     decision = route_message(messages, make_context())
     plan = build_plan(decision, make_context())
 
     assert any(intent.name == "public_current_fact" for intent in decision.intents)
-    assert tool_names(plan) == ["grok_search"]
+    assert tool_names(plan) == ["web_search"]
     assert plan.required_tools[0].arguments == {
         "query": "塔子你了解西班牙和比利时最近的一场比赛吗 latest match result scorers",
         "freshness": "recent",

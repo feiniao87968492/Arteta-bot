@@ -61,7 +61,7 @@ def test_search_web_uses_search_backend_abstraction(monkeypatch):
                 backend="fake",
             )]
 
-    monkeypatch.setattr(handlers, "_search_backends_for_request", lambda freshness, timelimit: [FakeBackend()])
+    monkeypatch.setattr(handlers, "_search_backends_for_request", lambda freshness, timelimit, **_kwargs: [FakeBackend()])
 
     result = asyncio.run(handlers._search_web("Arsenal", max_results=2, freshness="recent", timelimit="m"))
 

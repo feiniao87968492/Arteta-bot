@@ -68,11 +68,14 @@ def test_breaking_transfer_prefers_grok_when_configured():
     assert plan.required_tools[0].arguments["max_results"] == 5
 
 
-def test_document_read_and_web_verification_have_explicit_dependency():
+def test_document_read_and_web_verification_have_explicit_dependency(tmp_path, monkeypatch):
     from plugins.arteta_agent.planning.execution import initial_tool_calls_from_plan
     from plugins.arteta_agent.planning.execution import initial_tool_dependencies_from_plan
     from plugins.arteta_agent.planning.plan_builder import build_plan
     from plugins.arteta_agent.routing.models import Intent, PlannedToolCall, RouteDecision
+
+    monkeypatch.setenv("ARTETA_AGENT_BEHAVIOR_POLICY_PATH", str(tmp_path / "behavior_policy.json"))
+    monkeypatch.delenv("ARTETA_AGENT_BEHAVIOR_POLICY_DB_PATH", raising=False)
 
     decision = RouteDecision(
         intents=[
@@ -90,6 +93,6 @@ def test_document_read_and_web_verification_have_explicit_dependency():
     calls = initial_tool_calls_from_plan(plan)
     dependencies = initial_tool_dependencies_from_plan(plan, calls)
 
-    assert tool_names(plan) == ["read_document", "grok_search"]
-    assert plan.dependencies == {"grok_search": ["read_document"]}
-    assert dependencies == {"planned-grok-search-2": ["planned-read-document-1"]}
+    assert tool_names(plan) == ["read_document", "web_search"]
+    assert plan.dependencies == {"web_search": ["read_document"]}
+    assert dependencies == {"planned-web-search-2": ["planned-read-document-1"]}
