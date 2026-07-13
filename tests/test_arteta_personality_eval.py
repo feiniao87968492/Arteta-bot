@@ -33,7 +33,15 @@ def test_personality_eval_report_records_current_baseline_flags():
     assert "current_code_baseline" in report
     assert "risk_flags" in report
     assert report["current_code_baseline"]["mood_forces_positive_neutral"] is True
-    assert report["current_code_baseline"]["favorability_prompt_marker_required"] is True
     assert report["current_code_baseline"]["trace_prefixes_grok_marker"] is True
     assert report["risk_flags"]["forced_neutral_emoji_cases"] >= 1
-    assert report["risk_flags"]["visible_favorability_cases"] >= 1
+
+
+def test_personality_eval_baseline_checks_favorability_marker_only_in_default_prompt():
+    from tools.evaluate_personality_style import evaluate_records, load_records
+
+    records = load_records("tests/fixtures/personality_eval_cases.json")
+    report = evaluate_records(records)
+
+    assert report["current_code_baseline"]["favorability_prompt_marker_required"] is False
+    assert report["risk_flags"]["visible_favorability_cases"] == 0

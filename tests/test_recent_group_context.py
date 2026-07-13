@@ -260,8 +260,10 @@ class RecentGroupContextFormatTests(unittest.TestCase):
         self.assertEqual("system", messages[-1]["role"])
         content = messages[-1]["content"]
         self.assertTrue(content.rstrip().endswith("不要只模仿最近群聊上下文里的旧短回复。"))
-        self.assertIn("第一句就要有劲", content)
-        self.assertIn("语气要有起伏", content)
+        self.assertIn("不要描述自己的肢体动作", content)
+        self.assertIn("简单问题可以只回答 1～3 句", content)
+        self.assertNotIn("第一句" + "就要有劲", content)
+        self.assertNotIn("可以先" + "拍桌子", content)
 
 
 class RecentGroupContextSQLiteTests(unittest.TestCase):

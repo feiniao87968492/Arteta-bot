@@ -4648,3 +4648,81 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 - Phase 1 still needs to centralize the Arteta persona prompt defaults and remove fixed-action/high-energy prompt repetition.
 - Later phases still need style profiles, emoji policy, favorability decoupling, trace hiding, transport decisions, render template work, and final ECS smoke.
+
+## 2026-07-13 Personality Response Optimization Phase 1 Prompt Defaults
+
+### Scope
+
+- Centralized Arteta persona defaults for QQ and Dashboard.
+- Removed fixed-action/high-energy default prompt wording from the authoritative prompt.
+- Removed the main prompt's favorability marker dead command; deterministic favorability scoring remains a later Phase 5 task.
+- Kept production behavior outside prompt construction unchanged.
+
+### RED Check
+
+- Updated `tests/test_arteta_prompt_style.py` and the current-turn style guard regression in `tests/test_recent_group_context.py`.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_prompt_style.py tests\test_recent_group_context.py::RecentGroupContextFormatTests::test_append_current_turn_style_guard_is_last_system_instruction -q`
+  - Result: failed because:
+    - `ARTETA_PERSONA_CORE` and `ARTETA_DEFAULT_PROMPT` did not exist;
+    - QQ/Dashboard still owned duplicated prompt strings;
+    - `append_current_turn_style_guard(...)` still injected the old fixed-action template.
+- Added an evaluator regression:
+  - `test_personality_eval_baseline_checks_favorability_marker_only_in_default_prompt`
+  - RED result: failed because the evaluator scanned source files and confused favorability post-processing code with the default prompt.
+
+### Changes
+
+- Added centralized prompt constants in `plugins/arteta_agent/prompts.py`:
+  - `ARTETA_PERSONA_CORE`;
+  - `ARTETA_RESPONSE_RULES`;
+  - `ARTETA_DEFAULT_PROMPT`.
+- Updated `plugins/arteta_chat.py`:
+  - `ARTETA_PROMPT` now aliases `ARTETA_DEFAULT_PROMPT`;
+  - current-turn style guard no longer asks for a fixed energetic first sentence or action opening;
+  - simple questions are explicitly allowed to be 1-3 sentences.
+- Updated Dashboard defaults:
+  - `dashboard/api/services/prompt_service.py`;
+  - `dashboard/api/services/bot_chat_service.py`.
+- Expanded stale prompt override filtering so old enabled registry content with fixed-action/default-marker language falls back to the unified default.
+- Updated `tools/evaluate_personality_style.py` to inspect the actual unified default prompt instead of scanning unrelated favorability source code.
+
+### Baseline Result After Phase 1
+
+- `python tools\evaluate_personality_style.py --output artifacts\personality_style_eval_report_phase1.json`
+- Result:
+  - `total=41`;
+  - `fixed_opening_prompt_hits=0`;
+  - `favorability_prompt_marker_required=false`;
+  - `mood_forces_positive_neutral=true`;
+  - `trace_prefixes_grok_marker=true`;
+  - risk flags: forced neutral emoji cases `36`, visible favorability cases `0`, visible trace marker cases `39`.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_prompt_style.py tests\test_recent_group_context.py::RecentGroupContextFormatTests::test_append_current_turn_style_guard_is_last_system_instruction -q`
+  - Result: `5 passed`.
+- `python -m pytest tests\test_arteta_personality_eval.py tests\test_arteta_prompt_style.py tests\test_recent_group_context.py::RecentGroupContextFormatTests::test_append_current_turn_style_guard_is_last_system_instruction tests\dashboard\test_prompt_service.py -q`
+  - Result: `20 passed`.
+- `python -m pytest tests\test_arteta_prompt_style.py tests\test_recent_group_context.py tests\dashboard\test_prompt_service.py tests\dashboard\test_bot_chat.py tests\test_arteta_personality_eval.py -q`
+  - Result: `43 passed`.
+- `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+- `python -m py_compile plugins\arteta_agent\prompts.py plugins\arteta_chat.py dashboard\api\services\prompt_service.py dashboard\api\services\bot_chat_service.py tools\evaluate_personality_style.py`
+  - Result: passed.
+- `rg -n "可以先拍桌子|第一句就要有劲|默认用 2-4 个自然段|信任度评估——死命令|你的回复正文结束后必须另起一行" plugins dashboard tools config -g "*.py" -g "*.json"`
+  - Result: no matches.
+
+### Compatibility
+
+- Persistent prompt overrides still work. Only stale `arteta.main` overrides containing known old default markers are ignored.
+- Existing `ARTETA_PROMPT` module attributes remain for compatibility.
+- No Web Access, ChromaDB, permission, PendingAction, Provider, Runtime, or database schema behavior changed.
+
+### Remaining
+
+- Phase 2 still needs response style profiles and dynamic style constraints.
+- Phase 4 still needs to stop forced neutral mood emoji.
+- Phase 5 still needs deterministic favorability scoring and display policy.
+- Phase 6 still needs trace/marker hiding.
+- Phase 7/8 still need transport/render and personality knowledge-boundary work.

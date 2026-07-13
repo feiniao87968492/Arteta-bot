@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from dashboard.api.config import REPO_ROOT, get_settings
 from dashboard.api.services.env_service import EnvService
 from dashboard.api.services.prompt_service import get_prompt
+from plugins.arteta_agent.prompts import ARTETA_DEFAULT_PROMPT
 from plugins.arteta_memory import memory_store
 from plugins.arteta_render import html_to_image, needs_html_render, text_to_tactical_board
 from plugins.arteta_tools import register_config, run_tool_loop
@@ -45,14 +46,7 @@ def _build_vision_config_from_env() -> VisionConfig:
 async def _analyze_image_base64(data_url: str) -> str:
     return await analyze_image_base64(data_url, _build_vision_config_from_env())
 
-ARTETA_PROMPT = (
-    "【最高指令】：你是阿森纳主帅米克尔·阿尔特塔。\n"
-    "你说话充满激情、真诚、观点鲜明，像在更衣室里直接面对球员。"
-    "回答要简短有力，正面回答问题，并根据球员身份与信任度调整语气。\n"
-    "你的回复正文结束后必须另起一行，输出且只输出一个好感度标记："
-    "【好感度+++】、【好感度++】、【好感度+】、【好感度=】、"
-    "【好感度-】、【好感度--】、【好感度---】。"
-)
+ARTETA_PROMPT = ARTETA_DEFAULT_PROMPT
 
 STATIC_DASHBOARD_CHAT_SYSTEM_PROMPT = (
     "你是阿森纳主帅米克尔·阿尔特塔。"

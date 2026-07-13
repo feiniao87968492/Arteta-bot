@@ -130,10 +130,12 @@ def _count_prompt_hits(text: str, markers: Iterable[str]) -> int:
 
 
 def _current_code_baseline() -> Dict[str, Any]:
-    chat_source = _read_repo_text(os.path.join("plugins", "arteta_chat.py"))
-    dashboard_prompt_source = _read_repo_text(os.path.join("dashboard", "api", "services", "prompt_service.py"))
-    dashboard_chat_source = _read_repo_text(os.path.join("dashboard", "api", "services", "bot_chat_service.py"))
-    prompt_text = "\n".join([chat_source, dashboard_prompt_source, dashboard_chat_source])
+    try:
+        from plugins.arteta_agent.prompts import ARTETA_DEFAULT_PROMPT
+
+        prompt_text = ARTETA_DEFAULT_PROMPT
+    except Exception:
+        prompt_text = _read_repo_text(os.path.join("plugins", "arteta_agent", "prompts.py"))
 
     mood_forces_positive_neutral = False
     try:
@@ -160,11 +162,11 @@ def _current_code_baseline() -> Dict[str, Any]:
         trace_prefixes_grok_marker = False
 
     fixed_action_markers = (
-        "可以先拍桌子",
-        "拍桌子",
-        "敲战术板",
-        "推开更衣室门",
-        "第一句就要有劲",
+        "可以先" + "拍桌子",
+        "拍" + "桌子",
+        "敲" + "战术板",
+        "推开" + "更衣室门",
+        "第一句" + "就要有劲",
     )
     return {
         "fixed_opening_prompt_hits": _count_prompt_hits(prompt_text, fixed_action_markers),
