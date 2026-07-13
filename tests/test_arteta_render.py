@@ -93,6 +93,7 @@ def test_render_template_uses_reply_header_image():
     html = _get_template_env().get_template("arteta_render.html").render(
         text="hello",
         header_image_data_uri=_header_image_data_uri(),
+        render_mode="full",
     )
 
     assert HEADER_IMAGE_PATH.endswith("situation_room_header.png")
@@ -100,10 +101,25 @@ def test_render_template_uses_reply_header_image():
     assert 'class="notice-stage"' in html
     assert 'class="notice-frame"' in html
     assert 'class="notice-frame-red"' in html
-    assert 'class="notice-frame-gold"' in html
     assert 'class="notice-paper"' in html
+    assert 'class="notice-frame-gold"' not in html
     assert "data:image/png;base64," in html
     assert "ARSENAL | TACTICAL BOARD" not in html
+
+
+def test_render_template_supports_compact_mode_without_header_or_nested_frames():
+    html = _get_template_env().get_template("arteta_render.html").render(
+        text="short",
+        header_image_data_uri=_header_image_data_uri(),
+        render_mode="compact",
+    )
+
+    assert 'class="reply-header"' not in html
+    assert 'class="notice-stage compact"' in html
+    assert 'class="notice-frame"' not in html
+    assert 'class="notice-frame-red"' not in html
+    assert 'class="notice-frame-gold"' not in html
+    assert 'class="notice-paper compact"' in html
 
 
 def test_text_to_tactical_board_uses_image_header_and_notice_frame():

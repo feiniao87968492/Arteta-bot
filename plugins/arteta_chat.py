@@ -67,6 +67,7 @@ from plugins.arteta_agent.response.favorability import (
     format_favorability_notice,
     strip_legacy_favor_markers,
 )
+from plugins.arteta_agent.response.transport import choose_reply_transport
 try:
     from plugins.arteta_agent.planner import ProviderResponseError
 except ImportError:
@@ -203,6 +204,44 @@ def append_agent_visual_trace(answer: str, trace) -> str:
     if "【Agent 调度】" in plain_answer:
         return answer
     return "{0}\n\n{1}".format(answer, block)
+
+
+async def send_agent_answer_message(
+    bot,
+    event,
+    answer: str,
+    agent_image_artifacts,
+    user_requested_image: bool = False,
+):
+    decision = choose_reply_transport(
+        answer,
+        has_image_artifact=bool(agent_image_artifacts),
+        user_requested_image=user_requested_image,
+    )
+    if decision.mode == "text":
+        await bot.send(event, Message(str(answer or "")))
+        return decision
+
+    should_use_html = needs_html_render(answer) or decision.reason in {
+        "long_structured_content",
+        "long_text",
+        "rich_style",
+    }
+    render_mode = "compact" if decision.reason == "user_requested_image" else "full"
+    if should_use_html:
+        with open("/tmp/debug.log", "a") as df:
+            df.write("RENDER: needs_html_render=True, trying html_to_image\n")
+        html_answer = style_tags_to_html(answer)
+        try:
+            img_bytes = await html_to_image(html_answer, render_mode=render_mode)
+        except Exception as e:
+            with open("/tmp/debug.log", "a") as df:
+                df.write(f"RENDER: html_to_image failed: {e}, falling back to PIL\n")
+            img_bytes = text_to_tactical_board(answer)
+    else:
+        img_bytes = text_to_tactical_board(answer)
+    await bot.send(event, MessageSegment.image(img_bytes))
+    return decision
 
 
 def should_skip_agent_reply(answer: str) -> bool:
@@ -2094,20 +2133,17 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
                     if trace_block:
                         answer = append_agent_visual_trace(answer, trace)
 
-                if needs_html_render(answer):
-                    with open("/tmp/debug.log", "a") as df:
-                        df.write(f"RENDER: needs_html_render=True, trying html_to_image\n")
-                    html_answer = style_tags_to_html(answer)
-                    try:
-                        img_bytes = await html_to_image(html_answer)
-                    except Exception as e:
-                        with open("/tmp/debug.log", "a") as df:
-                            df.write(f"RENDER: html_to_image failed: {e}, falling back to PIL\n")
-                        img_bytes = text_to_tactical_board(answer)
-                else:
-                    img_bytes = text_to_tactical_board(answer)
-                print(f"[delayed_response] 开始发送图片回复 to group={group_id} user={user_id}")
-                await bot.send(event, MessageSegment.image(img_bytes))
+                transport_decision = await send_agent_answer_message(
+                    bot,
+                    event,
+                    answer,
+                    agent_image_artifacts,
+                )
+                print(
+                    "[delayed_response] 发送回复成功 "
+                    f"mode={transport_decision.mode} reason={transport_decision.reason} "
+                    f"group={group_id} user={user_id}"
+                )
                 for artifact_path in agent_image_artifacts:
                     resolved_artifact = _resolve_agent_image_artifact(artifact_path)
                     if not resolved_artifact:
@@ -2134,7 +2170,6 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None)
                     trace_summary = trace_block.replace("\n", " | ")
                     print(f"[AgentTrace] block group={group_id} user={user_id} {trace_summary}")
                     print(f"[AgentTrace] rendered group={group_id} user={user_id}")
-                print(f"[delayed_response] 图片发送成功 to group={group_id}")
             except Exception as e:
                 print(f"[delayed_response] 回复处理出错: {e}")
                 try:

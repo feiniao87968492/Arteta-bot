@@ -5026,3 +5026,75 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 - Phase 7 still needs reply transport/render decision improvements.
 - Phase 8 still needs personality knowledge-boundary work.
+
+## 2026-07-13 Personality Response Optimization Phase 7 Reply Transport And Render Modes
+
+### Scope
+
+- Added a structured reply transport decision so ordinary short replies can be sent as native QQ text.
+- Kept image rendering for code blocks, formulas, markdown tables, long structured analysis, explicit image requests, and image-artifact paths.
+- Added compact/full HTML template modes and reduced the full template decoration layers.
+- Kept existing PIL tactical-board fallback and formula/code rendering behavior available.
+
+### RED Check
+
+- Added `tests/test_arteta_agent_response_transport.py`.
+- Initial focused run:
+  - `python -m pytest tests\test_arteta_agent_response_transport.py -q`
+  - Result: failed because `plugins.arteta_agent.response.transport` did not exist.
+- Added a chat-layer integration test:
+  - `test_send_agent_answer_message_uses_text_for_short_plain_reply`
+  - Initial result: failed because `plugins.arteta_chat` had no `send_agent_answer_message(...)` helper and still rendered every main reply as an image.
+- Updated render template tests for compact/full behavior.
+  - Initial focused run failed because the template still always rendered the header and nested gold frame.
+
+### Changes
+
+- Added `plugins/arteta_agent/response/transport.py`:
+  - `ReplyTransportDecision`;
+  - `choose_reply_transport(...)`.
+- Updated `plugins/arteta_chat.py`:
+  - added `send_agent_answer_message(...)`;
+  - main Agent replies now use text transport for short plain replies;
+  - long structured/image-worthy replies use HTML rendering or existing PIL fallback.
+- Updated `plugins/arteta_render.py`:
+  - `html_to_image(markdown_text, render_mode="full")` now passes render mode into the template.
+- Updated `templates/arteta_render.html`:
+  - `full` mode keeps the header but lowers its impact and removes the gold nested frame;
+  - `compact` mode hides the header and avoids nested frame wrappers.
+
+### Verification
+
+- `python -m pytest tests\test_arteta_agent_response_transport.py -q`
+  - Result: `4 passed`.
+- `python -m pytest tests\test_arteta_chat_commands.py::ClearGroupMemoryCommandTests::test_send_agent_answer_message_uses_text_for_short_plain_reply -q`
+  - Result: `1 passed`.
+- `python -m pytest tests\test_arteta_render.py::test_render_template_uses_reply_header_image tests\test_arteta_render.py::test_render_template_supports_compact_mode_without_header_or_nested_frames -q`
+  - Result: `2 passed`.
+- `python -m pytest tests\test_arteta_render.py tests\test_arteta_agent_response_transport.py tests\test_arteta_chat_commands.py -q`
+  - Result: `33 passed`.
+- `python -m py_compile plugins\arteta_agent\response\transport.py plugins\arteta_chat.py plugins\arteta_render.py`
+  - Result: passed.
+- `python -m pytest tests\test_arteta_agent_registry.py -q`
+  - Result: `192 passed`.
+- `python tools\evaluate_personality_style.py --output artifacts\personality_style_eval_report_phase7.json`
+  - Result:
+    - `trace_prefixes_grok_marker=false`;
+    - `fixed_opening_prompt_hits=0`;
+    - `forced_neutral_emoji_cases=0`;
+    - `visible_favorability_cases=0`;
+    - `visible_trace_marker_cases=0`.
+- `git diff --check -- Docs\dev\agent-architecture-devlog.md plugins\arteta_agent\response\transport.py plugins\arteta_chat.py plugins\arteta_render.py templates\arteta_render.html tests\test_arteta_agent_response_transport.py tests\test_arteta_chat_commands.py tests\test_arteta_render.py`
+  - Result: passed.
+
+### Compatibility
+
+- Existing `html_to_image(markdown_text)` callers remain compatible because `render_mode` defaults to `full`.
+- Formula/code/table rendering still uses the HTML path.
+- Existing image artifacts are still sent after the main reply.
+- Web Access, ChromaDB, permissions, PendingAction, Provider, Runtime, behavior policy storage, and database schema were not changed.
+
+### Remaining
+
+- Phase 8 still needs personality knowledge-boundary work.
+- Final acceptance still needs broader personality evaluator and registry regression runs after Phase 8.

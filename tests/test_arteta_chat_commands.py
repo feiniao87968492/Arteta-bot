@@ -616,6 +616,27 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
         finally:
             restore_modules(previous)
 
+    def test_send_agent_answer_message_uses_text_for_short_plain_reply(self):
+        arteta_chat, previous = load_arteta_chat_module()
+        try:
+            sent = []
+
+            class FakeBot(object):
+                async def send(self, event, message):
+                    sent.append(message)
+
+            result = asyncio.run(arteta_chat.send_agent_answer_message(
+                FakeBot(),
+                object(),
+                "早，今天先把节奏稳住。",
+                [],
+            ))
+
+            self.assertEqual(result.mode, "text")
+            self.assertEqual(sent, ["早，今天先把节奏稳住。"])
+        finally:
+            restore_modules(previous)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -461,12 +461,16 @@ def text_to_tactical_board(text: str) -> bytes:
     return img_byte_arr.getvalue()
 
 
-async def html_to_image(markdown_text: str) -> bytes:
+async def html_to_image(markdown_text: str, render_mode: str = "full") -> bytes:
     """将 Markdown 文本渲染为图片（支持 KaTeX 公式 + 代码高亮）"""
     markdown_text = normalize_math_delimiters(markdown_text)
     env = _get_template_env()
     template = env.get_template(TEMPLATE_FILE)
-    html_content = template.render(text=markdown_text, header_image_data_uri=_header_image_data_uri())
+    html_content = template.render(
+        text=markdown_text,
+        header_image_data_uri=_header_image_data_uri(),
+        render_mode=render_mode,
+    )
 
     browser = await _get_browser()
     page = await browser.new_page(
