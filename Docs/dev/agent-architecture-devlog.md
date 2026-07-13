@@ -5203,3 +5203,29 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 
 - No Web Access security, ChromaDB schema, PendingAction, Provider, Runtime, or permission model changes were made in the final acceptance slice.
 - The active branch has each implementation phase committed and pushed to `origin/feat/chromadb-memory`.
+
+### ECS Deployment And Smoke
+
+- Deployed commit: `bde6cfe test: record personality response acceptance`.
+- Deployment archive: `/tmp/arteta_personality_response_bde6cfe.tar.gz`.
+- Remote backup directory: `/opt/arteta_bot/backups/personality_response_bde6cfe_20260713124350`.
+- Remote compile:
+  - `cd /opt/arteta_bot && ./venv/bin/python - <<'PY' ... PY`
+  - Result: `compiled 26`.
+- Remote restart:
+  - `supervisorctl restart arteta_bot arteta_dashboard && supervisorctl status arteta_bot arteta_dashboard`
+  - Result: both `arteta_bot` and `arteta_dashboard` are `RUNNING`.
+- Remote smoke:
+  - `./venv/bin/python tools/verify_features.py --suite chat`
+    - Result: passed.
+  - `./venv/bin/python tools/verify_features.py --suite agent_registry --suite agent_permissions`
+    - Result: passed.
+  - `./venv/bin/python tools/verify_features.py --suite agent_loop`
+    - Result: passed.
+  - `./venv/bin/python tools/evaluate_personality_style.py --output artifacts/personality_style_eval_report_deploy.json`
+    - Result: `fixed_opening_prompt_hits=0`, `forced_neutral_emoji_cases=0`, `visible_favorability_cases=0`, `visible_trace_marker_cases=0`, `trace_prefixes_grok_marker=false`.
+
+### Manual Acceptance Status
+
+- Added `Docs/dev/personality-response-acceptance.md` with implementation evidence, local verification, ECS smoke, and acceptance matrix mapping.
+- The task-plan request for 12 live QQ reply screenshots and before/after screenshots remains operator-manual evidence. It was not fabricated from automated fixtures.
