@@ -6,6 +6,14 @@ Arteta Bot 是一个基于 NoneBot2、OneBot V11 和 NapCat 的 QQ 群聊机器�
 
 最近一轮人格响应优化已经并入主线：默认人格 prompt 集中管理，回复风格由 `ResponseStyleProfile` 驱动，普通短回复优先走 QQ 原生文本，代码、公式、表格、长结构化内容和图片产物走渲染图片；表情、好感度、Trace 标记和知识库素材都从主回复正文中解耦。
 
+## 架构状态
+
+- **Agent 架构重构已完成**：Routing、Planning、Runtime、Provider、Response、Policy、Executor 和 Audit 已从旧 planner 主循环中拆出，外部入口仍兼容 `run_agent_loop(...)`。
+- **当前事实链路已策略化**：足球转会、伤病、赛程、最近比赛和实时新闻类问题会进入 Freshness Policy，并优先使用 GrokSearch / Web 工具获取当前证据。
+- **安全边界由服务端执行**：工具参数校验、权限判断、PendingAction 原子消费、artifact 生成、审计记录和禁用工具过滤都不依赖模型文本声明。
+- **人格呈现已组件化**：prompt、style profile、开场去重、表情策略、好感度、Trace 展示和文本/图片传输决策由 response 层集中处理。
+- **仍需人工证据的项目**：人格响应优化的代码与自动化验收已完成，12 条真实 QQ 回复截图和 before/after 截图仍作为 operator manual evidence 由人工补充。
+
 ## 核心能力
 
 - **阿尔特塔人格群聊**：结合角色设定、群成员档案、长期记忆、近期上下文和响应风格策略生成回复。
@@ -43,6 +51,8 @@ QQ / NapCat
   -> arteta_chat.py                         # text/image 发送、群记忆写入、好感度入库
 ```
 
+旧架构里，路由关键词、强制工具、模型调用、工具执行、权限确认、artifact marker、降级回复和表情后处理大多堆在 planner 或聊天入口附近。现在这些职责被拆成稳定边界：Routing 只判断意图，Planning 只生成计划，Runtime 只执行循环，Executor 只做校验和权限，Provider 只处理模型协议，Response 只组合最终呈现。
+
 ### 主请求数据流
 
 ```text
@@ -74,6 +84,15 @@ QQ / NapCat
 | Policy | `plugins/arteta_agent/behavior_policy.py` / `policy/` | 管理 SQLite 行为策略、TTL 消耗和旧 JSON 迁移兼容。 |
 | Web Access | `plugins/arteta_agent/tools/web/` | 搜索、网页抓取、X/Twitter 读取、SSRF 校验、响应限制、格式化和事实证据收集。 |
 | Audit | `plugins/arteta_agent/audit.py` | 持久化确认、拒绝、执行、异常、超时和管理动作的脱敏审计记录。 |
+
+### 关键设计原则
+
+- `planner.py` 不再承载业务判断，只保留兼容入口和 provider wrapper。
+- `RouteDecision` 和 `AgentPlan` 支持同一轮多意图，不再命中第一个关键词后提前返回。
+- required tools、强制工具和模型后续 tool calls 都进入同一个 Runtime。
+- 存在显式依赖的工具不会并行；只有声明 `parallel_safe=True`、`idempotent=True` 且权限为 `safe_read` 的独立工具才会受限并行。
+- Provider 降级路径也不会把工具结果、网页、PDF、附件或群消息写进动态 `system`。
+- Artifact 来自结构化 `ToolResult.artifacts`，普通工具正文里的伪造 marker 不会生成 artifact。
 
 ### 关键结构化对象
 
