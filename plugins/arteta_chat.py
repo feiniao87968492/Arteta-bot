@@ -2107,10 +2107,14 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
         progress_reporter = None
         if USE_AGENT_REGISTRY and agent_progress_enabled(group_id):
             async def send_progress_message(text):
-                await bot.send(event, Message(text))
+                return await bot.send(event, Message(text))
+
+            async def recall_progress_message(message_id):
+                await bot.call_api("delete_msg", message_id=int(message_id))
 
             progress_reporter = DebugProgressReporter(
                 send_progress_message,
+                recall_message=recall_progress_message,
                 config=ProgressReporterConfig(
                     initial_delay_seconds=AGENT_PROGRESS_INITIAL_DELAY,
                     minimum_update_interval_seconds=AGENT_PROGRESS_MIN_INTERVAL,
@@ -2271,6 +2275,8 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                         print(f"[AgentArtifact] sent image artifact={resolved_artifact}")
                     except Exception as artifact_exc:
                         print(f"[AgentArtifact] send failed artifact={artifact_path}: {artifact_exc}")
+                if progress_reporter:
+                    await progress_reporter.recall_sent_messages()
                 try:
                     await save_bot_reply_to_daily_messages(
                         str(getattr(bot, "self_id", "arteta_bot")),

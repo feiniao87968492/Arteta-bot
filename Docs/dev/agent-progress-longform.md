@@ -20,9 +20,9 @@ Progress is formatted and sent by `plugins/arteta_agent/progress/`:
 
 - `models.py` defines lifecycle events and sanitized tool-call metadata.
 - `formatter.py` turns events into native QQ text with `[Agent]`, `[Plan]`, `[Action]`, `[Observation]`, and `[Confirmation]`.
-- `reporter.py` applies initial delay, dedupe, throttling, max-message limits, one-shot tool heartbeat, one-shot synthesis heartbeat, and close cancellation.
+- `reporter.py` applies initial delay, dedupe, throttling, max-message limits, one-shot tool heartbeat, one-shot synthesis heartbeat, close cancellation, message-id tracking, and best-effort recall.
 
-Progress messages are not appended to `AgentState.messages`, not stored in ChromaDB, not added to daily message history, not rendered into final cards, and do not trigger favorability or mood-emoji handling.
+Progress messages are not appended to `AgentState.messages`, not stored in ChromaDB, not added to daily message history, not rendered into final cards, and do not trigger favorability or mood-emoji handling. They are temporary QQ status updates: after the final main reply and any image artifacts are sent successfully, `arteta_chat.py` asks the reporter to recall the progress messages it recorded from OneBot `message_id` values. Timeout, exception, and no-reply paths only close the reporter and leave already-sent progress visible for troubleshooting.
 
 ## Long-Form Reply Policy
 
@@ -81,6 +81,9 @@ Focused local verification:
 ```powershell
 python -m pytest tests\test_arteta_agent_progress_models.py tests\test_arteta_agent_progress_formatter.py tests\test_arteta_agent_progress_reporter.py tests\test_arteta_agent_runtime_progress.py tests\test_arteta_agent_long_form_policy.py tests\test_arteta_agent_response_style.py tests\test_arteta_agent_response_transport.py tests\test_arteta_agent_registry.py tests\test_arteta_chat_commands.py tests\test_arteta_prompt_style.py tests\test_recent_group_context.py -q
 # 275 passed
+
+python -m pytest tests\test_arteta_agent_progress_reporter.py tests\test_arteta_chat_commands.py -q
+# Covers temporary progress message recall after successful final replies.
 
 python -m pytest tests -q
 # 695 passed

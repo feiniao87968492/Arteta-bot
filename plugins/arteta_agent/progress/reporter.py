@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 from dataclasses import dataclass
-from typing import Callable, Optional, Set
+from typing import Callable, List, Optional, Set
 
 from .formatter import ProgressFormatterPolicy, format_progress_event
 from .models import (
@@ -29,15 +29,18 @@ class DebugProgressReporter(object):
     def __init__(
         self,
         send_message: Callable[[str], object],
+        recall_message: Optional[Callable[[object], object]] = None,
         config: Optional[ProgressReporterConfig] = None,
         formatter_policy: Optional[ProgressFormatterPolicy] = None,
     ) -> None:
         self.send_message = send_message
+        self.recall_message = recall_message
         self.config = config or ProgressReporterConfig()
         self.formatter_policy = formatter_policy or ProgressFormatterPolicy()
         self._closed = False
         self._sent_count = 0
         self._sent_texts: Set[str] = set()
+        self._sent_message_ids: List[object] = []
         self._lock = asyncio.Lock()
         self._initial_task = None
         self._pending_initial_event = None
@@ -75,6 +78,20 @@ class DebugProgressReporter(object):
         async with self._lock:
             return
 
+    async def recall_sent_messages(self) -> None:
+        if self.recall_message is None:
+            return
+        async with self._lock:
+            message_ids = list(self._sent_message_ids)
+            self._sent_message_ids = []
+        for message_id in message_ids:
+            try:
+                value = self.recall_message(message_id)
+                if inspect.isawaitable(value):
+                    await value
+            except Exception:
+                continue
+
     async def _flush_initial_after_delay(self) -> None:
         try:
             await asyncio.sleep(max(0.0, float(self.config.initial_delay_seconds or 0)))
@@ -111,10 +128,23 @@ class DebugProgressReporter(object):
             try:
                 value = self.send_message(text)
                 if inspect.isawaitable(value):
-                    await value
+                    value = await value
+                self._record_message_id(value)
                 self._last_sent_at = asyncio.get_running_loop().time()
             except Exception:
                 return
+
+    def _record_message_id(self, send_result) -> None:
+        message_id = None
+        if isinstance(send_result, dict):
+            message_id = send_result.get("message_id")
+        else:
+            message_id = getattr(send_result, "message_id", None)
+        if message_id is None:
+            return
+        if isinstance(message_id, str) and not message_id.strip():
+            return
+        self._sent_message_ids.append(message_id)
 
     def _schedule_synthesis_heartbeat(self) -> None:
         if self._synthesis_task is not None or self._closed:

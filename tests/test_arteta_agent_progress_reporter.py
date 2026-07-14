@@ -165,3 +165,58 @@ def test_reporter_send_errors_are_swallowed():
     asyncio.run(scenario())
 
     assert len(calls) == 1
+
+
+def test_reporter_records_message_ids_and_recalls_them_once():
+    sent = []
+    recalled = []
+
+    async def send_message(text):
+        message_id = 1000 + len(sent)
+        sent.append((message_id, text))
+        return {"message_id": message_id}
+
+    async def recall_message(message_id):
+        recalled.append(message_id)
+
+    reporter = DebugProgressReporter(
+        send_message=send_message,
+        recall_message=recall_message,
+        config=ProgressReporterConfig(initial_delay_seconds=0.0, minimum_update_interval_seconds=0.0),
+    )
+
+    async def scenario():
+        await reporter.handle_event(AgentProgressEvent(kind=PROGRESS_TOOL_BATCH_STARTED, tools=[ProgressToolCall("c1", "grok_search")]))
+        await reporter.handle_event(AgentProgressEvent(kind=PROGRESS_TOOL_BATCH_FINISHED, tools=[ProgressToolCall("c1", "grok_search")], status="ok"))
+        await reporter.recall_sent_messages()
+        await reporter.recall_sent_messages()
+
+    asyncio.run(scenario())
+
+    assert [item[0] for item in sent] == [1000, 1001]
+    assert recalled == [1000, 1001]
+
+
+def test_reporter_extracts_message_id_from_object_response_and_swallows_recall_errors():
+    class SendResult(object):
+        message_id = "2002"
+
+    recalled = []
+
+    async def recall_message(message_id):
+        recalled.append(message_id)
+        raise RuntimeError("delete failed")
+
+    reporter = DebugProgressReporter(
+        send_message=lambda text: SendResult(),
+        recall_message=recall_message,
+        config=ProgressReporterConfig(initial_delay_seconds=0.0, minimum_update_interval_seconds=0.0),
+    )
+
+    async def scenario():
+        await reporter.handle_event(AgentProgressEvent(kind=PROGRESS_TOOL_BATCH_STARTED, tools=[ProgressToolCall("c1", "grok_search")]))
+        await reporter.recall_sent_messages()
+
+    asyncio.run(scenario())
+
+    assert recalled == ["2002"]

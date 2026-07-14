@@ -775,6 +775,7 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
             )
 
             sent = []
+            deleted = []
             saved_memory = []
             created_tasks = []
 
@@ -805,6 +806,11 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
 
                 async def send(self, event, message):
                     sent.append(str(message))
+                    return {"message_id": len(sent)}
+
+                async def call_api(self, name, **kwargs):
+                    if name == "delete_msg":
+                        deleted.append(kwargs.get("message_id"))
 
             class FakeMessageSegment(object):
                 @staticmethod
@@ -883,6 +889,7 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
                 sent,
             )
             self.assertIn("结论：罗杰斯可以聊，但要看价格、位置和无球强度。", sent)
+            self.assertEqual([1], deleted)
             self.assertEqual(len(saved_memory), 1)
             self.assertNotIn("[Action]", saved_memory[0][3])
         finally:
