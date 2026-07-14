@@ -2254,6 +2254,7 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
 
                 if progress_reporter:
                     await progress_reporter.close()
+                    await progress_reporter.recall_sent_messages()
                 transport_decision = await send_agent_answer_message(
                     bot,
                     event,

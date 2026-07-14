@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from plugins.arteta_agent.progress.models import (
     PROGRESS_FINAL_SYNTHESIS_STARTED,
@@ -146,6 +147,34 @@ def test_reporter_respects_minimum_update_interval():
     assert sent[1][1] - sent[0][1] >= 0.04
 
 
+def test_reporter_close_during_minimum_interval_prevents_pending_send():
+    sent = []
+    reporter = DebugProgressReporter(
+        send_message=lambda text: sent.append(text),
+        config=ProgressReporterConfig(
+            initial_delay_seconds=0.0,
+            minimum_update_interval_seconds=0.08,
+            maximum_messages=3,
+        ),
+    )
+
+    async def scenario():
+        await reporter.handle_event(AgentProgressEvent(kind=PROGRESS_TOOL_BATCH_STARTED, tools=[ProgressToolCall("c1", "grok_search")]))
+        pending = asyncio.create_task(reporter.handle_event(AgentProgressEvent(
+            kind=PROGRESS_TOOL_BATCH_FINISHED,
+            tools=[ProgressToolCall("c1", "grok_search")],
+            status="ok",
+        )))
+        await asyncio.sleep(0.01)
+        await reporter.close()
+        await pending
+
+    asyncio.run(scenario())
+
+    assert len(sent) == 1
+    assert sent[0].startswith("[Action]")
+
+
 def test_reporter_send_errors_are_swallowed():
     calls = []
 
@@ -195,6 +224,36 @@ def test_reporter_records_message_ids_and_recalls_them_once():
 
     assert [item[0] for item in sent] == [1000, 1001]
     assert recalled == [1000, 1001]
+
+
+def test_reporter_recall_errors_are_counted_logged_and_retried(caplog):
+    calls = []
+
+    async def recall_message(message_id):
+        calls.append(message_id)
+        if len(calls) == 1:
+            raise RuntimeError("delete failed")
+
+    reporter = DebugProgressReporter(
+        send_message=lambda text: {"message_id": 3003},
+        recall_message=recall_message,
+        config=ProgressReporterConfig(initial_delay_seconds=0.0, minimum_update_interval_seconds=0.0),
+    )
+
+    async def scenario():
+        await reporter.handle_event(AgentProgressEvent(kind=PROGRESS_TOOL_BATCH_STARTED, tools=[ProgressToolCall("c1", "grok_search")]))
+        first_result = await reporter.recall_sent_messages()
+        second_result = await reporter.recall_sent_messages()
+        return first_result, second_result
+
+    caplog.set_level(logging.WARNING, logger="plugins.arteta_agent.progress.reporter")
+
+    first, second = asyncio.run(scenario())
+
+    assert (first.attempted, first.succeeded, first.failed) == (1, 0, 1)
+    assert (second.attempted, second.succeeded, second.failed) == (1, 1, 0)
+    assert calls == [3003, 3003]
+    assert "Failed to recall agent progress message" in caplog.text
 
 
 def test_reporter_extracts_message_id_from_object_response_and_swallows_recall_errors():

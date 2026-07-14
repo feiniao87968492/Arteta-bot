@@ -899,6 +899,135 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
                 pass
             restore_modules(previous)
 
+    def test_process_chat_recalls_progress_before_final_reply_and_after(self):
+        arteta_chat, previous = load_arteta_chat_module({
+            "arteta_use_agent_registry": True,
+        })
+        try:
+            from plugins.arteta_agent.progress.models import (
+                PROGRESS_FINAL_SYNTHESIS_STARTED,
+                AgentProgressEvent,
+            )
+
+            events = []
+            created_tasks = []
+
+            class FakeSegment(object):
+                def __init__(self, seg_type, data=None):
+                    self.type = seg_type
+                    self.data = data or {}
+
+            class FakeMessage(list):
+                def extract_plain_text(self):
+                    return "A draw Beckham with a buzz cut"
+
+            class FakeEvent(arteta_chat.GroupMessageEvent):
+                group_id = 10001
+                group_name = "Test Group"
+                sender = types.SimpleNamespace(card="Tester", nickname="Tester")
+                reply = None
+                original_message = None
+
+                def get_user_id(self):
+                    return "20002"
+
+                def get_message(self):
+                    return FakeMessage([FakeSegment("text", {"text": "A draw Beckham with a buzz cut"})])
+
+            class FakeBot(object):
+                self_id = "99999"
+
+                async def send(self, event, message):
+                    return {"message_id": 101}
+
+            class FakeProgressReporter(object):
+                def __init__(self, *args, **kwargs):
+                    return None
+
+                async def handle_event(self, event):
+                    events.append("progress_event")
+
+                async def close(self):
+                    events.append("close")
+
+                async def recall_sent_messages(self):
+                    events.append("recall")
+
+            async def no_op(*args, **kwargs):
+                return None
+
+            async def fake_get_player_data(*args, **kwargs):
+                return "Academy", 0
+
+            async def fake_apply_favor_change(*args, **kwargs):
+                return "Academy", 0
+
+            async def fake_count(*args, **kwargs):
+                return 1
+
+            async def fake_profile(*args, **kwargs):
+                return ""
+
+            async def fake_rows(*args, **kwargs):
+                return []
+
+            async def fake_answer(*args, **kwargs):
+                observer = kwargs.get("progress_observer")
+                assert observer is not None
+                await observer(AgentProgressEvent(kind=PROGRESS_FINAL_SYNTHESIS_STARTED), None)
+                return "Final answer"
+
+            async def fake_should_update_profile(*args, **kwargs):
+                return False
+
+            async def fake_send_agent_answer_message(*args, **kwargs):
+                events.append("final_send")
+                return arteta_chat.ReplyTransportDecision("image", "test")
+
+            original_create_task = arteta_chat.asyncio.create_task
+
+            def tracking_create_task(coro):
+                task = original_create_task(coro)
+                created_tasks.append(task)
+                return task
+
+            arteta_chat.asyncio.create_task = tracking_create_task
+            arteta_chat.DebugProgressReporter = FakeProgressReporter
+            arteta_chat.refresh_group_name = no_op
+            arteta_chat.save_message = no_op
+            arteta_chat.get_player_data = fake_get_player_data
+            arteta_chat.get_message_count = fake_count
+            arteta_chat.get_profile_section = fake_profile
+            arteta_chat.get_active_members_snapshot = lambda *args, **kwargs: ""
+            arteta_chat.get_recent_group_messages = fake_rows
+            arteta_chat.find_recent_messages_by_alias = lambda *args, **kwargs: []
+            arteta_chat.maybe_answer_football_news_directly = fake_profile
+            arteta_chat.maybe_search_football_news_for_prompt = fake_profile
+            arteta_chat.memory_store.query_memories = lambda *args, **kwargs: []
+            arteta_chat.memory_store.add_memory = lambda *args, **kwargs: None
+            arteta_chat.run_agent_loop = fake_answer
+            arteta_chat.apply_favor_change = fake_apply_favor_change
+            arteta_chat.should_update_profile = fake_should_update_profile
+            arteta_chat.get_known_aliases = fake_rows
+            arteta_chat.save_bot_reply_to_daily_messages = no_op
+            arteta_chat.send_pending_mood_emojis = fake_count
+            arteta_chat.send_agent_answer_message = fake_send_agent_answer_message
+
+            async def exercise():
+                await arteta_chat.process_chat(FakeBot(), FakeEvent())
+                await arteta_chat.asyncio.gather(*created_tasks)
+
+            asyncio.run(exercise())
+
+            ordered = [item for item in events if item in ("close", "recall", "final_send")]
+            self.assertEqual(["close", "recall", "final_send", "recall"], ordered)
+        finally:
+            try:
+                arteta_chat.asyncio.create_task = original_create_task
+            except UnboundLocalError:
+                pass
+            restore_modules(previous)
+
     def test_process_chat_closes_progress_reporter_on_reply_processing_error(self):
         arteta_chat, previous = load_arteta_chat_module({
             "arteta_use_agent_registry": True,
@@ -944,6 +1073,7 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
             class FakeProgressReporter(object):
                 def __init__(self, *args, **kwargs):
                     self.closed = False
+                    self.recall_count = 0
                     reporters.append(self)
 
                 async def handle_event(self, event):
@@ -951,6 +1081,9 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
 
                 async def close(self):
                     self.closed = True
+
+                async def recall_sent_messages(self):
+                    self.recall_count += 1
 
             async def no_op(*args, **kwargs):
                 return None
@@ -1017,6 +1150,7 @@ class ClearGroupMemoryCommandTests(unittest.TestCase):
 
             self.assertEqual(1, len(reporters))
             self.assertTrue(reporters[0].closed)
+            self.assertEqual(0, reporters[0].recall_count)
             self.assertTrue(any("回复处理出错" in item for item in sent))
         finally:
             try:

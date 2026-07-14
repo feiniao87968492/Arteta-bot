@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import logging
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Set
 
@@ -13,6 +14,8 @@ from .models import (
     AgentProgressEvent,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class ProgressReporterConfig(object):
@@ -23,6 +26,13 @@ class ProgressReporterConfig(object):
     maximum_messages: int = 9
     maximum_tool_heartbeats: int = 1
     maximum_synthesis_heartbeats: int = 1
+
+
+@dataclass(frozen=True)
+class ProgressRecallResult(object):
+    attempted: int = 0
+    succeeded: int = 0
+    failed: int = 0
 
 
 class DebugProgressReporter(object):
@@ -78,19 +88,38 @@ class DebugProgressReporter(object):
         async with self._lock:
             return
 
-    async def recall_sent_messages(self) -> None:
+    async def recall_sent_messages(self) -> ProgressRecallResult:
         if self.recall_message is None:
-            return
+            return ProgressRecallResult()
         async with self._lock:
             message_ids = list(self._sent_message_ids)
             self._sent_message_ids = []
+        attempted = 0
+        succeeded = 0
+        failed_ids = []
         for message_id in message_ids:
+            attempted += 1
             try:
                 value = self.recall_message(message_id)
                 if inspect.isawaitable(value):
                     await value
             except Exception:
+                failed_ids.append(message_id)
+                logger.warning(
+                    "Failed to recall agent progress message message_id=%r",
+                    message_id,
+                    exc_info=True,
+                )
                 continue
+            succeeded += 1
+        if failed_ids:
+            async with self._lock:
+                self._sent_message_ids = failed_ids + self._sent_message_ids
+        return ProgressRecallResult(
+            attempted=attempted,
+            succeeded=succeeded,
+            failed=len(failed_ids),
+        )
 
     async def _flush_initial_after_delay(self) -> None:
         try:
@@ -119,6 +148,8 @@ class DebugProgressReporter(object):
                 remaining = minimum_interval - (loop.time() - self._last_sent_at)
                 if remaining > 0:
                     await asyncio.sleep(remaining)
+                    if self._closed:
+                        return
             if self._sent_count >= int(self.config.maximum_messages or 0):
                 return
             if text in self._sent_texts:

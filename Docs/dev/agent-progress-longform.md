@@ -1,6 +1,6 @@
 # Agent Progress And Long-Form Replies
 
-Date: 2026-07-13
+Date: 2026-07-14
 
 Task plan: `Docs/tasks/arteta_agent_react_longform_integrated_plan.md`
 
@@ -20,9 +20,9 @@ Progress is formatted and sent by `plugins/arteta_agent/progress/`:
 
 - `models.py` defines lifecycle events and sanitized tool-call metadata.
 - `formatter.py` turns events into native QQ text with `[Agent]`, `[Plan]`, `[Action]`, `[Observation]`, and `[Confirmation]`.
-- `reporter.py` applies initial delay, dedupe, throttling, max-message limits, one-shot tool heartbeat, one-shot synthesis heartbeat, close cancellation, message-id tracking, and best-effort recall.
+- `reporter.py` applies initial delay, dedupe, throttling, max-message limits, one-shot tool heartbeat, one-shot synthesis heartbeat, close cancellation, message-id tracking, best-effort recall, recall result counts, failure logging, and failed-message retry.
 
-Progress messages are not appended to `AgentState.messages`, not stored in ChromaDB, not added to daily message history, not rendered into final cards, and do not trigger favorability or mood-emoji handling. They are temporary QQ status updates: after the final main reply and any image artifacts are sent successfully, `arteta_chat.py` asks the reporter to recall the progress messages it recorded from OneBot `message_id` values. Timeout, exception, and no-reply paths only close the reporter and leave already-sent progress visible for troubleshooting.
+Progress messages are not appended to `AgentState.messages`, not stored in ChromaDB, not added to daily message history, not rendered into final cards, and do not trigger favorability or mood-emoji handling. They are temporary QQ status updates: once the successful final answer is ready and before the final reply image is sent, `arteta_chat.py` closes the reporter and asks it to recall progress messages recorded from OneBot `message_id` values. After the final reply and any image artifacts are sent, it asks the reporter to recall again as a fallback for failed pre-send deletions. Timeout, exception, and no-reply paths only close the reporter and leave already-sent progress visible for troubleshooting.
 
 ## Long-Form Reply Policy
 
@@ -83,7 +83,7 @@ python -m pytest tests\test_arteta_agent_progress_models.py tests\test_arteta_ag
 # 275 passed
 
 python -m pytest tests\test_arteta_agent_progress_reporter.py tests\test_arteta_chat_commands.py -q
-# Covers temporary progress message recall after successful final replies.
+# Covers temporary progress message recall before successful final replies plus post-send fallback recall.
 
 python -m pytest tests -q
 # 695 passed
