@@ -39,6 +39,8 @@ from nonebot import get_driver, on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot_plugin_apscheduler import scheduler
 
+from plugins.arteta_football_intelligence.schema import ensure_football_intelligence_schema
+
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -373,25 +375,7 @@ class FootballNewsSQLiteStore(object):
             os.makedirs(parent)
         conn = sqlite3.connect(self.db_path)
         try:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS football_news_items (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chroma_id TEXT NOT NULL,
-                    url TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    summary TEXT NOT NULL DEFAULT '',
-                    published_at INTEGER NOT NULL,
-                    fetched_at INTEGER NOT NULL,
-                    content_hash TEXT NOT NULL,
-                    UNIQUE(url)
-                )
-            """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_football_news_fetched_at ON football_news_items(fetched_at)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_football_news_category ON football_news_items(category)")
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_football_news_content_hash ON football_news_items(content_hash)")
-            conn.commit()
+            ensure_football_intelligence_schema(conn)
         finally:
             conn.close()
 
