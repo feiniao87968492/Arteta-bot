@@ -381,6 +381,44 @@ class FootballNewsSyncTests(unittest.TestCase):
             self.assertEqual(1, result.sources_succeeded)
             self.assertEqual(1, result.inserted_items)
 
+    def test_sync_keeps_sqlite_fact_when_chroma_item_write_fails(self):
+        module = load_module()
+        import asyncio
+        import tempfile
+        now = 1716400000
+
+        class FailingChromaStore(object):
+            def add_item(self, item):
+                raise RuntimeError("chroma unavailable")
+
+            def add_digest(self, items, fetched_at):
+                raise AssertionError("digest should not be written when no item was indexed")
+
+            def delete_ids(self, chroma_ids):
+                pass
+
+        async def fake_fetch(source):
+            return '<a href="/pl-a.html">阿森纳继续追逐英超冠军</a>'
+
+        sources = [{
+            "name": "fixture",
+            "source": "新浪体育",
+            "url": "https://sports.sina.com.cn/global/england/",
+            "base_url": "https://sports.sina.com.cn",
+            "category": "premier_league",
+            "max_items": 10,
+        }]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sqlite_store = module.FootballNewsSQLiteStore(str(Path(tmpdir) / "news.db"))
+            sqlite_store.initialize()
+            result = asyncio.run(module.sync_football_news(sources, sqlite_store, FailingChromaStore(), fake_fetch, now=now))
+
+            self.assertEqual(1, result.inserted_items)
+            self.assertFalse(result.digest_written)
+            rows = sqlite_store.list_recent_items(days=90, now=now + 60)
+            self.assertEqual(1, len(rows))
+            self.assertEqual("failed", rows[0]["index_status"])
+
 
 class FootballNewsToolIntegrationTests(unittest.TestCase):
     def test_detect_football_news_query_maps_recent_league_questions(self):

@@ -39,7 +39,11 @@ from nonebot import get_driver, on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot_plugin_apscheduler import scheduler
 
-from plugins.arteta_football_intelligence.schema import ensure_football_intelligence_schema
+from plugins.arteta_football_intelligence.storage import FootballNewsSQLiteStore as BaseFootballNewsSQLiteStore
+from plugins.arteta_football_intelligence.vector_index import (
+    FootballNewsChromaStore as BaseFootballNewsChromaStore,
+    build_item_chroma_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -365,197 +369,17 @@ def build_digest_document(items: List[NewsItem], fetched_at: int) -> str:
     return "\n".join(lines)
 
 
-class FootballNewsSQLiteStore(object):
-    def __init__(self, db_path: str):
-        self.db_path = db_path
-
-    def initialize(self) -> None:
-        parent = os.path.dirname(self.db_path)
-        if parent and not os.path.exists(parent):
-            os.makedirs(parent)
-        conn = sqlite3.connect(self.db_path)
-        try:
-            ensure_football_intelligence_schema(conn)
-        finally:
-            conn.close()
-
-    def insert_item(self, item: NewsItem, chroma_id: str) -> bool:
-        hashed = item.with_hash()
-        conn = sqlite3.connect(self.db_path)
-        try:
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO football_news_items
-                    (chroma_id, url, title, source, category, summary, published_at, fetched_at, content_hash)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        chroma_id,
-                        hashed.url,
-                        hashed.title,
-                        hashed.source,
-                        hashed.category,
-                        hashed.summary,
-                        int(hashed.published_at),
-                        int(hashed.fetched_at),
-                        hashed.content_hash,
-                    ),
-                )
-                conn.commit()
-                return True
-            except sqlite3.IntegrityError:
-                return False
-        finally:
-            conn.close()
-
-    def list_recent_items(self, days: int, now: Optional[int] = None, category: Optional[str] = None) -> List[Dict[str, object]]:
-        current = int(now or time.time())
-        cutoff = current - int(days) * 86400
-        sql = """
-            SELECT chroma_id, url, title, source, category, summary, published_at, fetched_at, content_hash
-            FROM football_news_items
-            WHERE fetched_at >= ?
-        """
-        params = [cutoff]
-        if category:
-            sql += " AND category = ?"
-            params.append(category)
-        sql += " ORDER BY fetched_at DESC, id DESC"
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            rows = conn.execute(sql, params).fetchall()
-            return [dict(row) for row in rows]
-        finally:
-            conn.close()
-
-    def delete_older_than(self, days: int, now: Optional[int] = None) -> List[str]:
-        current = int(now or time.time())
-        cutoff = current - int(days) * 86400
-        conn = sqlite3.connect(self.db_path)
-        try:
-            rows = conn.execute(
-                "SELECT chroma_id FROM football_news_items WHERE fetched_at < ? ORDER BY fetched_at ASC",
-                (cutoff,),
-            ).fetchall()
-            chroma_ids = [row[0] for row in rows]
-            conn.execute("DELETE FROM football_news_items WHERE fetched_at < ?", (cutoff,))
-            conn.commit()
-            return chroma_ids
-        finally:
-            conn.close()
+class FootballNewsSQLiteStore(BaseFootballNewsSQLiteStore):
+    pass
 
 
-class FootballNewsChromaStore(object):
+class FootballNewsChromaStore(BaseFootballNewsChromaStore):
     def __init__(self, chroma_dir: str = CHROMA_DB_DIR, collection=None):
-        self.chroma_dir = chroma_dir
-        self.collection = collection
-        self.client = None
-        self._ready = collection is not None
-
-    def initialize(self) -> None:
-        if self.collection is not None:
-            self._ready = True
-            return
-        try:
-            self.client = chromadb.PersistentClient(
-                path=self.chroma_dir,
-                settings=Settings(anonymized_telemetry=False),
-            )
-            try:
-                self.collection = self.client.get_collection(COLLECTION_NAME)
-            except Exception:
-                self.collection = self.client.create_collection(COLLECTION_NAME)
-            self._ready = True
-            logger.info("[FootballNews] ChromaDB collection ready: %s", COLLECTION_NAME)
-        except Exception as e:
-            self._ready = False
-            logger.error("[FootballNews] ChromaDB initialization failed: %s", e)
-
-    def add_item(self, item: NewsItem) -> str:
-        if not self._ready or self.collection is None:
-            raise RuntimeError("football_news collection is not ready")
-        hashed = item.with_hash()
-        chroma_id = "football_news_item_%s_%s" % (hashed.fetched_at, hashed.content_hash[:12])
-        self.collection.add(
-            documents=[build_item_document(hashed)],
-            metadatas=[{
-                "kind": "item",
-                "category": hashed.category,
-                "source": hashed.source,
-                "url": hashed.url,
-                "published_at": int(hashed.published_at),
-                "fetched_at": int(hashed.fetched_at),
-            }],
-            ids=[chroma_id],
+        super(FootballNewsChromaStore, self).__init__(
+            chroma_dir=chroma_dir,
+            collection=collection,
+            collection_name=COLLECTION_NAME,
         )
-        return chroma_id
-
-    def add_digest(self, items: List[NewsItem], fetched_at: int) -> str:
-        if not self._ready or self.collection is None:
-            raise RuntimeError("football_news collection is not ready")
-        digest_hash = hashlib.sha1("|".join([item.with_hash().content_hash for item in items]).encode("utf-8")).hexdigest()
-        chroma_id = "football_news_digest_%s_%s" % (int(fetched_at), digest_hash[:12])
-        self.collection.add(
-            documents=[build_digest_document(items, fetched_at)],
-            metadatas=[{
-                "kind": "daily_digest",
-                "category": "all",
-                "source": "football_news_sync",
-                "url": "",
-                "published_at": int(fetched_at),
-                "fetched_at": int(fetched_at),
-            }],
-            ids=[chroma_id],
-        )
-        return chroma_id
-
-    def delete_ids(self, chroma_ids: List[str]) -> None:
-        if not chroma_ids or not self._ready or self.collection is None:
-            return
-        self.collection.delete(ids=chroma_ids)
-
-    def search(self, query: str, category: Optional[str] = None, days: int = SEARCH_DEFAULT_DAYS,
-               now: Optional[int] = None, n_results: int = 8) -> str:
-        if not self._ready or self.collection is None:
-            return "足球新闻向量库尚未初始化。"
-        if not query:
-            return "请提供要查询的足球新闻关键词。"
-        safe_days = max(1, min(int(days or SEARCH_DEFAULT_DAYS), SEARCH_MAX_DAYS))
-        current = int(now or time.time())
-        cutoff = current - safe_days * 86400
-        where = {"category": category} if category else None
-        try:
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=n_results,
-                where=where,
-            )
-        except Exception as e:
-            logger.warning("[FootballNews] search failed: %s", e)
-            return "足球新闻检索失败。"
-        documents = results.get("documents", [[]])[0]
-        metadatas = results.get("metadatas", [[]])[0]
-        lines = []
-        for doc, meta in zip(documents, metadatas):
-            fetched_at = int(meta.get("fetched_at", 0) or 0)
-            if fetched_at and fetched_at < cutoff:
-                continue
-            date_text = datetime.fromtimestamp(fetched_at).strftime("%Y-%m-%d") if fetched_at else "未知日期"
-            source = meta.get("source", "未知来源")
-            url = meta.get("url", "")
-            kind = meta.get("kind", "item")
-            first_line = doc.split("\n")[0] if doc else ""
-            title_match = re.search(r"Title: (.+)", doc)
-            summary_match = re.search(r"Summary: (.+)", doc)
-            title = title_match.group(1) if title_match else first_line
-            summary = summary_match.group(1) if summary_match else doc[:180]
-            line = "• [%s] %s｜%s｜%s" % (date_text, title, source, summary[:180])
-            if url and kind == "item":
-                line += "｜%s" % url
-            lines.append(line)
-        return "\n".join(lines) if lines else "没有找到符合时间范围的足球新闻。"
 
 
 async def fetch_source_html(source: Dict[str, object]) -> str:
@@ -591,25 +415,25 @@ async def sync_football_news(sources: List[Dict[str, object]], sqlite_store: Foo
             logger.warning("[FootballNews] source failed %s: %s", source.get("name"), e)
     selected_items = apply_category_quotas(all_items, CATEGORY_QUOTAS)
     result.fetched_items = len(selected_items)
-    inserted_items = []
+    indexed_items = []
     for item in selected_items:
-        try:
-            chroma_id = chroma_store.add_item(item)
-        except Exception as e:
-            logger.warning("[FootballNews] chroma add failed for %s: %s", item.title, e)
-            continue
-        if sqlite_store.insert_item(item, chroma_id):
-            inserted_items.append(item)
-            result.inserted_items += 1
-        else:
+        hashed = item.with_hash()
+        chroma_id = build_item_chroma_id(hashed)
+        if not sqlite_store.insert_pending_item(hashed, chroma_id):
             result.duplicate_items += 1
-            try:
-                chroma_store.delete_ids([chroma_id])
-            except Exception as e:
-                logger.warning("[FootballNews] duplicate vector cleanup failed: %s", e)
-    if inserted_items:
+            continue
+        result.inserted_items += 1
         try:
-            chroma_store.add_digest(inserted_items, fetched_at)
+            chroma_store.add_item(hashed)
+        except Exception as e:
+            sqlite_store.mark_index_status(chroma_id, "failed")
+            logger.warning("[FootballNews] chroma add failed for %s: %s", hashed.title, e)
+            continue
+        sqlite_store.mark_index_status(chroma_id, "ready")
+        indexed_items.append(hashed)
+    if indexed_items:
+        try:
+            chroma_store.add_digest(indexed_items, fetched_at)
             result.digest_written = True
         except Exception as e:
             logger.warning("[FootballNews] digest write failed: %s", e)
