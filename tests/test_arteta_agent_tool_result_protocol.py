@@ -37,6 +37,7 @@ def test_executor_preserves_structured_tool_result_but_overrides_authority_field
             artifacts=["artifact://structured"],
             duration_ms=99999,
             error_code="STRUCTURED_ERROR",
+            metadata={"sources": [{"url": "https://www.arsenal.com/news/source"}]},
         )
 
     clear_registry()
@@ -69,6 +70,7 @@ def test_executor_preserves_structured_tool_result_but_overrides_authority_field
     assert result.markers == ["[structured-marker]"]
     assert result.artifacts == ["artifact://structured"]
     assert result.error_code == "STRUCTURED_ERROR"
+    assert result.metadata == {"sources": [{"url": "https://www.arsenal.com/news/source"}]}
     assert result.duration_ms >= 0
     assert result.duration_ms != 99999
 
@@ -109,6 +111,10 @@ def test_web_fetch_returns_structured_tool_result(monkeypatch):
     assert result.artifacts == []
     assert "Structured page" in result.content
     assert "Structured body" in result.content
+    assert result.metadata["tool"] == "web_fetch"
+    assert result.metadata["sources"][0]["url"] == "https://www.arsenal.com/news/structured"
+    assert result.metadata["sources"][0]["title"] == "Structured page"
+    assert "Structured body" in result.metadata["sources"][0]["snippet"]
 
 
 def test_web_fetch_does_not_use_remote_grok_proxy_by_default(monkeypatch):
@@ -165,6 +171,15 @@ def test_web_search_returns_structured_result_with_grok_marker(monkeypatch):
     assert "[grok]" in result.markers
     assert result.content.startswith("[grok]")
     assert "Grok source" in result.content
+    assert result.metadata["tool"] == "web_search"
+    assert result.metadata["sources"] == [{
+        "title": "Grok source",
+        "url": "https://www.arsenal.com/news/grok",
+        "snippet": "Fresh Grok search result.",
+        "published_time": "",
+        "source_name": "",
+        "backend": "grok",
+    }]
 
 
 def test_grok_search_unconfigured_returns_structured_unavailable(monkeypatch):

@@ -91,8 +91,22 @@ async def _runtime_finalizer(
 
 
 def _observe_runtime_tool_result(tool_artifact_markers: list):
-    def _observer(tool_result, runtime_state: AgentState) -> None:
+    async def _observer(tool_result, runtime_state: AgentState) -> None:
         _remember_artifact_markers(tool_artifact_markers, tool_result)
+        try:
+            from plugins.arteta_football_intelligence import write_through
+        except Exception:
+            return
+        if not write_through.write_through_enabled():
+            return
+        query_context = write_through.build_query_context_from_runtime_state(runtime_state)
+        if not write_through.should_enqueue_tool_observation(tool_result, query_context):
+            return
+        await write_through.get_write_through_queue().enqueue(
+            str(getattr(tool_result, "name", "") or ""),
+            tool_result,
+            query_context,
+        )
 
     return _observer
 

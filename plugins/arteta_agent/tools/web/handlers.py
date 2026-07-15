@@ -171,6 +171,7 @@ def _web_tool_result(
     content: str,
     error_code: str = "",
     markers: Optional[list] = None,
+    metadata: Optional[dict] = None,
 ) -> ToolResult:
     return ToolResult(
         name=str(name or ""),
@@ -179,11 +180,86 @@ def _web_tool_result(
         content=str(content or ""),
         error_code=str(error_code or ""),
         markers=list(markers or []),
+        metadata=dict(metadata or {}),
     )
 
 
 # 搜索结果数据结构工具
 # ---------------------------------------------------------------------------
+
+def _search_result_metadata(results: list, tool_name: str) -> dict:
+    sources = []
+    for item in list(results or []):
+        if not isinstance(item, dict):
+            continue
+        url = _safe_url(_search_result_url(item))
+        if not url:
+            continue
+        sources.append({
+            "title": _clean_text(item.get("title") or item.get("name") or ""),
+            "url": url,
+            "snippet": _clean_text(item.get("body") or item.get("snippet") or item.get("description") or ""),
+            "published_time": _clean_text(item.get("date") or item.get("published") or item.get("published_time") or ""),
+            "source_name": _clean_text(item.get("source") or item.get("source_name") or item.get("displayLink") or ""),
+            "backend": _clean_text(item.get("_backend") or ""),
+        })
+    return {"tool": str(tool_name or ""), "sources": sources}
+
+
+def _page_source_metadata(page: dict, source_url: str, tool_name: str, backend: str = "") -> dict:
+    url = _safe_url(page.get("url") or source_url)
+    sources = []
+    if url:
+        sources.append({
+            "title": _clean_text(page.get("title") or ""),
+            "url": url,
+            "snippet": _clean_text(page.get("text") or "")[:MAX_EXCERPT_CHARS],
+            "published_time": _clean_text(page.get("published_time") or ""),
+            "source_name": "",
+            "backend": _clean_text(backend),
+        })
+    return {"tool": str(tool_name or ""), "sources": sources}
+
+
+def _x_post_source_metadata(data: dict, source_url: str, provenance: str, backend: str = "") -> dict:
+    url = _safe_url(data.get("url") or source_url)
+    sources = []
+    if url:
+        source_name = _clean_text(data.get("author_username") or data.get("author_name") or "")
+        sources.append({
+            "title": source_name or "X post",
+            "url": url,
+            "snippet": _clean_text(data.get("text") or data.get("content") or ""),
+            "published_time": _clean_text(data.get("created_at") or data.get("published_time") or ""),
+            "source_name": source_name,
+            "backend": _clean_text(backend or provenance),
+        })
+    return {"tool": "fetch_x_post", "sources": sources, "provenance": _clean_text(provenance)}
+
+
+def _verification_metadata(claim: str, verdict: str, evidence_items: list) -> dict:
+    sources = []
+    for item in list(evidence_items or []):
+        url = _safe_url(getattr(item, "url", ""))
+        if not url:
+            continue
+        sources.append({
+            "title": _clean_text(getattr(item, "title", "") or ""),
+            "url": url,
+            "snippet": _clean_text(getattr(item, "excerpt", "") or ""),
+            "published_time": "",
+            "source_name": "",
+            "backend": "verification",
+            "stance": _clean_text(getattr(item, "stance", "") or ""),
+            "fetched": bool(getattr(item, "fetched", False)),
+        })
+    return {
+        "tool": "verify_recent_claim",
+        "claim": _clean_text(claim),
+        "verdict": _clean_text(verdict),
+        "sources": sources,
+    }
+
 
 def _log_web_fallback(event: str, exc: Exception, source: str = "") -> None:
     LOGGER.warning(
@@ -750,7 +826,13 @@ async def web_search(ctx: ToolContext, query: str, freshness: str = "recent", ma
 
     visible_results = results[:limit]
     markers = ["[grok]"] if any(_is_grok_result(item) for item in visible_results) else []
-    return _web_tool_result("web_search", TOOL_STATUS_OK, _format_search_results(visible_results), markers=markers)
+    return _web_tool_result(
+        "web_search",
+        TOOL_STATUS_OK,
+        _format_search_results(visible_results),
+        markers=markers,
+        metadata=_search_result_metadata(visible_results, "web_search"),
+    )
 
 
 async def grok_search(ctx: ToolContext, query: str, freshness: str = "recent", max_results: int = 5) -> ToolResult:
@@ -793,7 +875,13 @@ async def grok_search(ctx: ToolContext, query: str, freshness: str = "recent", m
             item["_backend"] = "grok"
 
     visible_results = results[:limit]
-    return _web_tool_result("grok_search", TOOL_STATUS_OK, _format_search_results(visible_results), markers=["[grok]"])
+    return _web_tool_result(
+        "grok_search",
+        TOOL_STATUS_OK,
+        _format_search_results(visible_results),
+        markers=["[grok]"],
+        metadata=_search_result_metadata(visible_results, "grok_search"),
+    )
 
 
 async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
@@ -825,7 +913,13 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
                 backend=backend,
             )
             if formatted:
-                return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, formatted, markers=["[x-post]"])
+                return _web_tool_result(
+                    "fetch_x_post",
+                    TOOL_STATUS_OK,
+                    formatted,
+                    markers=["[x-post]"],
+                    metadata=_x_post_source_metadata(data, safe_url, X_PROVENANCE_CONFIGURED_BRIDGE, backend=backend),
+                )
         except Exception as exc:
             _log_web_fallback("x_fetch", exc, "configured_bridge")
 
@@ -834,7 +928,13 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
         data = await asyncio.wait_for(_fetch_x_syndication(tweet_id), timeout=20.0)
         formatted = _format_x_post(data, safe_url, provenance=X_PROVENANCE_OFFICIAL_EMBED)
         if formatted:
-            return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, formatted, markers=["[x-post]"])
+            return _web_tool_result(
+                "fetch_x_post",
+                TOOL_STATUS_OK,
+                formatted,
+                markers=["[x-post]"],
+                metadata=_x_post_source_metadata(data, safe_url, X_PROVENANCE_OFFICIAL_EMBED),
+            )
     except Exception as exc:
         _log_web_fallback("x_fetch", exc, "official_embed")
 
@@ -844,7 +944,19 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
             fetched = await asyncio.wait_for(_fetch_x_mirror(mirror_url), timeout=20.0)
             formatted = _format_x_mirror_page(fetched, safe_url)
             if formatted:
-                return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, formatted, markers=["[x-post]"])
+                page = {
+                    "url": safe_url,
+                    "author_username": _x_username(safe_url),
+                    "text": _clean_text(formatted),
+                    "created_at": "",
+                }
+                return _web_tool_result(
+                    "fetch_x_post",
+                    TOOL_STATUS_OK,
+                    formatted,
+                    markers=["[x-post]"],
+                    metadata=_x_post_source_metadata(page, safe_url, "third_party_mirror"),
+                )
         except Exception as exc:
             _log_web_fallback("x_fetch", exc, "third_party_mirror")
 
@@ -862,7 +974,13 @@ async def fetch_x_post(ctx: ToolContext, url: str) -> ToolResult:
                 }
                 formatted = _format_x_post(page, safe_url, provenance=X_PROVENANCE_GENERATED_EXTRACTION)
                 if formatted:
-                    return _web_tool_result("fetch_x_post", TOOL_STATUS_OK, "[grok]\n" + formatted, markers=["[grok]", "[x-post]"])
+                    return _web_tool_result(
+                        "fetch_x_post",
+                        TOOL_STATUS_OK,
+                        "[grok]\n" + formatted,
+                        markers=["[grok]", "[x-post]"],
+                        metadata=_x_post_source_metadata(page, safe_url, X_PROVENANCE_GENERATED_EXTRACTION, backend="grok"),
+                    )
         except Exception as exc:
             _log_web_fallback("x_fetch", exc, "generated_extraction")
 
@@ -899,6 +1017,7 @@ async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHA
                 x_result.content,
                 x_result.error_code,
                 markers=x_result.markers,
+                metadata=dict(getattr(x_result, "metadata", {}) or {}, tool="web_fetch"),
             )
         status = TOOL_STATUS_UNAVAILABLE if str(x_result).startswith("[x-post-unavailable]") else TOOL_STATUS_OK
         return _web_tool_result("web_fetch", status, str(x_result), "XPostUnavailable" if status == TOOL_STATUS_UNAVAILABLE else "")
@@ -910,7 +1029,12 @@ async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHA
         fetched = await asyncio.wait_for(_fetch_url(safe_url), timeout=12.0)
         page = _parse_page(fetched.get("final_url") or safe_url, fetched.get("text") or "")
         page["text"] = page.get("text", "")[:max_chars]
-        return _web_tool_result("web_fetch", TOOL_STATUS_OK, _format_page_evidence(page, safe_url))
+        return _web_tool_result(
+            "web_fetch",
+            TOOL_STATUS_OK,
+            _format_page_evidence(page, safe_url),
+            metadata=_page_source_metadata(page, safe_url, "web_fetch"),
+        )
     except asyncio.TimeoutError:
         local_error = "[WebFetchTimeout] 抓取超时。"
         local_error_code = "TimeoutError"
@@ -932,7 +1056,12 @@ async def web_fetch(ctx: ToolContext, url: str, max_chars: int = MAX_EXCERPT_CHA
                     "published_time": "",
                     "text": _clean_text(grok_text)[:max_chars],
                 }
-                return _web_tool_result("web_fetch", TOOL_STATUS_OK, "[grok]\n" + _format_page_evidence(page, safe_url))
+                return _web_tool_result(
+                    "web_fetch",
+                    TOOL_STATUS_OK,
+                    "[grok]\n" + _format_page_evidence(page, safe_url),
+                    metadata=_page_source_metadata(page, safe_url, "web_fetch", backend="grok"),
+                )
         except ValueError as exc:
             return _web_tool_result("web_fetch", TOOL_STATUS_ERROR, str(exc), "ValueError")
         except Exception as exc:
@@ -986,7 +1115,13 @@ async def verify_recent_claim(ctx: ToolContext, claim: str, preferred_sources: s
             [],
             ["未找到可靠网页来源，不能确认该说法。"],
         )
-        return _web_tool_result("verify_recent_claim", TOOL_STATUS_OK, content, markers=["unclear"])
+        return _web_tool_result(
+            "verify_recent_claim",
+            TOOL_STATUS_OK,
+            content,
+            markers=["unclear"],
+            metadata=_verification_metadata(text, "unclear", []),
+        )
 
     # 按得分降序排列，选取最多 3 个独立候选来源
     candidates.sort(key=lambda item: _claim_result_score(text, item), reverse=True)
@@ -1031,4 +1166,10 @@ async def verify_recent_claim(ctx: ToolContext, claim: str, preferred_sources: s
     if any(_is_grok_result(item) for item in candidates):
         markers.append("[grok]")
         content = "[grok]\n" + content
-    return _web_tool_result("verify_recent_claim", TOOL_STATUS_OK, content, markers=markers)
+    return _web_tool_result(
+        "verify_recent_claim",
+        TOOL_STATUS_OK,
+        content,
+        markers=markers,
+        metadata=_verification_metadata(text, verdict, evidence_items),
+    )

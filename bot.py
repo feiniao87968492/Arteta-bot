@@ -72,6 +72,12 @@ async def close_agent_shared_async_client() -> None:
     await close_shared_async_client()
 
 
+async def drain_football_write_through_queue() -> None:
+    from plugins.arteta_football_intelligence.write_through import drain_write_through_queue
+
+    await drain_write_through_queue()
+
+
 if __name__ == "__main__":
     setup_logging()
     logger.info("Loguru 日志系统已初始化")
@@ -79,6 +85,7 @@ if __name__ == "__main__":
     nonebot.init()
     driver = nonebot.get_driver()
     driver.register_adapter(Adapter)
+    driver.on_shutdown(drain_football_write_through_queue)
     driver.on_shutdown(close_agent_shared_async_client)
     nonebot.load_plugins("plugins")
     nonebot.run()

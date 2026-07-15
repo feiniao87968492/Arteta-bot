@@ -163,6 +163,7 @@ def _normalize_handler_tool_result(
         artifacts=list(getattr(handler_result, "artifacts", None) or []),
         duration_ms=max(0, int(duration_ms or 0)),
         error_code=str(getattr(handler_result, "error_code", "") or ""),
+        metadata=dict(getattr(handler_result, "metadata", None) or {}),
     )
     record_tool(trace, result.name, result.permission, result.args, result)
     return result

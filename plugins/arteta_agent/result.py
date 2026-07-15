@@ -23,6 +23,7 @@ class ToolResult:
     artifacts: List[str] = field(default_factory=list)
     duration_ms: int = 0
     error_code: str = ""
+    metadata: Dict[str, object] = field(default_factory=dict)
 
     def __str__(self) -> str:
         return self.content
