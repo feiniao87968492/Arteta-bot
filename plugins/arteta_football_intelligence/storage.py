@@ -6,6 +6,7 @@ import sqlite3
 import time
 from typing import Dict, List, Optional
 
+from .models import FootballSyncRun
 from .schema import ensure_football_intelligence_schema
 
 
@@ -158,5 +159,92 @@ class FootballNewsSQLiteStore(object):
             conn.execute("DELETE FROM football_news_items WHERE fetched_at < ?", (cutoff,))
             conn.commit()
             return chroma_ids
+        finally:
+            conn.close()
+
+    def start_sync_run(self, job_type: str, run_id: str, now: Optional[int] = None) -> FootballSyncRun:
+        started_at = int(now or time.time())
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO football_sync_runs
+                (run_id, job_type, started_at, finished_at, status)
+                VALUES (?, ?, ?, 0, 'running')
+                """,
+                (run_id, job_type, started_at),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return FootballSyncRun(run_id=run_id, job_type=job_type, started_at=started_at)
+
+    def finish_sync_run(self, run: FootballSyncRun, now: Optional[int] = None) -> FootballSyncRun:
+        finished_at = int(now or time.time())
+        run.finished_at = finished_at
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                UPDATE football_sync_runs
+                SET finished_at = ?,
+                    status = ?,
+                    query_count = ?,
+                    fetched_count = ?,
+                    inserted_count = ?,
+                    updated_count = ?,
+                    duplicate_count = ?,
+                    failed_source_count = ?,
+                    error_summary = ?
+                WHERE run_id = ?
+                """,
+                (
+                    int(run.finished_at),
+                    str(run.status),
+                    int(run.query_count),
+                    int(run.fetched_count),
+                    int(run.inserted_count),
+                    int(run.updated_count),
+                    int(run.duplicate_count),
+                    int(run.failed_source_count),
+                    str(run.error_summary or ""),
+                    str(run.run_id),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return run
+
+    def latest_sync_run(self) -> Dict[str, object]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM football_sync_runs
+                ORDER BY started_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            return dict(row) if row is not None else {}
+        finally:
+            conn.close()
+
+    def count_items_by_index_status(self, status: str) -> int:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM football_news_items WHERE index_status = ?",
+                (status,),
+            ).fetchone()[0])
+        finally:
+            conn.close()
+
+    def count_news_items(self) -> int:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            return int(conn.execute("SELECT COUNT(*) FROM football_news_items").fetchone()[0])
         finally:
             conn.close()

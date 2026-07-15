@@ -43,7 +43,10 @@ from plugins.arteta_football_intelligence.storage import FootballNewsSQLiteStore
 from plugins.arteta_football_intelligence.vector_index import (
     FootballNewsChromaStore as BaseFootballNewsChromaStore,
     build_item_chroma_id,
+    rebuild_index_from_sqlite,
+    repair_pending_indexes,
 )
+from plugins.arteta_football_intelligence.scheduler import format_sync_status
 
 logger = logging.getLogger(__name__)
 
@@ -455,9 +458,32 @@ def get_default_stores() -> Tuple[FootballNewsSQLiteStore, FootballNewsChromaSto
     return sqlite_store, chroma_store
 
 
+def get_default_sqlite_store() -> FootballNewsSQLiteStore:
+    sqlite_store = FootballNewsSQLiteStore(DB_PATH)
+    sqlite_store.initialize()
+    return sqlite_store
+
+
 async def run_default_sync() -> SyncResult:
     sqlite_store, chroma_store = get_default_stores()
     return await sync_football_news(NEWS_SOURCES, sqlite_store, chroma_store)
+
+
+def get_football_intelligence_status_text() -> str:
+    sqlite_store = get_default_sqlite_store()
+    return format_sync_status(sqlite_store)
+
+
+def retry_football_news_index() -> str:
+    sqlite_store, chroma_store = get_default_stores()
+    result = repair_pending_indexes(sqlite_store, chroma_store)
+    return "足球新闻索引重试完成：尝试 {attempted}，修复 {repaired}，失败 {failed}".format(**result)
+
+
+def rebuild_football_news_index() -> str:
+    sqlite_store, chroma_store = get_default_stores()
+    result = rebuild_index_from_sqlite(sqlite_store, chroma_store)
+    return "足球新闻索引重建完成：尝试 {attempted}，重建 {rebuilt}，失败 {failed}".format(**result)
 
 
 def format_sync_result(result: SyncResult) -> str:
@@ -493,6 +519,10 @@ async def football_news_evening_job():
 
 
 refresh_football_news_cmd = on_command("刷新足球新闻", aliases={"足球新闻刷新"}, priority=5, block=True)
+football_intelligence_status_cmd = on_command("足球情报同步状态", aliases={"/足球情报同步状态"}, priority=5, block=True)
+sync_football_intelligence_cmd = on_command("同步足球情报", aliases={"/同步足球情报"}, priority=5, block=True)
+retry_football_index_cmd = on_command("重试足球索引", aliases={"/重试足球索引"}, priority=5, block=True)
+rebuild_football_index_cmd = on_command("重建足球新闻索引", aliases={"/重建足球新闻索引"}, priority=5, block=True)
 
 
 @refresh_football_news_cmd.handle()
@@ -507,3 +537,41 @@ async def handle_refresh_football_news(bot: Bot, event: GroupMessageEvent):
         logger.exception("[FootballNews] manual refresh failed: %s", e)
         await refresh_football_news_cmd.finish("足球新闻刷新失败，请检查日志。")
     await refresh_football_news_cmd.finish(format_sync_result(result))
+
+
+@football_intelligence_status_cmd.handle()
+async def handle_football_intelligence_status(bot: Bot, event: GroupMessageEvent):
+    user_id = event.get_user_id()
+    if str(user_id) != ADMIN_QQ:
+        await football_intelligence_status_cmd.finish("只有教练组可以查看足球情报同步状态。")
+    await football_intelligence_status_cmd.finish(get_football_intelligence_status_text())
+
+
+@sync_football_intelligence_cmd.handle()
+async def handle_sync_football_intelligence(bot: Bot, event: GroupMessageEvent):
+    user_id = event.get_user_id()
+    if str(user_id) != ADMIN_QQ:
+        await sync_football_intelligence_cmd.finish("只有教练组可以同步足球情报。")
+    await sync_football_intelligence_cmd.send("开始同步足球情报，请稍候...")
+    try:
+        result = await run_default_sync()
+    except Exception as e:
+        logger.exception("[FootballNews] manual intelligence sync failed: %s", e)
+        await sync_football_intelligence_cmd.finish("足球情报同步失败，请检查日志。")
+    await sync_football_intelligence_cmd.finish(format_sync_result(result))
+
+
+@retry_football_index_cmd.handle()
+async def handle_retry_football_index(bot: Bot, event: GroupMessageEvent):
+    user_id = event.get_user_id()
+    if str(user_id) != ADMIN_QQ:
+        await retry_football_index_cmd.finish("只有教练组可以重试足球索引。")
+    await retry_football_index_cmd.finish(retry_football_news_index())
+
+
+@rebuild_football_index_cmd.handle()
+async def handle_rebuild_football_index(bot: Bot, event: GroupMessageEvent):
+    user_id = event.get_user_id()
+    if str(user_id) != ADMIN_QQ:
+        await rebuild_football_index_cmd.finish("只有教练组可以重建足球新闻索引。")
+    await rebuild_football_index_cmd.finish(rebuild_football_news_index())

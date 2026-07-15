@@ -40,11 +40,11 @@ def build_item_document(item) -> str:
     fetched = datetime.fromtimestamp(int(getattr(item, "fetched_at", 0) or 0)).isoformat()
     return "\n".join([
         "Football News Item",
-        "Category: %s" % getattr(item, "category", ""),
-        "Source: %s" % getattr(item, "source", ""),
+        "Category: %s" % (getattr(item, "category", "") or getattr(item, "event_type", "")),
+        "Source: %s" % (getattr(item, "source", "") or getattr(item, "source_name", "")),
         "Title: %s" % getattr(item, "title", ""),
         "Summary: %s" % summary,
-        "URL: %s" % getattr(item, "url", ""),
+        "URL: %s" % (getattr(item, "url", "") or getattr(item, "canonical_url", "")),
         "Published At: %s" % published,
         "Fetched At: %s" % fetched,
     ])
@@ -108,9 +108,9 @@ class FootballNewsChromaStore(object):
             documents=[build_item_document(hashed)],
             metadatas=[{
                 "kind": "item",
-                "category": getattr(hashed, "category", ""),
-                "source": getattr(hashed, "source", ""),
-                "url": getattr(hashed, "url", ""),
+                "category": getattr(hashed, "category", "") or getattr(hashed, "event_type", ""),
+                "source": getattr(hashed, "source", "") or getattr(hashed, "source_name", ""),
+                "url": getattr(hashed, "url", "") or getattr(hashed, "canonical_url", ""),
                 "published_at": int(getattr(hashed, "published_at", 0) or 0),
                 "fetched_at": int(getattr(hashed, "fetched_at", 0) or 0),
             }],
@@ -215,3 +215,28 @@ def repair_pending_indexes(sqlite_store, chroma_store, limit: int = 100) -> dict
             sqlite_store.mark_index_status(chroma_id, "failed")
             failed += 1
     return {"attempted": attempted, "repaired": repaired, "failed": failed}
+
+
+def rebuild_index_from_sqlite(sqlite_store, chroma_store, days: int = 3650, now: Optional[int] = None) -> dict:
+    import time
+
+    rows = sqlite_store.list_recent_items(days=days, now=int(now or time.time()))
+    attempted = 0
+    rebuilt = 0
+    failed = 0
+    for row in rows:
+        attempted += 1
+        item = StoredFootballNewsItem(row)
+        chroma_id = str(row.get("chroma_id") or build_item_chroma_id(item))
+        try:
+            try:
+                chroma_store.delete_ids([chroma_id])
+            except Exception:
+                pass
+            chroma_store.add_item(item)
+            sqlite_store.mark_index_status(chroma_id, "ready")
+            rebuilt += 1
+        except Exception:
+            sqlite_store.mark_index_status(chroma_id, "failed")
+            failed += 1
+    return {"attempted": attempted, "rebuilt": rebuilt, "failed": failed}
