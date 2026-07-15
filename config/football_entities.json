@@ -1,0 +1,19 @@
+{
+  "teams": {
+    "Arsenal": ["阿森纳", "Arsenal", "Gunners"],
+    "Chelsea": ["切尔西", "Chelsea"],
+    "Manchester City": ["曼城", "Manchester City", "Man City"],
+    "Liverpool": ["利物浦", "Liverpool"]
+  },
+  "players": {
+    "Bukayo Saka": ["萨卡", "Bukayo Saka", "Saka"],
+    "Declan Rice": ["赖斯", "Declan Rice", "Rice"],
+    "Martin Odegaard": ["厄德高", "Odegaard", "Martin Odegaard"],
+    "Kai Havertz": ["哈弗茨", "Kai Havertz", "Havertz"]
+  },
+  "competitions": {
+    "Premier League": ["英超", "Premier League", "EPL"],
+    "Champions League": ["欧冠", "Champions League", "UCL"],
+    "FA Cup": ["足总杯", "FA Cup"]
+  }
+}

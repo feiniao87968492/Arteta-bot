@@ -1,0 +1,47 @@
+{
+  "source_groups": {
+    "official_primary": {
+      "domains": ["arsenal.com", "premierleague.com", "uefa.com", "fifa.com"],
+      "source_level": "official"
+    },
+    "authoritative_media_a": {
+      "domains": ["bbc.com", "bbc.co.uk", "skysports.com", "espn.com", "reuters.com"],
+      "source_level": "authoritative_media"
+    }
+  },
+  "topic_packs": [
+    {
+      "key": "arsenal_priority",
+      "queries": [
+        "Arsenal latest official news injuries transfers contracts",
+        "Arsenal match press conference training player update"
+      ],
+      "event_types": ["injury", "transfer", "contract", "press_conference", "training", "match_result"],
+      "priority": 100
+    },
+    {
+      "key": "major_matches",
+      "queries": [
+        "major European football match results scorers lineups latest",
+        "Premier League Champions League latest match results"
+      ],
+      "event_types": ["match_result", "lineup", "match_event"],
+      "priority": 90
+    },
+    {
+      "key": "transfers",
+      "queries": [
+        "football transfer news official confirmed latest",
+        "Premier League European transfer negotiations latest"
+      ],
+      "event_types": ["transfer", "contract"],
+      "priority": 90
+    },
+    {
+      "key": "player_updates",
+      "queries": ["football player injury suspension training return latest"],
+      "event_types": ["injury", "suspension", "training"],
+      "priority": 80
+    }
+  ]
+}
