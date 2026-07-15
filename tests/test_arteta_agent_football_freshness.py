@@ -64,6 +64,27 @@ def test_implicit_current_football_questions_require_web_plan():
         assert plan.required_tools[0].arguments.get("query") or plan.required_tools[0].arguments.get("claim")
 
 
+def test_current_football_questions_prefer_local_knowledge_when_flag_enabled(monkeypatch):
+    monkeypatch.setenv("ARTETA_FOOTBALL_KNOWLEDGE_FIRST", "true")
+
+    decision, plan = _decision_and_plan("萨卡最近伤病怎么样")
+    names = _tool_names(plan)
+
+    assert names[0] == "query_current_football_knowledge"
+    assert any(name in WEB_TOOLS for name in names[1:])
+    assert plan.constraints.get("football_knowledge_first") is True
+    assert "query_current_football_knowledge" in plan.constraints.get("required_current_information_tool_names")
+
+
+def test_lineup_questions_do_not_use_news_knowledge_first(monkeypatch):
+    monkeypatch.setenv("ARTETA_FOOTBALL_KNOWLEDGE_FIRST", "true")
+
+    decision, plan = _decision_and_plan("萨卡怎么没上")
+
+    assert decision.freshness.intent == "lineup"
+    assert _tool_names(plan)[0] != "query_current_football_knowledge"
+
+
 def test_stable_football_history_and_tactics_do_not_require_web():
     examples = [
         "温格为什么离开阿森纳",
@@ -381,6 +402,125 @@ def test_required_current_information_tool_success_allows_model_answer():
 
     assert result.stop_reason == "final"
     assert result.content == "查到的来源显示萨卡有轻伤。"
+
+
+def test_fresh_local_football_knowledge_skips_web_fallback():
+    from plugins.arteta_agent.runtime.config import AgentRunConfig
+    from plugins.arteta_agent.runtime.runner import AgentRuntimeRunner
+    from plugins.arteta_agent.runtime.state import AgentState
+
+    calls = []
+
+    async def fake_execute(tool_call, ctx):
+        name = tool_call["function"]["name"]
+        calls.append(name)
+        if name == "query_current_football_knowledge":
+            return ToolResult(
+                name=name,
+                permission="safe_read",
+                status=TOOL_STATUS_OK,
+                content='{"status":"fresh","requires_web_refresh":false,"items":[{"title":"Saka update"}]}',
+            )
+        raise AssertionError("web fallback should be skipped after fresh local knowledge")
+
+    async def fake_model(messages, runtime_state):
+        assert runtime_state.current_information_satisfied is True
+        return {"role": "assistant", "content": "本地可靠消息显示萨卡已经恢复训练。"}
+
+    state = AgentState(
+        messages=[{"role": "user", "content": "萨卡最近伤病怎么样"}],
+        ctx=make_context(),
+        allowed_permissions={"safe_read"},
+    )
+    runner = AgentRuntimeRunner(model_call=fake_model, tool_executor=fake_execute)
+
+    result = asyncio.run(runner.run(
+        state,
+        AgentRunConfig(
+            max_rounds=2,
+            required_current_information_tool_call_ids=[
+                "planned-query-current-football-knowledge-1",
+                "planned-grok-search-2",
+            ],
+        ),
+        initial_tool_calls=[
+            {
+                "id": "planned-query-current-football-knowledge-1",
+                "type": "function",
+                "function": {"name": "query_current_football_knowledge", "arguments": json.dumps({"query": "Saka injury"})},
+            },
+            {
+                "id": "planned-grok-search-2",
+                "type": "function",
+                "function": {"name": "grok_search", "arguments": json.dumps({"query": "Saka injury"})},
+            },
+        ],
+    ))
+
+    assert result.stop_reason == "final"
+    assert calls == ["query_current_football_knowledge"]
+
+
+def test_miss_local_football_knowledge_continues_to_web_fallback():
+    from plugins.arteta_agent.runtime.config import AgentRunConfig
+    from plugins.arteta_agent.runtime.runner import AgentRuntimeRunner
+    from plugins.arteta_agent.runtime.state import AgentState
+
+    calls = []
+
+    async def fake_execute(tool_call, ctx):
+        name = tool_call["function"]["name"]
+        calls.append(name)
+        if name == "query_current_football_knowledge":
+            return ToolResult(
+                name=name,
+                permission="safe_read",
+                status=TOOL_STATUS_OK,
+                content='{"status":"miss","requires_web_refresh":true,"reason_codes":["no_local_match"]}',
+            )
+        return ToolResult(
+            name=name,
+            permission="safe_read",
+            status=TOOL_STATUS_OK,
+            content="web source result says Saka returned to training",
+        )
+
+    async def fake_model(messages, runtime_state):
+        assert runtime_state.current_information_satisfied is True
+        return {"role": "assistant", "content": "联网核实后，萨卡已经恢复训练。"}
+
+    state = AgentState(
+        messages=[{"role": "user", "content": "萨卡最近伤病怎么样"}],
+        ctx=make_context(),
+        allowed_permissions={"safe_read"},
+    )
+    runner = AgentRuntimeRunner(model_call=fake_model, tool_executor=fake_execute)
+
+    result = asyncio.run(runner.run(
+        state,
+        AgentRunConfig(
+            max_rounds=2,
+            required_current_information_tool_call_ids=[
+                "planned-query-current-football-knowledge-1",
+                "planned-grok-search-2",
+            ],
+        ),
+        initial_tool_calls=[
+            {
+                "id": "planned-query-current-football-knowledge-1",
+                "type": "function",
+                "function": {"name": "query_current_football_knowledge", "arguments": json.dumps({"query": "Saka injury"})},
+            },
+            {
+                "id": "planned-grok-search-2",
+                "type": "function",
+                "function": {"name": "grok_search", "arguments": json.dumps({"query": "Saka injury"})},
+            },
+        ],
+    ))
+
+    assert result.stop_reason == "final"
+    assert calls == ["query_current_football_knowledge", "grok_search"]
 
 
 def test_implicit_current_football_questions_pass_activation_candidate_gate():

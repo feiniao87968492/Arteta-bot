@@ -5,6 +5,7 @@ import asyncio
 import json
 import sqlite3
 import time
+from datetime import datetime
 
 from typing import List
 from plugins.arteta_knowledge import query_knowledge
@@ -422,14 +423,39 @@ async def _search_news(q: str) -> str:
 async def _search_football_news(query: str, category=None, days: int = 14) -> str:
     """查询本地足球新闻向量库。"""
     try:
-        from plugins.arteta_football_news import FootballNewsChromaStore, CHROMA_DB_DIR
-        store = FootballNewsChromaStore(CHROMA_DB_DIR)
-        store.initialize()
+        from plugins.arteta_football_news import FootballNewsChromaStore, FootballNewsSQLiteStore, CHROMA_DB_DIR, DB_PATH
+        from plugins.arteta_football_intelligence.models import FootballKnowledgeQuery
+        from plugins.arteta_football_intelligence.query import query_current_football_knowledge
         try:
             safe_days = int(days)
         except (TypeError, ValueError):
             safe_days = 14
         category_value = str(category).strip() if category else None
+        sqlite_store = FootballNewsSQLiteStore(DB_PATH)
+        sqlite_store.initialize()
+        result = query_current_football_knowledge(
+            sqlite_store,
+            FootballKnowledgeQuery(
+                query=str(query or ""),
+                competitions=[category_value] if category_value else [],
+                max_age_seconds=max(1, safe_days) * 86400,
+                max_results=8,
+            ),
+        )
+        if result.items:
+            lines = []
+            for item in result.items:
+                date_text = datetime.fromtimestamp(int(item.fetched_at or item.published_at or 0)).strftime("%Y-%m-%d")
+                lines.append("• [%s] %s｜%s｜%s｜%s" % (
+                    date_text,
+                    item.title,
+                    item.source_name,
+                    item.summary[:180],
+                    item.canonical_url,
+                ))
+            return "\n".join(lines)
+        store = FootballNewsChromaStore(CHROMA_DB_DIR)
+        store.initialize()
         return store.search(query=query, category=category_value, days=safe_days)
     except Exception as e:
         print(f"[Tool Error] _search_football_news: {e}")

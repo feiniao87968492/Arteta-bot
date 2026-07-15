@@ -172,6 +172,10 @@ class AgentRuntimeRunner:
         index = 0
         completed_call_ids = self._completed_tool_call_ids(state)
         while index < len(calls):
+            if self._should_skip_satisfied_current_information_call(calls[index], config, state):
+                completed_call_ids.add(str((calls[index] or {}).get("id") or ""))
+                index += 1
+                continue
             batch = self._parallel_safe_batch(calls, index, config, completed_call_ids)
             await self._emit_progress(AgentProgressEvent(
                 kind=PROGRESS_TOOL_BATCH_STARTED,
@@ -333,6 +337,8 @@ class AgentRuntimeRunner:
             state.required_web_tools_attempted.append(tool_result.name)
             if self._current_information_result_satisfied(tool_result):
                 state.current_information_satisfied = True
+            elif self._is_local_football_knowledge_result(tool_result):
+                state.required_web_failure_code = self._current_information_failure_code(tool_result)
             else:
                 state.stop_reason = STOP_REASON_REQUIRED_CURRENT_INFORMATION_UNAVAILABLE
                 state.required_web_failure_code = self._current_information_failure_code(tool_result)
@@ -369,6 +375,19 @@ class AgentRuntimeRunner:
         call_id = str((tool_call or {}).get("id") or "")
         return bool(call_id and call_id in set(config.required_current_information_tool_call_ids or []))
 
+    def _should_skip_satisfied_current_information_call(
+        self,
+        tool_call: dict,
+        config: AgentRunConfig,
+        state: AgentState,
+    ) -> bool:
+        if not state.current_information_satisfied:
+            return False
+        if not self._is_required_current_information_call(tool_call, config):
+            return False
+        function = (tool_call or {}).get("function") or {}
+        return str(function.get("name") or "") != "query_current_football_knowledge"
+
     def _current_information_result_satisfied(self, tool_result: ToolResult) -> bool:
         if tool_result.status != TOOL_STATUS_OK:
             return False
@@ -379,16 +398,33 @@ class AgentRuntimeRunner:
             TOOL_STATUS_UNAVAILABLE,
         }:
             return False
+        if self._is_local_football_knowledge_result(tool_result):
+            return self._local_football_knowledge_status(tool_result) == "fresh"
         return bool(str(tool_result.content or "").strip())
 
     def _current_information_failure_code(self, tool_result: ToolResult) -> str:
         if tool_result.status == TOOL_STATUS_OK and not str(tool_result.content or "").strip():
             return "EmptyObservation"
+        if self._is_local_football_knowledge_result(tool_result):
+            status = self._local_football_knowledge_status(tool_result)
+            return "LocalFootballKnowledge{0}".format(status.title() if status else "Unavailable")
         return (
             tool_result.error_code
             or tool_result.status
             or "RequiredCurrentInformationUnavailable"
         )
+
+    def _is_local_football_knowledge_result(self, tool_result: ToolResult) -> bool:
+        return str(getattr(tool_result, "name", "") or "") == "query_current_football_knowledge"
+
+    def _local_football_knowledge_status(self, tool_result: ToolResult) -> str:
+        try:
+            data = json.loads(str(tool_result.content or "{}"))
+        except ValueError:
+            return ""
+        if not isinstance(data, dict):
+            return ""
+        return str(data.get("status") or "").strip().lower()
 
     def _required_current_information_unavailable_message(self, state: AgentState) -> str:
         value = str(state.metadata.get("current_info_failure_message") or "").strip()

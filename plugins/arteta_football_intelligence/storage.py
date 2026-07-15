@@ -1,5 +1,6 @@
 import hashlib
 import html
+import json
 import os
 import re
 import sqlite3
@@ -66,8 +67,10 @@ class FootballNewsSQLiteStore(object):
                     """
                     INSERT INTO football_news_items
                     (chroma_id, url, title, source, category, summary, published_at, fetched_at, content_hash,
-                     canonical_url, index_status, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     canonical_url, source_domain, source_type, source_level, event_type, competition,
+                     teams_json, players_json, coaches_json, status, confidence, story_cluster_id,
+                     last_verified_at, expires_at, evidence_urls_json, index_status, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         chroma_id,
@@ -80,6 +83,20 @@ class FootballNewsSQLiteStore(object):
                         int(getattr(hashed, "fetched_at", 0) or 0),
                         str(getattr(hashed, "content_hash", "") or ""),
                         str(getattr(hashed, "canonical_url", "") or getattr(hashed, "url", "") or ""),
+                        str(getattr(hashed, "source_domain", "") or ""),
+                        str(getattr(hashed, "source_type", "") or "media"),
+                        str(getattr(hashed, "source_level", "") or "unknown"),
+                        str(getattr(hashed, "event_type", "") or "other"),
+                        str(getattr(hashed, "competition", "") or ""),
+                        json.dumps(list(getattr(hashed, "teams", []) or []), ensure_ascii=False),
+                        json.dumps(list(getattr(hashed, "players", []) or []), ensure_ascii=False),
+                        json.dumps(list(getattr(hashed, "coaches", []) or []), ensure_ascii=False),
+                        str(getattr(hashed, "status", "") or "reported"),
+                        float(getattr(hashed, "confidence", 0.0) or 0.0),
+                        str(getattr(hashed, "story_cluster_id", "") or ""),
+                        int(getattr(hashed, "last_verified_at", 0) or 0),
+                        int(getattr(hashed, "expires_at", 0) or 0),
+                        json.dumps(list(getattr(hashed, "evidence_urls", []) or []), ensure_ascii=False),
                         str(index_status or "pending"),
                         int(time.time()),
                     ),
