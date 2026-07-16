@@ -1,9 +1,18 @@
+import os
+
 from .http_client import get_shared_async_client
 from .openai_compatible import OpenAICompatibleProvider
 from ..registry import build_openai_tools
 
 
 DEFAULT_CHAT_API_URL = "https://www.boxying.com/v1/chat/completions"
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(str(os.environ.get(name, default)).strip())
+    except (TypeError, ValueError):
+        return default
 
 
 async def call_llm_with_tools(
@@ -23,6 +32,7 @@ async def call_llm_with_tools(
     provider = OpenAICompatibleProvider(
         client=get_shared_async_client(),
         api_url=api_url or DEFAULT_CHAT_API_URL,
+        max_retries=_env_int("ARTETA_LLM_PROVIDER_MAX_RETRIES", 1),
     )
     return await provider.chat(
         messages=messages,

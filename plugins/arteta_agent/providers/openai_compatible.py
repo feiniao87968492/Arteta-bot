@@ -1,9 +1,15 @@
 import json
 import asyncio
+import logging
+import time
 from dataclasses import dataclass
 from typing import List, Optional
+from urllib.parse import urlparse
 
 import httpx
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ProviderResponseError(Exception):
@@ -146,8 +152,21 @@ class OpenAICompatibleProvider:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
         attempts = self.max_retries + 1
+        parsed_url = urlparse(str(self.api_url or ""))
+        endpoint = "{0}{1}".format(parsed_url.netloc, parsed_url.path)
         for attempt_index in range(attempts):
+            started = time.monotonic()
             try:
+                LOGGER.info(
+                    "llm_provider_request_started endpoint=%s attempt=%s/%s model=%s messages=%s tools=%s timeout=%s",
+                    endpoint,
+                    attempt_index + 1,
+                    attempts,
+                    str(model or ""),
+                    len(payload.get("messages") or []),
+                    len(payload.get("tools") or []),
+                    timeout,
+                )
                 resp = await self.client.post(
                     self.api_url,
                     headers={"Authorization": "Bearer {0}".format(api_key)},
@@ -155,8 +174,26 @@ class OpenAICompatibleProvider:
                     timeout=timeout,
                 )
                 resp.raise_for_status()
+                LOGGER.info(
+                    "llm_provider_request_finished endpoint=%s attempt=%s/%s status=%s elapsed_ms=%s",
+                    endpoint,
+                    attempt_index + 1,
+                    attempts,
+                    getattr(resp, "status_code", "unknown"),
+                    int((time.monotonic() - started) * 1000),
+                )
                 break
             except Exception as exc:
+                response = getattr(exc, "response", None)
+                LOGGER.warning(
+                    "llm_provider_request_failed endpoint=%s attempt=%s/%s status=%s error=%s elapsed_ms=%s",
+                    endpoint,
+                    attempt_index + 1,
+                    attempts,
+                    getattr(response, "status_code", "none"),
+                    exc.__class__.__name__,
+                    int((time.monotonic() - started) * 1000),
+                )
                 if attempt_index >= self.max_retries or not self._should_retry_error(exc):
                     raise
                 await self._sleep_before_retry(attempt_index)

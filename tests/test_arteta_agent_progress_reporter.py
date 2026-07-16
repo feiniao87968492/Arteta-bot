@@ -3,6 +3,7 @@ import logging
 
 from plugins.arteta_agent.progress.models import (
     PROGRESS_FINAL_SYNTHESIS_STARTED,
+    PROGRESS_MODEL_ROUND_STARTED,
     PROGRESS_TOOL_BATCH_FINISHED,
     PROGRESS_TOOL_BATCH_STARTED,
     AgentProgressEvent,
@@ -100,6 +101,28 @@ def test_reporter_sends_tool_heartbeat_once_and_cancels_on_tool_finish():
     asyncio.run(scenario())
 
     assert sent.count("[Agent] 工具调用仍在执行，我会在返回后继续整理结果。") == 1
+
+
+def test_reporter_sends_model_heartbeat_once():
+    sent = []
+    reporter = DebugProgressReporter(
+        send_message=lambda text: sent.append(text),
+        config=ProgressReporterConfig(
+            initial_delay_seconds=0.0,
+            minimum_update_interval_seconds=0.0,
+            model_heartbeat_seconds=0.02,
+            maximum_model_heartbeats=1,
+        ),
+    )
+
+    async def scenario():
+        await reporter.handle_event(AgentProgressEvent(kind=PROGRESS_MODEL_ROUND_STARTED))
+        await asyncio.sleep(0.05)
+        await reporter.close()
+
+    asyncio.run(scenario())
+
+    assert sent.count("[Agent] LLM 通道还在等待响应，我会在返回后继续整理结果。") == 1
 
 
 def test_reporter_cancels_tool_heartbeat_when_tool_finishes_quickly():

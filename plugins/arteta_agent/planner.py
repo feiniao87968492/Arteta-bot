@@ -34,7 +34,7 @@ async def call_llm_with_tools(messages, model: str, api_key: str, api_url: str =
     )
 
 
-async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, api_url: str = DEFAULT_CHAT_API_URL, max_rounds: int = 6, trace=None, temperature: float = 0.9, request_timeout: float = 80.0, max_tool_calls: int = 10, max_same_tool_call_repeats: int = 2, max_total_observation_chars: int = 80000, progress_observer=None):
+async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, api_url: str = DEFAULT_CHAT_API_URL, max_rounds: int = 6, trace=None, temperature: float = 0.9, request_timeout: float = 80.0, model_call_timeout: float = None, max_tool_calls: int = 10, max_same_tool_call_repeats: int = 2, max_total_observation_chars: int = 80000, progress_observer=None):
     # Agent loop entrypoint used by arteta_chat.py when
     # ARTETA_USE_AGENT_REGISTRY=true. It alternates LLM planning and
     # permission-checked tool execution until the model returns final text.
@@ -48,6 +48,7 @@ async def run_agent_loop(messages, ctx: ToolContext, model: str, api_key: str, a
         trace=trace,
         temperature=temperature,
         request_timeout=request_timeout,
+        model_call_timeout=model_call_timeout if model_call_timeout is not None else request_timeout,
         max_tool_calls=max_tool_calls,
         max_same_tool_call_repeats=max_same_tool_call_repeats,
         max_total_observation_chars=max_total_observation_chars,

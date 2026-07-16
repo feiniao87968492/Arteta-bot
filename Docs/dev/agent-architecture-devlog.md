@@ -5770,3 +5770,54 @@ This policy aligns the offline labels with Activation scope: pure current-footba
 - Post-restart log health:
   - `tail -120 /opt/arteta_bot/logs/arteta_bot.log | grep -E 'ERROR|CRITICAL|Traceback'`
   - Result: no matches.
+
+## 2026-07-16 - Agent Progress Stuck On Plan Fix
+
+### Root Cause
+
+- Production symptom: QQ only showed `[Plan] 我正在根据现有信息决定下一步。`, then no visible final answer.
+- Remote logs showed upstream OpenAI-compatible provider failures against `https://www.boxying.com/v1/chat/completions`, including `ReadTimeout`, `ConnectTimeout`, and `502 Bad Gateway`.
+- The provider wrapper retried by default, so each model round could spend most of the overall agent budget on repeated slow upstream attempts.
+- Progress recall ran before the final answer send. When NapCat `delete_msg` / `recallMsg` returned decode errors or hung, final answer delivery could be delayed or skipped behind progress cleanup.
+- Timeout and transport exceptions could expose raw provider errors instead of a short user-facing failure message.
+
+### Changes
+
+- Added `ARTETA_AGENT_MODEL_CALL_TIMEOUT` and threaded it from `arteta_chat.py` through `run_agent_loop`, `AgentRequest`, and Runtime model calls. The overall agent response timeout remains controlled by `ARTETA_AGENT_RESPONSE_TIMEOUT`.
+- Added `ARTETA_LLM_PROVIDER_MAX_RETRIES` to configure OpenAI-compatible provider retry count; default is now one retry instead of two retries.
+- Added sanitized provider lifecycle logs:
+  - `llm_provider_request_started`;
+  - `llm_provider_request_finished`;
+  - `llm_provider_request_failed`.
+- Changed progress cleanup ordering so final answers, timeout messages, exception messages, and no-reply decisions close the reporter, send the visible result first, then recall progress messages best-effort.
+- Added `ARTETA_AGENT_PROGRESS_RECALL_ENABLED` and `ARTETA_AGENT_PROGRESS_RECALL_TIMEOUT` to bound or disable progress recall when NapCat message deletion is unhealthy.
+- Added a one-shot model-call heartbeat: `[Agent] LLM 通道还在等待响应，我会在返回后继续整理结果。`.
+- Added safe timeout and network-error messages in `format_user_facing_exception(...)`.
+
+### Verification
+
+- RED before implementation:
+  - timeout exception formatting leaked raw provider details;
+  - progress recall occurred before final reply send;
+  - recall failure prevented the final reply path;
+  - provider retry count could not be disabled by env.
+- GREEN:
+  - `python -m pytest tests/test_arteta_chat_commands.py::ClearGroupMemoryCommandTests::test_format_user_facing_exception_reports_timeout_without_raw_error tests/test_arteta_chat_commands.py::ClearGroupMemoryCommandTests::test_process_chat_sends_final_reply_before_progress_recall tests/test_arteta_chat_commands.py::ClearGroupMemoryCommandTests::test_process_chat_sends_final_reply_when_progress_recall_fails -q`
+  - Result: `3 passed`.
+  - `python -m pytest tests/test_arteta_agent_provider.py::test_provider_chat_completion_wrapper_honors_retry_env -q`
+  - Result: `1 passed`.
+  - `python -m pytest tests/test_arteta_chat_commands.py tests/test_arteta_agent_provider.py tests/test_arteta_agent_progress_reporter.py tests/test_arteta_agent_runtime_progress.py -q`
+  - Result: `58 passed`.
+  - `python -m pytest tests/test_arteta_agent_runtime.py -q`
+  - Result: `17 passed`.
+- Final local verification:
+  - `python -m compileall plugins/arteta_chat.py plugins/arteta_agent/providers/openai_compatible.py plugins/arteta_agent/providers/chat_completion.py plugins/arteta_agent/planner.py plugins/arteta_agent/service.py plugins/arteta_agent/runtime/service.py plugins/arteta_agent/progress/reporter.py`
+  - Result: passed.
+  - `python -m pytest tests/test_arteta_chat_commands.py tests/test_arteta_agent_provider.py tests/test_arteta_agent_progress_reporter.py tests/test_arteta_agent_runtime_progress.py tests/test_arteta_agent_runtime.py -q`
+  - Result: `75 passed`.
+  - `python -m pytest tests/test_arteta_agent_registry.py -q`
+  - Result: `196 passed`.
+  - `python tools/verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`, report `artifacts/verify/20260716-144800/report.json`.
+  - `git diff --check`
+  - Result: passed.

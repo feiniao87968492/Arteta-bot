@@ -42,6 +42,7 @@ class AgentRequest:
     trace: Optional[dict]
     temperature: float
     request_timeout: float
+    model_call_timeout: float
     max_tool_calls: int
     max_same_tool_call_repeats: int
     max_total_observation_chars: int
@@ -136,6 +137,7 @@ async def run_agent_request(request: AgentRequest) -> str:
             trace,
             request.temperature,
             request.request_timeout,
+            request.model_call_timeout,
             prepared.artifact_markers,
             max_tool_calls=request.max_tool_calls,
             max_same_tool_call_repeats=request.max_same_tool_call_repeats,
@@ -171,6 +173,7 @@ async def run_agent_request(request: AgentRequest) -> str:
         trace,
         request.temperature,
         request.request_timeout,
+        request.model_call_timeout,
         prepared.artifact_markers,
         max_tool_calls=request.max_tool_calls,
         max_same_tool_call_repeats=request.max_same_tool_call_repeats,

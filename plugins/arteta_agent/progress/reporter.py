@@ -8,6 +8,7 @@ from .formatter import ProgressFormatterPolicy, format_progress_event
 from .models import (
     PROGRESS_FINAL_SYNTHESIS_HEARTBEAT,
     PROGRESS_FINAL_SYNTHESIS_STARTED,
+    PROGRESS_MODEL_ROUND_STARTED,
     PROGRESS_TOOL_BATCH_STARTED,
     PROGRESS_TOOL_BATCH_FINISHED,
     PROGRESS_TOOL_FINISHED,
@@ -23,9 +24,12 @@ class ProgressReporterConfig(object):
     minimum_update_interval_seconds: float = 1.8
     tool_heartbeat_seconds: float = 12.0
     synthesis_heartbeat_seconds: float = 10.0
+    model_heartbeat_seconds: float = 15.0
+    recall_timeout_seconds: float = 2.0
     maximum_messages: int = 9
     maximum_tool_heartbeats: int = 1
     maximum_synthesis_heartbeats: int = 1
+    maximum_model_heartbeats: int = 1
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,8 @@ class DebugProgressReporter(object):
         self._pending_initial_event = None
         self._synthesis_task = None
         self._synthesis_heartbeat_count = 0
+        self._model_task = None
+        self._model_heartbeat_count = 0
         self._tool_task = None
         self._tool_heartbeat_count = 0
         self._last_sent_at = 0.0
@@ -63,11 +69,15 @@ class DebugProgressReporter(object):
     async def handle_event(self, event: AgentProgressEvent) -> None:
         if self._closed:
             return
+        if event.kind == PROGRESS_MODEL_ROUND_STARTED:
+            self._schedule_model_heartbeat()
         if event.kind == PROGRESS_TOOL_BATCH_STARTED:
+            self._cancel_model_heartbeat()
             self._schedule_tool_heartbeat()
         if event.kind in (PROGRESS_TOOL_BATCH_FINISHED, PROGRESS_TOOL_FINISHED):
             self._cancel_tool_heartbeat()
         if event.kind == PROGRESS_FINAL_SYNTHESIS_STARTED:
+            self._cancel_model_heartbeat()
             self._schedule_synthesis_heartbeat()
         if self.config.initial_delay_seconds > 0 and self._sent_count == 0:
             self._pending_initial_event = event
@@ -78,7 +88,7 @@ class DebugProgressReporter(object):
 
     async def close(self) -> None:
         self._closed = True
-        for task in (self._initial_task, self._synthesis_task, self._tool_task):
+        for task in (self._initial_task, self._synthesis_task, self._model_task, self._tool_task):
             if task and not task.done():
                 task.cancel()
                 try:
@@ -102,7 +112,11 @@ class DebugProgressReporter(object):
             try:
                 value = self.recall_message(message_id)
                 if inspect.isawaitable(value):
-                    await value
+                    timeout = max(0.0, float(self.config.recall_timeout_seconds or 0))
+                    if timeout > 0:
+                        await asyncio.wait_for(value, timeout=timeout)
+                    else:
+                        await value
             except Exception:
                 failed_ids.append(message_id)
                 logger.warning(
@@ -195,6 +209,30 @@ class DebugProgressReporter(object):
             await self._send_event(AgentProgressEvent(kind=PROGRESS_FINAL_SYNTHESIS_HEARTBEAT))
         except asyncio.CancelledError:
             raise
+
+    def _schedule_model_heartbeat(self) -> None:
+        if self._model_task is not None or self._closed:
+            return
+        if int(self.config.maximum_model_heartbeats or 0) <= 0:
+            return
+        self._model_task = asyncio.create_task(self._send_model_heartbeat_later())
+
+    async def _send_model_heartbeat_later(self) -> None:
+        try:
+            await asyncio.sleep(max(0.0, float(self.config.model_heartbeat_seconds or 0)))
+            if self._closed:
+                return
+            if self._model_heartbeat_count >= int(self.config.maximum_model_heartbeats or 0):
+                return
+            self._model_heartbeat_count += 1
+            await self._send_text("[Agent] LLM 通道还在等待响应，我会在返回后继续整理结果。")
+        except asyncio.CancelledError:
+            raise
+
+    def _cancel_model_heartbeat(self) -> None:
+        if self._model_task and not self._model_task.done():
+            self._model_task.cancel()
+        self._model_task = None
 
     def _schedule_tool_heartbeat(self) -> None:
         if self._tool_task is not None or self._closed:

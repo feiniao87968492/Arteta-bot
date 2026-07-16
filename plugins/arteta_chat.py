@@ -138,6 +138,12 @@ def format_user_facing_exception(exc: Exception) -> str:
     # message concise and avoid echoing raw provider URLs or exception text.
     if ProviderResponseError is not None and isinstance(exc, ProviderResponseError):
         return "连接中断：LLM 供应商返回了非标准响应（不是合法 JSON），请稍后再试或切换模型渠道。"
+    timeout_exception = getattr(httpx, "TimeoutException", None)
+    if timeout_exception is not None and isinstance(exc, timeout_exception):
+        return "连接中断：LLM 通道响应超时，请稍后再试或切换模型渠道。"
+    transport_error = getattr(httpx, "TransportError", None)
+    if transport_error is not None and isinstance(exc, transport_error):
+        return "连接中断：LLM 通道网络连接失败，请稍后再试。"
     response = getattr(exc, "response", None)
     status_code = getattr(response, "status_code", None)
     if status_code == 402:
@@ -171,6 +177,9 @@ AGENT_VISUAL_TRACE = _setting_enabled(
 AGENT_RESPONSE_TIMEOUT = float(
     _read_runtime_setting("ARTETA_AGENT_RESPONSE_TIMEOUT", "arteta_agent_response_timeout", "180")
 )
+AGENT_MODEL_CALL_TIMEOUT = float(
+    _read_runtime_setting("ARTETA_AGENT_MODEL_CALL_TIMEOUT", "arteta_agent_model_call_timeout", "60")
+)
 AGENT_PROGRESS_ENABLED = _setting_enabled(
     _read_runtime_setting("ARTETA_AGENT_PROGRESS_ENABLED", "arteta_agent_progress_enabled", "true")
 )
@@ -188,6 +197,12 @@ AGENT_SYNTHESIS_HEARTBEAT = float(
 )
 AGENT_PROGRESS_MAX_MESSAGES = int(
     _read_runtime_setting("ARTETA_AGENT_PROGRESS_MAX_MESSAGES", "arteta_agent_progress_max_messages", "9")
+)
+AGENT_PROGRESS_RECALL_ENABLED = _setting_enabled(
+    _read_runtime_setting("ARTETA_AGENT_PROGRESS_RECALL_ENABLED", "arteta_agent_progress_recall_enabled", "true")
+)
+AGENT_PROGRESS_RECALL_TIMEOUT = float(
+    _read_runtime_setting("ARTETA_AGENT_PROGRESS_RECALL_TIMEOUT", "arteta_agent_progress_recall_timeout", "2.0")
 )
 AGENT_AUTONOMOUS_ACTIVATION = _setting_enabled(
     _read_runtime_setting("ARTETA_AGENT_AUTONOMOUS_ACTIVATION", "arteta_agent_autonomous_activation", "true")
@@ -230,6 +245,15 @@ def progress_show_observations(group_id: str) -> bool:
     if item:
         return bool(item.get("value"))
     return True
+
+
+async def recall_progress_messages_best_effort(progress_reporter) -> None:
+    if progress_reporter is None or not AGENT_PROGRESS_RECALL_ENABLED:
+        return
+    try:
+        await progress_reporter.recall_sent_messages()
+    except Exception as exc:
+        print(f"[AgentProgress] recall skipped after final send: {exc}")
 
 
 def append_agent_visual_trace(answer: str, trace) -> str:
@@ -2121,6 +2145,7 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                     tool_heartbeat_seconds=AGENT_PROGRESS_HEARTBEAT,
                     synthesis_heartbeat_seconds=AGENT_SYNTHESIS_HEARTBEAT,
                     maximum_messages=AGENT_PROGRESS_MAX_MESSAGES,
+                    recall_timeout_seconds=AGENT_PROGRESS_RECALL_TIMEOUT,
                 ),
                 formatter_policy=ProgressFormatterPolicy(
                     show_observations=progress_show_observations(group_id),
@@ -2151,6 +2176,7 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                         trace=trace,
                         temperature=DEEPSEEK_TEMPERATURE,
                         request_timeout=AGENT_RESPONSE_TIMEOUT,
+                        model_call_timeout=AGENT_MODEL_CALL_TIMEOUT,
                         progress_observer=progress_observer if progress_reporter else None,
                     ),
                     timeout=AGENT_RESPONSE_TIMEOUT,
@@ -2178,26 +2204,30 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                 })
                 answer = await call_answer_model(retry_messages)
         except asyncio.TimeoutError:
-            print(f"[delayed_response] 超时 group={group_id} user={user_id}")
+            print(f"[delayed_response] timeout group={group_id} user={user_id}")
             if progress_reporter:
                 await progress_reporter.close()
-            await bot.send(event, Message("⏰ 教练这次思考太久，重新说一遍？"))
+            await bot.send(event, Message("连接中断：LLM 通道响应超时，请稍后再试。"))
+            await recall_progress_messages_best_effort(progress_reporter)
             return
         except Exception as e:
             print(f"[delayed_response] 异常: {e} group={group_id} user={user_id}")
             if progress_reporter:
                 await progress_reporter.close()
             await bot.send(event, Message(format_user_facing_exception(e)))
+            await recall_progress_messages_best_effort(progress_reporter)
             return
 
         if should_skip_agent_reply(answer):
             if progress_reporter:
                 await progress_reporter.close()
             if allow_no_reply:
+                await recall_progress_messages_best_effort(progress_reporter)
                 await send_pending_mood_emojis(tool_context)
                 print(f"[AgentActivation] skipped reply group={group_id} user={user_id}")
                 return
             await bot.send(event, Message("我在。刚才这条被误判成不用回复了，重新问我一句，我直接接上。"))
+            await recall_progress_messages_best_effort(progress_reporter)
             print(f"[AgentActivation] explicit no_reply fallback group={group_id} user={user_id}")
             return
 
@@ -2254,7 +2284,6 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
 
                 if progress_reporter:
                     await progress_reporter.close()
-                    await progress_reporter.recall_sent_messages()
                 transport_decision = await send_agent_answer_message(
                     bot,
                     event,
@@ -2266,6 +2295,7 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                     f"mode={transport_decision.mode} reason={transport_decision.reason} "
                     f"group={group_id} user={user_id}"
                 )
+                await recall_progress_messages_best_effort(progress_reporter)
                 for artifact_path in agent_image_artifacts:
                     resolved_artifact = _resolve_agent_image_artifact(artifact_path)
                     if not resolved_artifact:
@@ -2276,8 +2306,6 @@ async def process_chat(bot: Bot, event: MessageEvent, custom_prompt: str = None,
                         print(f"[AgentArtifact] sent image artifact={resolved_artifact}")
                     except Exception as artifact_exc:
                         print(f"[AgentArtifact] send failed artifact={artifact_path}: {artifact_exc}")
-                if progress_reporter:
-                    await progress_reporter.recall_sent_messages()
                 try:
                     await save_bot_reply_to_daily_messages(
                         str(getattr(bot, "self_id", "arteta_bot")),

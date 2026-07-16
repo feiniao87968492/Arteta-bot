@@ -20,9 +20,9 @@ Progress is formatted and sent by `plugins/arteta_agent/progress/`:
 
 - `models.py` defines lifecycle events and sanitized tool-call metadata.
 - `formatter.py` turns events into native QQ text with `[Agent]`, `[Plan]`, `[Action]`, `[Observation]`, and `[Confirmation]`.
-- `reporter.py` applies initial delay, dedupe, throttling, max-message limits, one-shot tool heartbeat, one-shot synthesis heartbeat, close cancellation, message-id tracking, best-effort recall, recall result counts, failure logging, and failed-message retry.
+- `reporter.py` applies initial delay, dedupe, throttling, max-message limits, one-shot model-call heartbeat, one-shot tool heartbeat, one-shot synthesis heartbeat, close cancellation, message-id tracking, best-effort recall, bounded recall waits, recall result counts, failure logging, and failed-message retry.
 
-Progress messages are not appended to `AgentState.messages`, not stored in ChromaDB, not added to daily message history, not rendered into final cards, and do not trigger favorability or mood-emoji handling. They are temporary QQ status updates: once the successful final answer is ready and before the final reply image is sent, `arteta_chat.py` closes the reporter and asks it to recall progress messages recorded from OneBot `message_id` values. After the final reply and any image artifacts are sent, it asks the reporter to recall again as a fallback for failed pre-send deletions. Timeout, exception, and no-reply paths only close the reporter and leave already-sent progress visible for troubleshooting.
+Progress messages are not appended to `AgentState.messages`, not stored in ChromaDB, not added to daily message history, not rendered into final cards, and do not trigger favorability or mood-emoji handling. They are temporary QQ status updates: once a final answer, timeout notice, exception notice, or no-reply decision is ready, `arteta_chat.py` closes the reporter, sends the user-facing result first, then performs best-effort recall of recorded OneBot `message_id` values. Recall failures and slow NapCat delete responses are bounded by `ARTETA_AGENT_PROGRESS_RECALL_TIMEOUT`, so a stuck progress deletion cannot block the visible final reply.
 
 ## Long-Form Reply Policy
 
@@ -64,6 +64,10 @@ ARTETA_AGENT_PROGRESS_MIN_INTERVAL=1.8
 ARTETA_AGENT_PROGRESS_HEARTBEAT=12.0
 ARTETA_AGENT_SYNTHESIS_HEARTBEAT=10.0
 ARTETA_AGENT_PROGRESS_MAX_MESSAGES=9
+ARTETA_AGENT_MODEL_CALL_TIMEOUT=60
+ARTETA_AGENT_PROGRESS_RECALL_ENABLED=true
+ARTETA_AGENT_PROGRESS_RECALL_TIMEOUT=2.0
+ARTETA_LLM_PROVIDER_MAX_RETRIES=1
 ```
 
 Policy examples:
@@ -83,7 +87,7 @@ python -m pytest tests\test_arteta_agent_progress_models.py tests\test_arteta_ag
 # 275 passed
 
 python -m pytest tests\test_arteta_agent_progress_reporter.py tests\test_arteta_chat_commands.py -q
-# Covers temporary progress message recall before successful final replies plus post-send fallback recall.
+# Covers model-call heartbeat, final-answer-first progress recall, timeout/error safety text, and recall failure tolerance.
 
 python -m pytest tests -q
 # 695 passed

@@ -263,3 +263,54 @@ clear_cache()  # 使缓存失效，下次查询重新读取
 ```
 
 - **涉及文件**：`plugins/arteta_weekly.py`、`plugins/arteta_knowledge.py`
+
+---
+
+## 7. Agent only sends `[Plan]` and then no final reply
+
+### Symptom
+
+- QQ group receives only the first progress message, usually `[Plan] 我正在根据现有信息决定下一步。`.
+- The API gateway dashboard may show request input as `0`, or the upstream provider may show no completed request.
+- Bot process still appears `RUNNING`.
+
+### Likely causes
+
+1. OpenAI-compatible upstream provider timeout, connect timeout, or 5xx response.
+2. Agent model call timeout is too close to the overall response timeout, leaving no room for fallback handling.
+3. NapCat `delete_msg` / `recallMsg` is unhealthy and progress recall blocks visible final delivery on older builds.
+
+### Log checks
+
+```bash
+grep -nE 'llm_provider_request|receive_response_headers.failed|connect_tcp.failed|HTTP Request: POST https://www.boxying.com/v1/chat/completions|Failed to recall agent progress|recall skipped' logs/arteta_bot.log | tail -n 80
+```
+
+Useful patterns:
+
+- `llm_provider_request_started`: sanitized endpoint, attempt, model, message count, tool count, timeout.
+- `llm_provider_request_finished`: upstream status and elapsed time.
+- `llm_provider_request_failed`: upstream status or exception class without prompt/API-key leakage.
+- `Failed to recall agent progress message` or `recall skipped`: NapCat recall path is unhealthy; final delivery should still happen on current builds.
+
+### Runtime knobs
+
+```bash
+ARTETA_AGENT_MODEL_CALL_TIMEOUT=60
+ARTETA_AGENT_RESPONSE_TIMEOUT=240
+ARTETA_LLM_PROVIDER_MAX_RETRIES=1
+ARTETA_AGENT_PROGRESS_RECALL_ENABLED=true
+ARTETA_AGENT_PROGRESS_RECALL_TIMEOUT=2.0
+```
+
+Operational choices:
+
+- Set `ARTETA_LLM_PROVIDER_MAX_RETRIES=0` temporarily to fail fast while the upstream gateway is unstable.
+- Set `ARTETA_AGENT_PROGRESS_RECALL_ENABLED=false` temporarily if NapCat recall keeps failing and progress messages can remain visible.
+- Keep `ARTETA_AGENT_MODEL_CALL_TIMEOUT` lower than `ARTETA_AGENT_RESPONSE_TIMEOUT` so timeout handling has room to send a user-facing message.
+
+### Expected current behavior
+
+- Final answer, timeout notice, exception notice, or no-reply decision is sent before progress-message recall.
+- Timeout text is user-facing and does not include raw provider errors.
+- Progress recall is best-effort and bounded by `ARTETA_AGENT_PROGRESS_RECALL_TIMEOUT`.

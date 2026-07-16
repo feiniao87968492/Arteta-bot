@@ -401,6 +401,39 @@ def test_provider_chat_completion_wrapper_builds_tool_schema_and_reuses_client()
     assert calls[0][3] == 12.0
 
 
+def test_provider_chat_completion_wrapper_honors_retry_env(monkeypatch):
+    from plugins.arteta_agent.providers.chat_completion import call_llm_with_tools
+    from plugins.arteta_agent.registry import clear_registry
+
+    clear_registry()
+    monkeypatch.setenv("ARTETA_LLM_PROVIDER_MAX_RETRIES", "0")
+    calls = []
+    client = SequenceClient([
+        FailingStatusResponse(502),
+        FakeResponse({"role": "assistant", "content": "would pass if retried"}),
+    ])
+    set_shared_async_client_factory(lambda: client)
+    try:
+        try:
+            asyncio.run(call_llm_with_tools(
+                [{"role": "user", "content": "hi"}],
+                "model",
+                "key",
+                api_url="https://provider.example/v1/chat/completions",
+                allowed_permissions={"safe_read"},
+                disabled_tools=set(),
+            ))
+        except FakeHTTPStatusError:
+            pass
+        else:
+            raise AssertionError("Expected retryable provider status to be raised when retries are disabled")
+    finally:
+        asyncio.run(close_shared_async_client())
+        set_shared_async_client_factory(None)
+
+    assert len(client.calls) == 1
+
+
 def test_planner_provider_entrypoint_is_compatibility_wrapper_only():
     source = Path("plugins/arteta_agent/planner.py").read_text(encoding="utf-8")
 
