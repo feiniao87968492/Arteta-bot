@@ -5821,3 +5821,26 @@ This policy aligns the offline labels with Activation scope: pure current-footba
   - Result: `14 passed`, report `artifacts/verify/20260716-144800/report.json`.
   - `git diff --check`
   - Result: passed.
+
+### ECS Deployment
+
+- Commit deployed: `c3f309e fix: keep agent replies from blocking on progress recall`.
+- Remote backup directory: `/opt/arteta_bot/backups/plan_stuck_fix_c3f309e_20260716145345`.
+- Uploaded the 13 changed code, test, and documentation files to `/opt/arteta_bot/`.
+- Remote compile:
+  - `./venv/bin/python -m compileall plugins/arteta_chat.py plugins/arteta_agent/providers/openai_compatible.py plugins/arteta_agent/providers/chat_completion.py plugins/arteta_agent/planner.py plugins/arteta_agent/service.py plugins/arteta_agent/runtime/service.py plugins/arteta_agent/progress/reporter.py`
+  - Result: passed.
+- Remote pytest note:
+  - `./venv/bin/python -m pytest ...`
+  - Result: unavailable because the ECS venv does not include `pytest`.
+- Restart:
+  - `supervisorctl restart arteta_bot`
+  - `arteta_bot RUNNING pid 37338`.
+- Remote smoke after restart:
+  - `./venv/bin/python tools/verify_features.py --suite chat --json-only`
+  - Result: `4 passed`, report `/opt/arteta_bot/artifacts/verify/20260716-145512/report.json`.
+  - `./venv/bin/python tools/verify_features.py --suite agent_loop --json-only`
+  - Result: `14 passed`, report `/opt/arteta_bot/artifacts/verify/20260716-145512/report.json`.
+- Post-restart log health:
+  - `tail -160 logs/arteta_bot.log | grep -E 'ERROR|CRITICAL|Traceback|Failed to load|Exception'`
+  - Result: no matches.
