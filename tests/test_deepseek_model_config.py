@@ -35,6 +35,19 @@ def test_chat_reads_configurable_deepseek_api_url():
     assert "DEEPSEEK_API_URL," in text
 
 
+def test_main_chat_defaults_to_the_configured_deepseek_provider():
+    chat_text = _read("plugins/arteta_chat.py")
+    tools_text = _read("plugins/arteta_tools.py")
+    dashboard_text = _read("dashboard/api/services/bot_chat_service.py")
+
+    assert '"https://api.deepseek.com/chat/completions"' in chat_text
+    assert '"deepseek-v4-pro"' in chat_text
+    assert '"https://api.deepseek.com/chat/completions"' in tools_text
+    assert '"deepseek-v4-pro"' in tools_text
+    assert '"https://api.deepseek.com/chat/completions"' in dashboard_text
+    assert '"deepseek-v4-pro"' in dashboard_text
+
+
 def test_agent_runtime_uses_configured_deepseek_api_url():
     chat_text = _read("plugins/arteta_chat.py")
     planner_text = _read("plugins/arteta_agent/planner.py")
@@ -66,11 +79,14 @@ def test_deploy_files_expose_deepseek_model_default():
     deploy_text = _read("deploy/deploy_ecs.sh")
     env_dev_text = _read(".env.dev")
 
-    assert 'DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-gpt-5.5}"' in deploy_text
+    assert 'DEEPSEEK_API_URL="${DEEPSEEK_API_URL:-https://api.deepseek.com/chat/completions}"' in deploy_text
+    assert 'DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-v4-pro}"' in deploy_text
     assert 'DEEPSEEK_TEMPERATURE="${DEEPSEEK_TEMPERATURE:-0.9}"' in deploy_text
+    assert "DEEPSEEK_API_URL=${DEEPSEEK_API_URL}" in deploy_text
     assert "DEEPSEEK_MODEL=${DEEPSEEK_MODEL}" in deploy_text
     assert "DEEPSEEK_TEMPERATURE=${DEEPSEEK_TEMPERATURE}" in deploy_text
-    assert "DEEPSEEK_MODEL=gpt-5.5" in env_dev_text
+    assert "DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions" in env_dev_text
+    assert "DEEPSEEK_MODEL=deepseek-v4-pro" in env_dev_text
     assert "DEEPSEEK_TEMPERATURE=0.9" in env_dev_text
 
 

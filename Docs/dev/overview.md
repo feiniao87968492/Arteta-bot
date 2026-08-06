@@ -20,7 +20,8 @@
 |------|------|------|
 | 框架 | NoneBot2 | 事件驱动机器人框架 |
 | 协议适配 | OneBot V11 (NapCat QQ) | QQ 消息协议适配 |
-| LLM | BoxYing API (`gpt-5.5`) | AI 对话、Function Calling、周报生成 |
+| 主对话 LLM | DeepSeek API (`DEEPSEEK_MODEL`，默认 `deepseek-v4-pro`) | AI 对话、Function Calling |
+| 定时内容 LLM | 现有独立配置 | 每日总结、周报生成（本次不变） |
 | 关系数据库 | SQLite / aiosqlite | 用户数据、发言记录、好感度等结构化数据 |
 | 向量数据库 | ChromaDB (PersistentClient) | 语义化群聊记忆存储与检索 |
 | HTML 渲染 | Playwright + Jinja2 + KaTeX + marked.js | 将 Markdown/LaTeX 渲染为图片输出 |

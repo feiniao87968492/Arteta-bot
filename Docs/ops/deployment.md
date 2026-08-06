@@ -37,6 +37,8 @@ pip install nonebot2 nonebot-adapter-onebot nonebot-plugin-apscheduler httpx aio
 cp .env.dev .env
 # 编辑 .env，填入你的 API Key：
 #   - DEEPSEEK_API_KEY：DeepSeek API 密钥
+#   - DEEPSEEK_API_URL：完整聊天端点（默认 https://api.deepseek.com/chat/completions）
+#   - DEEPSEEK_MODEL：主对话和工具调用模型（默认 deepseek-v4-pro）
 #   - FOOTBALL_API_TOKEN：football-data.org API 令牌
 #   - SUPERUSERS：管理员 QQ 号列表
 
@@ -60,6 +62,8 @@ python bot.py
 # 2. 编辑部署脚本参数
 # 编辑 deploy/deploy_ecs.sh，修改以下参数：
 #   - DEEPSEEK_API_KEY：你的 DeepSeek API 密钥
+#   - DEEPSEEK_API_URL：完整聊天端点（默认 https://api.deepseek.com/chat/completions）
+#   - DEEPSEEK_MODEL：主对话和工具调用模型（默认 deepseek-v4-pro）
 #   - FOOTBALL_API_TOKEN：football-data.org API 令牌
 #   - SUPERUSERS：管理员 QQ 号列表
 
@@ -96,6 +100,8 @@ supervisorctl start arteta_bot
 # 1. 创建 .env 文件
 cat > deploy/.env << 'EOF'
 DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
+DEEPSEEK_API_URL=https://api.deepseek.com/chat/completions
+DEEPSEEK_MODEL=deepseek-v4-pro
 FOOTBALL_API_TOKEN=xxxxxxxxxxxxxxxx
 SUPERUSERS=["2648955710"]
 EOF

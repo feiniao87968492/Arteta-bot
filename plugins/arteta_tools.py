@@ -15,8 +15,8 @@ DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 # --- 配置（在运行时由 register_config() 注入）---
 FOOTBALL_API_TOKEN = ""
 DEEPSEEK_API_KEY = ""
-DEEPSEEK_API_URL = "https://www.boxying.com/v1/chat/completions"
-DEEPSEEK_MODEL = "gpt-5.5"
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_MODEL = "deepseek-v4-pro"
 DEEPSEEK_TEMPERATURE = 0.9
 ARSENAL_ID = 57
 HAS_WEB_SEARCH = False
@@ -35,8 +35,8 @@ def register_config(**kwargs):
     global FOOTBALL_API_TOKEN, DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_MODEL, DEEPSEEK_TEMPERATURE, ARSENAL_ID, HAS_WEB_SEARCH
     FOOTBALL_API_TOKEN = kwargs.get("football_api_token", "")
     DEEPSEEK_API_KEY = kwargs.get("deepseek_api_key", "")
-    DEEPSEEK_API_URL = kwargs.get("deepseek_api_url", "https://www.boxying.com/v1/chat/completions")
-    DEEPSEEK_MODEL = kwargs.get("deepseek_model", "gpt-5.5")
+    DEEPSEEK_API_URL = kwargs.get("deepseek_api_url", "https://api.deepseek.com/chat/completions")
+    DEEPSEEK_MODEL = kwargs.get("deepseek_model", "deepseek-v4-pro")
     DEEPSEEK_TEMPERATURE = _coerce_temperature(kwargs.get("deepseek_temperature", 0.9))
     ARSENAL_ID = kwargs.get("arsenal_id", 57)
     HAS_WEB_SEARCH = kwargs.get("has_web_search", False)

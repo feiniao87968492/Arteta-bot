@@ -102,8 +102,8 @@ except AttributeError:
 
 FOOTBALL_API_TOKEN = str(config.get("football_api_token", "da24063a4040404c89250b601f8994a2")).strip('"\'')
 DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
-DEEPSEEK_API_URL = str(config.get("deepseek_api_url", os.environ.get("DEEPSEEK_API_URL", "https://www.boxying.com/v1/chat/completions"))).strip('"\'')
-DEEPSEEK_MODEL = str(config.get("deepseek_model", "gpt-5.5")).strip('"\'')
+DEEPSEEK_API_URL = str(config.get("deepseek_api_url", os.environ.get("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions"))).strip('"\'')
+DEEPSEEK_MODEL = str(config.get("deepseek_model", "deepseek-v4-pro")).strip('"\'')
 IMAGE_API_KEY = str(config.get("image_api_key", "")).strip('"\'')
 IMAGE_API_URL = str(config.get("image_api_url", "https://api.duckcoding.ai")).strip('"\'')
 VISION_API_KEY = str(config.get("vision_api_key", IMAGE_API_KEY)).strip('"\'')

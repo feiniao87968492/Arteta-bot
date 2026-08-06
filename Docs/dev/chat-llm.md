@@ -132,7 +132,7 @@ executor 还会对安全相关事件写入 `agent_audit_logs`：参数校验失�
 
 自主唤醒还有一层 cheap gate：只有“最近/最新/查/总结/链接/文档/图片/积分榜/伤病/新闻”等任务形态才会进入 activation LLM；普通群聊里只是提到“阿森纳/英超”不会触发 activation 请求，单纯 `?` / `？` 也不再作为任务触发条件，避免慢模型网关在无关聊天上产生 `ReadTimeout` 噪声。显式 PendingAction 确认消息（如 `确认 <id>` / `confirm <id>`）会直接进入主 Agent，不经过 activation LLM。
 
-线上如果出现大面积 `ReadTimeout`，优先检查 `ARTETA_USE_AGENT_REGISTRY`、`DEEPSEEK_MODEL`、`DEEPSEEK_API_URL` 和日志里的 `receive_response_headers.failed`。临时止血可以把 `ARTETA_USE_AGENT_REGISTRY=false` 切回 legacy `run_tool_loop()`，但长期应保持 Agent Registry 的 schema 收窄策略，避免普通聊天携带全量工具定义拖慢 BoxYing 响应。
+线上如果出现大面积 `ReadTimeout`，优先检查 `ARTETA_USE_AGENT_REGISTRY`、`DEEPSEEK_MODEL`、`DEEPSEEK_API_URL` 和日志里的 `receive_response_headers.failed`。临时止血可以把 `ARTETA_USE_AGENT_REGISTRY=false` 切回 legacy `run_tool_loop()`，但长期应保持 Agent Registry 的 schema 收窄策略，避免普通聊天携带全量工具定义拖慢 DeepSeek 响应。
 
 用户画像更新是主回复发送后的后台维护任务。`update_user_profile()` 的 LLM 请求限制为 JSON object 和最多 600 tokens；这类后台请求超时不应阻断主回复，也不应被当作“所有聊天都断联”的根因。
 
@@ -349,8 +349,8 @@ async def run_tool_loop(user_messages: List[dict]) -> str:
 async def call_deepseek_tool(messages: List[dict]) -> List[dict]:
 ```
 
-- 使用 httpx.AsyncClient 调用 BoxYing API (`https://www.boxying.com/v1/chat/completions`)
-- 模型：`gpt-5.5`
+- 使用 httpx.AsyncClient 调用 DeepSeek API (`DEEPSEEK_API_URL`，默认 `https://api.deepseek.com/chat/completions`)
+- 模型：`DEEPSEEK_MODEL`（默认 `deepseek-v4-pro`）
 - timeout：80s（单次请求）
 - 返回包含 role/content/tool_calls/reasoning_content 的消息字典列表
 
@@ -443,6 +443,8 @@ AI 对话相关的配置通过 NoneBot 的 `.env` 文件加载，通过 `driver.
 | 变量 | 说明 | 类型 |
 |------|------|------|
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | string |
+| `DEEPSEEK_API_URL` | 主对话与工具调用的完整聊天端点，默认 `https://api.deepseek.com/chat/completions` | string |
+| `DEEPSEEK_MODEL` | 主对话与工具调用模型，默认 `deepseek-v4-pro` | string |
 | `DEEPSEEK_TEMPERATURE` | 主对话生成温度，默认 `0.9`；画像分析仍固定 `0.3`，激活判定仍固定 `0` | float |
 | `FOOTBALL_API_TOKEN` | football-data.org API Token | string |
 | `ARSENAL_ID` | 阿森纳在 football-data.org 的 ID（固定 57） | int |
@@ -455,6 +457,8 @@ AI 对话相关的配置通过 NoneBot 的 `.env` 文件加载，通过 `driver.
 register_tools_config(
     football_api_token=FOOTBALL_API_TOKEN,
     deepseek_api_key=DEEPSEEK_API_KEY,
+    deepseek_api_url=DEEPSEEK_API_URL,
+    deepseek_model=DEEPSEEK_MODEL,
     deepseek_temperature=DEEPSEEK_TEMPERATURE,
     arsenal_id=ARSENAL_ID,
     has_web_search=HAS_WEB_SEARCH,
@@ -465,9 +469,9 @@ register_tools_config(
 
 | 用途 | 端点 | 模型 |
 |------|------|------|
-| 主对话 + Function Calling | `https://www.boxying.com/v1/chat/completions` | `gpt-5.5` |
+| 主对话 + Function Calling | `DEEPSEEK_API_URL`（默认 `https://api.deepseek.com/chat/completions`） | `DEEPSEEK_MODEL`（默认 `deepseek-v4-pro`） |
 | 算法/技术问题 | `https://www.boxying.com/v1/chat/completions` | `gpt-5.5` |
-| 人格画像分析 | `https://www.boxying.com/v1/chat/completions` | `gpt-5.5` |
+| 人格画像分析 | `DEEPSEEK_API_URL`（默认 `https://api.deepseek.com/chat/completions`） | `DEEPSEEK_MODEL`（默认 `deepseek-v4-pro`） |
 
 ### 其他相关配置
 

@@ -193,8 +193,8 @@ class BotChatService:
         register_config(
             football_api_token=self._setting_value(env_values, "FOOTBALL_API_TOKEN"),
             deepseek_api_key=deepseek_api_key,
-            deepseek_api_url=self._setting_value(env_values, "DEEPSEEK_API_URL") or "https://www.boxying.com/v1/chat/completions",
-            deepseek_model=self._setting_value(env_values, "DEEPSEEK_MODEL") or "gpt-5.5",
+            deepseek_api_url=self._setting_value(env_values, "DEEPSEEK_API_URL") or "https://api.deepseek.com/chat/completions",
+            deepseek_model=self._setting_value(env_values, "DEEPSEEK_MODEL") or "deepseek-v4-pro",
             deepseek_temperature=self._setting_value(env_values, "DEEPSEEK_TEMPERATURE") or "0.9",
             arsenal_id=57,
             has_web_search=True,
