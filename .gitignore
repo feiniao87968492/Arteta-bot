@@ -43,7 +43,19 @@ astrbot_backup_*/
 
 # Stale artifacts
 registry-mirrors*
-EOF
 
 # Generated assets
 qrcode.png
+artifacts/
+chroma_db/
+data/ecs_sync_status.json
+/bg.mp4
+/不够.mp4
+repomix-admin-analysis.xml
+task_plan.md
+progress.md
+findings.md
+/package-lock.json
+/dashboard/web/package-lock.json
+/dashboard/web/dist/
+/dashboard/web/node_modules/

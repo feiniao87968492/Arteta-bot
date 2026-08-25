@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "key": "arteta.main",
+      "title": "主对话人设",
+      "category": "主对话",
+      "content": "",
+      "variables": [],
+      "enabled": false,
+      "builtin": true
+    },
+    {
+      "key": "arteta.dashboard_chat",
+      "title": "Dashboard 对话人设",
+      "category": "Dashboard 对话",
+      "content": "",
+      "variables": [],
+      "enabled": false,
+      "builtin": true
+    },
+    {
+      "key": "profile.analysis",
+      "title": "用户画像分析",
+      "category": "画像分析",
+      "content": "",
+      "variables": ["current_profile", "count", "recent_messages", "nickname", "level", "favorability", "now", "total_count"],
+      "enabled": false,
+      "builtin": true
+    },
+    {
+      "key": "daily.summary",
+      "title": "每日群聊总结",
+      "category": "定时总结",
+      "content": "",
+      "variables": ["chat_log", "total_msgs", "active_users", "top_users_str"],
+      "enabled": false,
+      "builtin": true
+    },
+    {
+      "key": "weekly.report",
+      "title": "阿森纳周报",
+      "category": "周报",
+      "content": "",
+      "variables": ["articles"],
+      "enabled": false,
+      "builtin": true
+    },
+    {
+      "key": "algo.coach",
+      "title": "算法/理科解题",
+      "category": "理科解题",
+      "content": "",
+      "variables": [],
+      "enabled": false,
+      "builtin": true
+    }
+  ]
+}

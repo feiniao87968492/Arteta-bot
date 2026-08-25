@@ -1,0 +1,425 @@
+import json
+import re
+from typing import List
+
+from .. import behavior_policy
+from ..context import ToolContext
+from .contextual_tools import detect_memory_preference_args
+from .contextual_tools import detect_ui_preference_args
+from .freshness import detect_football_freshness
+from .models import Intent, PlannedToolCall, RouteDecision
+from ..tool_policy import parse_tool_block_instruction
+
+
+LOCAL_MEMORY_MARKERS = ("之前", "刚才", "上次", "昨天", "你之前", "你刚才")
+CURRENT_FACT_MARKERS = ("最新", "最近", "现在", "结果", "赛果", "比分", "伤病", "转会")
+FOOTBALL_MARKERS = ("阿森纳", "arsenal", "比赛", "英超", "欧冠", "球队")
+DOCUMENT_MARKERS = ("pdf", "PDF", "文档", "文件", "附件", "报告")
+DOCUMENT_INTENT_MARKERS = (
+    "文档",
+    "pdf",
+    "docx",
+    "文件",
+    "读取",
+    "总结",
+    "分析",
+    "看看",
+    "提取",
+    "讲了什么",
+)
+DETECTED_URL_DOCUMENT_INTENT_MARKERS = (
+    "文档",
+    "pdf",
+    "docx",
+    "文件",
+    "读取",
+    "附件",
+    "报告",
+)
+LINK_INTENT_MARKERS = (
+    "链接",
+    "网址",
+    "网页",
+    "http://",
+    "https://",
+    "总结",
+    "分析",
+    "看看",
+    "快照",
+    "截取",
+    "讲了什么",
+)
+MATH_INTENT_MARKERS = ("求解", "计算", "解方程", "证明")
+ALGORITHM_MARKERS = (
+    "leetcode",
+    "算法",
+    "数据结构",
+    "复杂度",
+    "动态规划",
+    "二分",
+    "两数之和",
+)
+CODE_MARKERS = (
+    "```",
+    "python",
+    "javascript",
+    "typescript",
+    "java ",
+    "c++",
+    "代码",
+    "报错",
+    "实现一个函数",
+    "写个函数",
+)
+SCIENCE_MARKERS = (
+    "物理",
+    "力学",
+    "电路",
+    "加速度",
+    "动量",
+    "电压",
+)
+MATH_MARKERS = (
+    "数学",
+    "求解",
+    "证明",
+    "方程",
+    "求导",
+    "导数",
+    "极限",
+    "概率",
+    "矩阵",
+    "不等式",
+    "几何",
+    "三角",
+    "微积分",
+)
+
+TRACE_MARKERS = (
+    "trace",
+    "agent trace",
+    "tool trace",
+    "调用了什么工具",
+    "调用什么工具",
+    "工具调用",
+    "为什么这样回复",
+    "为什么这么回",
+    "可视化调试",
+)
+
+CURRENT_FACT_ASCII_MARKERS = (
+    "latest",
+    "recent",
+    "news",
+    "transfer",
+    "injury",
+    "fixture",
+    "score",
+    "result",
+    "official",
+)
+FOOTBALL_ASCII_MARKERS = (
+    "arsenal",
+    "football",
+    "premier league",
+    "champions league",
+    "club",
+    "team",
+    "match",
+    "game",
+)
+
+RECENT_MATCH_MARKERS = (
+    "recent match",
+    "latest match",
+    "last match",
+    "previous match",
+    "最近一场",
+    "最近的一场",
+    "上一场",
+    "上场",
+    "近期",
+)
+MATCH_CONTEXT_MARKERS = (
+    "match",
+    "game",
+    "fixture",
+    "比赛",
+    "对阵",
+    "交手",
+    "踢",
+)
+TEAM_PAIR_MARKERS = (
+    " vs ",
+    " v ",
+    " versus ",
+    " against ",
+    "和",
+    "与",
+    "跟",
+    "对",
+    "对阵",
+)
+LOCAL_CURRENT_VERIFICATION_MARKERS = (
+    "现在查",
+    "查最新",
+    "最新",
+    "最近",
+    "新闻",
+    "消息",
+    "动态",
+    "官宣",
+    "官方",
+    "来源",
+    "核实",
+    "查证",
+    "转会",
+    "伤病",
+    "赛程",
+    "赛果",
+    "结果",
+    "search",
+    "verify",
+    "source",
+    "news",
+    "latest",
+    "recent",
+)
+
+
+def _latest_user_content(messages) -> str:
+    for msg in reversed(messages or []):
+        if msg.get("role") == "user":
+            return str(msg.get("content") or "")
+    return ""
+
+
+def _append_tool_once(tools: List[PlannedToolCall], call: PlannedToolCall) -> None:
+    for item in tools:
+        if item.name == call.name and json.dumps(item.arguments, ensure_ascii=False, sort_keys=True) == json.dumps(call.arguments, ensure_ascii=False, sort_keys=True):
+            return
+    tools.append(call)
+
+
+def _has_any(text: str, markers) -> bool:
+    lowered = text.lower()
+    return any(str(marker).lower() in lowered for marker in markers)
+
+
+def _has_x_status_url(text: str, extra: dict) -> bool:
+    candidates = list((extra or {}).get("detected_urls") or [])
+    candidates.extend(re.findall(r"https?://[^\s)）]+", str(text or "")))
+    return any(
+        re.search(r"https?://(?:www\.)?(?:x|twitter)\.com/[^/\s]+/status/\d+", str(url), flags=re.I)
+        for url in candidates
+    )
+
+
+def _looks_like_math(text: str) -> bool:
+    compact = text.replace(" ", "")
+    if _has_any(text, MATH_INTENT_MARKERS) and any(token in compact for token in ("=", "^", "+", "*", "/", "x", "X")):
+        return True
+    return False
+
+
+def _science_tool_for_text(text: str) -> str:
+    if not text:
+        return ""
+    lower = text.lower()
+    if any(marker in lower for marker in ALGORITHM_MARKERS):
+        return "solve_algorithm_problem"
+    if any(marker in lower for marker in CODE_MARKERS):
+        return "solve_code_question"
+    if any(marker in text for marker in SCIENCE_MARKERS):
+        return "solve_science_question"
+    if any(marker in text for marker in MATH_MARKERS) or _looks_like_math(text):
+        return "solve_math_question"
+    return ""
+
+
+def _looks_like_recent_public_match_question(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return (
+        any(marker in lowered for marker in RECENT_MATCH_MARKERS)
+        and any(marker in lowered for marker in MATCH_CONTEXT_MARKERS)
+        and any(marker in lowered for marker in TEAM_PAIR_MARKERS)
+    )
+
+
+def _public_current_fact_query(text: str) -> str:
+    lowered = text.lower()
+    query = text
+    if "阿森纳" in text and "arsenal" not in lowered:
+        query = "{0} Arsenal".format(query)
+    if "转会" in text and "transfer" not in lowered:
+        query = "{0} transfer news".format(query)
+    return query
+
+
+def _append_freshness_required_tool(decision: RouteDecision) -> None:
+    freshness = decision.freshness
+    if freshness.mode != "required":
+        return
+    if freshness.domain != "football":
+        return
+    decision.intents.append(Intent("public_current_fact", freshness.confidence, "current football information required"))
+    decision.constraints["current_information_required"] = True
+    decision.constraints["freshness_reason_codes"] = list(freshness.reason_codes or [])
+    preferred = list(freshness.preferred_web_tools or [])
+    tool_name = preferred[0] if preferred else "grok_search"
+    if tool_name == "fetch_x_post":
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="fetch_x_post",
+            arguments={"url": freshness.query_hint},
+            reason="current football source post required",
+            forced=True,
+        ))
+        return
+    query = freshness.query_hint or _public_current_fact_query(_latest_user_content([{"role": "user", "content": freshness.query_hint}]))
+    _append_tool_once(decision.required_tools, PlannedToolCall(
+        name=tool_name,
+        arguments={"query": query, "freshness": "recent", "max_results": 5},
+        reason="current football information required",
+        forced=True,
+    ))
+
+
+def _allows_public_fact_with_local_memory(text: str) -> bool:
+    if not _has_any(text, LOCAL_MEMORY_MARKERS):
+        return True
+    return _has_any(text, LOCAL_CURRENT_VERIFICATION_MARKERS)
+
+
+def _document_tool_args(text: str, extra: dict):
+    if extra.get("document_urls") and (not text or _has_any(text, DOCUMENT_INTENT_MARKERS)):
+        return {}
+    if extra.get("detected_urls") and _has_any(text, DETECTED_URL_DOCUMENT_INTENT_MARKERS):
+        urls = list(extra.get("detected_urls") or [])
+        if urls:
+            return {"url": str(urls[0])}
+    return None
+
+
+def route_message(messages, ctx: ToolContext = None) -> RouteDecision:
+    text = _latest_user_content(messages).strip()
+    decision = RouteDecision()
+    extra = getattr(ctx, "extra", {}) or {} if ctx is not None else {}
+    if not text and not extra.get("document_urls") and not extra.get("detected_urls"):
+        return decision
+
+    behavior_instruction = behavior_policy.parse_behavior_policy_instruction(text)
+    if behavior_instruction:
+        decision.intents.append(Intent("behavior_policy_update", 0.95, "explicit behavior policy update"))
+        decision.constraints["execute_single_required_tool"] = True
+        decision.constraints["direct_tool_response"] = True
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="update_behavior_policy",
+            arguments=dict(behavior_instruction),
+            reason="update behavior policy",
+            forced=True,
+        ))
+        return decision
+
+    tool_block_instruction = parse_tool_block_instruction(text)
+    if tool_block_instruction:
+        tool_name = str(tool_block_instruction.get("tool_name") or "")
+        decision.intents.append(Intent("tool_policy_update", 0.95, "explicit temporary tool block"))
+        decision.constraints["execute_single_required_tool"] = True
+        decision.constraints["direct_tool_response"] = True
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="update_behavior_policy",
+            arguments={
+                "key": "tool.{0}.disabled".format(tool_name),
+                "value_json": "true",
+                "ttl_turns": int(tool_block_instruction.get("turns") or 10),
+                "reason": str(tool_block_instruction.get("reason") or ""),
+            },
+            reason="temporarily disable tool through behavior policy",
+            forced=True,
+        ))
+        return decision
+
+    ui_args = detect_ui_preference_args(messages)
+    if ui_args:
+        decision.intents.append(Intent("ui_preference", 0.9, "explicit UI preference request"))
+        decision.constraints["execute_single_required_tool"] = True
+        decision.constraints["direct_tool_response"] = True
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="update_ui_preference",
+            arguments=ui_args,
+            reason="update controlled UI preference",
+            forced=True,
+        ))
+
+    memory_args = detect_memory_preference_args(messages)
+    if memory_args and not ui_args:
+        decision.intents.append(Intent("memory_preference", 0.9, "explicit future/preference marker"))
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="remember_user_preference",
+            arguments=memory_args,
+            reason="remember explicit user preference",
+            forced=True,
+        ))
+
+    if _has_any(text, TRACE_MARKERS):
+        decision.intents.append(Intent("agent_trace", 0.95, "explicit trace/debug request"))
+        decision.constraints["direct_trace_response"] = True
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="show_agent_trace",
+            arguments={},
+            reason="show sanitized agent trace",
+            forced=True,
+        ))
+
+    document_args = _document_tool_args(text, extra)
+    if document_args is not None:
+        decision.intents.append(Intent("document_read", 0.95, "document context present"))
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="read_document",
+            arguments=document_args,
+            reason="document context present",
+            forced=True,
+        ))
+
+    has_document_read = any(intent.name == "document_read" for intent in decision.intents)
+    if (
+        not has_document_read
+        and extra.get("detected_urls")
+        and (not text or _has_any(text, LINK_INTENT_MARKERS))
+        and not _has_x_status_url(text, extra)
+    ):
+        decision.intents.append(Intent("link_analysis", 0.9, "link context present with analysis intent"))
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="analyze_links",
+            arguments={},
+            reason="analyze detected link context",
+            forced=True,
+        ))
+
+    if _has_any(text, LOCAL_MEMORY_MARKERS):
+        decision.intents.append(Intent("group_memory", 0.75, "local memory reference"))
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name="query_group_memory",
+            arguments={"query": text},
+            reason="retrieve referenced local memory",
+            forced=True,
+        ))
+
+    if (
+        _allows_public_fact_with_local_memory(text)
+        and not any(intent.name == "memory_preference" for intent in decision.intents)
+    ):
+        decision.freshness = detect_football_freshness(text, decision.intents, ctx)
+        _append_freshness_required_tool(decision)
+
+    science_tool = _science_tool_for_text(text)
+    if science_tool:
+        decision.intents.append(Intent("science", 0.95, "explicit technical solve intent"))
+        _append_tool_once(decision.required_tools, PlannedToolCall(
+            name=science_tool,
+            arguments={"question": text},
+            reason="explicit technical solve intent",
+            forced=True,
+        ))
+
+    return decision

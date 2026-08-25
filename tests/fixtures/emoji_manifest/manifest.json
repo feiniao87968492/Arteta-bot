@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "assets": {
+    "arteta_stare_01": {
+      "file": "skeptical/arteta_stare_01.gif",
+      "reactions": ["skeptical", "speechless"],
+      "intensities": ["medium"],
+      "stances": ["toward_claim", "toward_event"],
+      "topics": ["football", "news", "meme"],
+      "avoid_contexts": ["serious_injury"],
+      "weight": 1.0
+    }
+  }
+}

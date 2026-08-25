@@ -1,5 +1,6 @@
 # plugins/arteta_swear.py
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 import nonebot
@@ -9,8 +10,8 @@ from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 # --- 1. 战术档案库配置 (本地数据持久化) ---
 # 在机器人根目录自动创建一个 data 文件夹用来存数据
 DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
-SWEARS_FILE = DATA_DIR / "arteta_swears.json"
+SWEARS_FILE = Path(os.environ.get("ARTETA_SWEARS_FILE", str(DATA_DIR / "arteta_swears.json")))
+SWEARS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 def load_swears() -> dict:
     """读取更衣室誓言档案"""

@@ -1,8 +1,14 @@
+import os
 import httpx, json
+
+
+api_key = os.environ.get("IMAGE_API_KEY", "")
+if not api_key:
+    raise SystemExit("IMAGE_API_KEY is required")
 
 resp = httpx.post(
     "https://api.duckcoding.ai/v1/images/generations",
-    headers={"Authorization": "Bearer sk-5fdiT7sPpX36NkvLykAo5MxKiWftOldkCfMX8kjfrr8VI1kb"},
+    headers={"Authorization": f"Bearer {api_key}"},
     json={"model": "gpt-image-1.5", "prompt": "a red cat playing football", "n": 1, "size": "1024x1024"},
     timeout=30,
 )

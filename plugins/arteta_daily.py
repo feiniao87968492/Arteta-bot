@@ -7,6 +7,7 @@
 - 自动清理 7 天前的消息记录
 """
 import nonebot
+import os
 from nonebot import on_message, on_command, get_driver
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageSegment
 from nonebot_plugin_apscheduler import scheduler
@@ -17,11 +18,13 @@ import time
 import asyncio
 import logging
 from datetime import datetime, date
+from dashboard.api.services.prompt_service import get_prompt
 from plugins.arteta_render import text_to_tactical_board
+from plugins.arteta_power import is_bot_enabled
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = "arsenal_data.db"
+DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 ADMIN_QQ = "2648955710"
 
 # --- 1. 初始化数据库 ---
@@ -49,6 +52,8 @@ except AttributeError:
     config = driver.config.dict()
 
 DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
+DEEPSEEK_API_URL = str(config.get("deepseek_api_url", os.environ.get("DEEPSEEK_API_URL", "https://www.boxying.com/v1/chat/completions"))).strip('"\'')
+DEEPSEEK_MODEL = str(config.get("deepseek_model", "gpt-5.5")).strip('"\'')
 SUMMARY_ENABLED = str(config.get("daily_summary_enabled", "true")).lower() in ("true", "1", "yes")
 
 # --- 3. 消息记录器：捕获所有群消息 ---
@@ -124,21 +129,25 @@ async def generate_summary(messages: list) -> str:
     top_users = sorted(user_counts.items(), key=lambda x: x[1], reverse=True)[:5]
     top_users_str = "、".join(f"{nick}({count}条)" for nick, count in top_users)
 
-    prompt = SUMMARY_PROMPT.format(
-        chat_log=chat_log[-4000:],  # 截断避免超 token
-        total_msgs=total_msgs,
-        active_users=active_users,
-        top_users_str=top_users_str,
+    prompt = get_prompt(
+        "daily.summary",
+        SUMMARY_PROMPT,
+        variables={
+            "chat_log": chat_log[-4000:],  # 截断避免超 token
+            "total_msgs": total_msgs,
+            "active_users": active_users,
+            "top_users_str": top_users_str,
+        },
     )
 
     for attempt in range(2):
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
-                    "https://api.deepseek.com/v1/chat/completions",
+                    DEEPSEEK_API_URL,
                     headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
                     json={
-                        "model": "deepseek-v4-flash",
+                        "model": DEEPSEEK_MODEL,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.7,
                         "max_tokens": 1000,
@@ -168,6 +177,9 @@ async def generate_summary(messages: list) -> str:
 async def daily_summary_job():
     if not SUMMARY_ENABLED:
         logger.info("[DailySummary] 每日总结已禁用")
+        return
+    if not is_bot_enabled():
+        logger.info("[DailySummary] 机器人电源已关闭，跳过")
         return
 
     bots = nonebot.get_bots()

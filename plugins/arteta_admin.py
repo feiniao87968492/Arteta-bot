@@ -5,7 +5,7 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 import aiosqlite
 
 # --- 球队纪律委员会配置 ---
-DB_PATH = "arsenal_data.db"
+DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 ADMIN_QQ = "2648955710"  # 主教练特权账号
 
 # 注册指令

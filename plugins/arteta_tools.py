@@ -5,26 +5,86 @@ import asyncio
 import json
 import sqlite3
 import time
+from datetime import datetime
 
 from typing import List
 from plugins.arteta_knowledge import query_knowledge
 
-DB_PATH = "arsenal_data.db"
+DB_PATH = __import__("os").environ.get("ARTETA_DB_PATH", "arsenal_data.db")
 
 # --- 配置（在运行时由 register_config() 注入）---
 FOOTBALL_API_TOKEN = ""
 DEEPSEEK_API_KEY = ""
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_MODEL = "deepseek-v4-pro"
+DEEPSEEK_TEMPERATURE = 0.9
 ARSENAL_ID = 57
 HAS_WEB_SEARCH = False
 
 
+def _coerce_temperature(value, default=0.9):
+    try:
+        temperature = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(2.0, temperature))
+
+
 def register_config(**kwargs):
     """在 bot 启动时注入全局配置"""
-    global FOOTBALL_API_TOKEN, DEEPSEEK_API_KEY, ARSENAL_ID, HAS_WEB_SEARCH
+    global FOOTBALL_API_TOKEN, DEEPSEEK_API_KEY, DEEPSEEK_API_URL, DEEPSEEK_MODEL, DEEPSEEK_TEMPERATURE, ARSENAL_ID, HAS_WEB_SEARCH
     FOOTBALL_API_TOKEN = kwargs.get("football_api_token", "")
     DEEPSEEK_API_KEY = kwargs.get("deepseek_api_key", "")
+    DEEPSEEK_API_URL = kwargs.get("deepseek_api_url", "https://api.deepseek.com/chat/completions")
+    DEEPSEEK_MODEL = kwargs.get("deepseek_model", "deepseek-v4-pro")
+    DEEPSEEK_TEMPERATURE = _coerce_temperature(kwargs.get("deepseek_temperature", 0.9))
     ARSENAL_ID = kwargs.get("arsenal_id", 57)
     HAS_WEB_SEARCH = kwargs.get("has_web_search", False)
+
+
+FOOTBALL_NEWS_CATEGORY_KEYWORDS = [
+    ("premier_league", ["英超", "曼联", "曼城", "利物浦", "切尔西", "热刺", "阿森纳"]),
+    ("champions_league", ["欧冠", "冠军杯", "冠军联赛"]),
+    ("laliga", ["西甲", "皇马", "巴萨", "马竞"]),
+    ("serie_a", ["意甲", "尤文", "国米", "米兰", "罗马", "那不勒斯"]),
+    ("bundesliga", ["德甲", "拜仁", "多特", "勒沃库森"]),
+    ("ligue1", ["法甲", "巴黎", "马赛", "里昂", "摩纳哥"]),
+    ("chinese_super_league", ["中超", "国安", "申花", "海港", "泰山", "蓉城"]),
+]
+
+
+def detect_football_news_query(query: str):
+    text = query or ""
+    image_question_keywords = ["这张图", "这个图", "图片", "图里", "截图", "照片", "看图", "图讲", "图说"]
+    if any(word in text for word in image_question_keywords):
+        return None
+    if not any(word in text for word in ["新闻", "消息", "动态", "最近", "最新", "怎么样", "有什么"]):
+        return None
+    for category, keywords in FOOTBALL_NEWS_CATEGORY_KEYWORDS:
+        if any(keyword in text for keyword in keywords):
+            return text, category
+    if "五大联赛" in text or "足球" in text:
+        return text, None
+    return None
+
+
+async def maybe_search_football_news_for_prompt(query: str) -> str:
+    return ""
+
+
+def format_football_news_direct_answer(query: str, search_result: str) -> str:
+    if not search_result or "没有找到符合时间范围" in search_result or "尚未初始化" in search_result or "检索失败" in search_result:
+        return "教练查了本地足球新闻库，这个分类最近还没有可靠新闻入库。\n\n【好感度=】"
+    lines = [line.strip() for line in search_result.splitlines() if line.strip()]
+    highlights = lines[:5]
+    body = "教练刚查了本地足球新闻库，最新能看到这些：\n\n" + "\n".join(highlights)
+    body += "\n\n重点是：这些是已经同步进本地向量库的新闻，不是我凭印象编的。"
+    body += "\n\n【好感度+】"
+    return body
+
+
+async def maybe_answer_football_news_directly(query: str) -> str:
+    return ""
 
 
 # --- 工具定义（DeepSeek / OpenAI 格式）---
@@ -86,7 +146,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_football_knowledge",
-            "description": "查询阿尔特塔的战术知识库。当你需要引用具体战术概念（如内收型边后卫、高位逼抢、2-3-5进攻站位）、更衣室故事（灯泡演讲、大脑与心脏演讲）、发布会语录或足球哲学时调用",
+            "description": "查询阿尔特塔的知识库（含阿森纳当前一线队球员名单、战术概念、更衣室故事、发布会语录、足球哲学）。当你需要查询球员信息、当前阵容、球员名单、球队新闻、战术术语、球队哲学时调用",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -146,13 +206,14 @@ async def call_deepseek_tool(messages: List[dict]) -> List[dict]:
     """单次调用 DeepSeek，返回完整响应 messages（含可能的 tool_calls）"""
     async with httpx.AsyncClient(timeout=80.0) as client:
         resp = await client.post(
-            "https://api.deepseek.com/v1/chat/completions",
+            DEEPSEEK_API_URL,
             headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
             json={
-                "model": "deepseek-v4-flash",
+                "model": DEEPSEEK_MODEL,
                 "messages": messages,
                 "tools": TOOLS,
-                "tool_choice": "auto"
+                "tool_choice": "auto",
+                "temperature": DEEPSEEK_TEMPERATURE
             }
         )
         if resp.status_code != 200:
@@ -190,7 +251,7 @@ async def execute_tool_call(tc: dict) -> str:
     elif name == "search_news":
         return await _search_news(args.get("q", ""))
     elif name == "get_football_knowledge":
-        return query_knowledge(args.get("topic", ""))
+        return query_knowledge(args.get("topic", ""), max_chars=3000)
     elif name == "get_group_members":
         return await _get_group_members(args.get("group_id", ""))
     elif name == "get_member_relations":
@@ -214,8 +275,11 @@ async def run_tool_loop(user_messages: List[dict]) -> str:
 
         last = resp_msgs[-1]
         if "tool_calls" not in last or not last["tool_calls"]:
-            # LLM 返回了最终回复
-            return last.get("content", "")
+            content = (last.get("content") or "").strip()
+            if content:
+                return content
+            messages.append({"role": "user", "content": "请直接给出最终回复，不要返回空内容。"})
+            continue
 
         # 执行所有 tool call
         for tc in last["tool_calls"]:
@@ -301,12 +365,12 @@ async def _get_arsenal_injuries() -> str:
         from duckduckgo_search import DDGS
 
         def _search():
-            with DDGS() as ddgs:
+            with DDGS(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}) as ddgs:
                 return list(ddgs.text("Arsenal injury news latest squad updates", max_results=3))
 
         results = await asyncio.wait_for(
             asyncio.get_event_loop().run_in_executor(None, _search),
-            timeout=10.0
+            timeout=5.0
         )
 
         snippets = []
@@ -317,8 +381,11 @@ async def _get_arsenal_injuries() -> str:
                 snippets.append(f"• {t}：{b}" if t else f"• {b}")
 
         return "\n".join(snippets) if snippets else "未找到相关伤病信息。"
+    except asyncio.TimeoutError:
+        return "[搜索超时]"
     except Exception as e:
-        return f"[搜索失败: {e}]"
+        print(f"[Tool Error] _get_arsenal_injuries: {e}")
+        return f"[搜索失败]"
 
 
 async def _search_news(q: str) -> str:
@@ -330,12 +397,12 @@ async def _search_news(q: str) -> str:
         from duckduckgo_search import DDGS
 
         def _search():
-            with DDGS() as ddgs:
+            with DDGS(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}) as ddgs:
                 return list(ddgs.text(q, max_results=5))
 
         results = await asyncio.wait_for(
             asyncio.get_event_loop().run_in_executor(None, _search),
-            timeout=10.0
+            timeout=5.0
         )
 
         snippets = []
@@ -346,8 +413,53 @@ async def _search_news(q: str) -> str:
                 snippets.append(f"• {t}：{b}" if t else f"• {b}")
 
         return "\n".join(snippets) if snippets else "未找到相关信息。"
+    except asyncio.TimeoutError:
+        return "[搜索超时]"
     except Exception as e:
-        return f"[搜索失败: {e}]"
+        print(f"[Tool Error] _search_news: {e}")
+        return "[搜索失败]"
+
+
+async def _search_football_news(query: str, category=None, days: int = 14) -> str:
+    """查询本地足球新闻向量库。"""
+    try:
+        from plugins.arteta_football_news import FootballNewsChromaStore, FootballNewsSQLiteStore, CHROMA_DB_DIR, DB_PATH
+        from plugins.arteta_football_intelligence.models import FootballKnowledgeQuery
+        from plugins.arteta_football_intelligence.query import query_current_football_knowledge
+        try:
+            safe_days = int(days)
+        except (TypeError, ValueError):
+            safe_days = 14
+        category_value = str(category).strip() if category else None
+        sqlite_store = FootballNewsSQLiteStore(DB_PATH)
+        sqlite_store.initialize()
+        result = query_current_football_knowledge(
+            sqlite_store,
+            FootballKnowledgeQuery(
+                query=str(query or ""),
+                competitions=[category_value] if category_value else [],
+                max_age_seconds=max(1, safe_days) * 86400,
+                max_results=8,
+            ),
+        )
+        if result.items:
+            lines = []
+            for item in result.items:
+                date_text = datetime.fromtimestamp(int(item.fetched_at or item.published_at or 0)).strftime("%Y-%m-%d")
+                lines.append("• [%s] %s｜%s｜%s｜%s" % (
+                    date_text,
+                    item.title,
+                    item.source_name,
+                    item.summary[:180],
+                    item.canonical_url,
+                ))
+            return "\n".join(lines)
+        store = FootballNewsChromaStore(CHROMA_DB_DIR)
+        store.initialize()
+        return store.search(query=query, category=category_value, days=safe_days)
+    except Exception as e:
+        print(f"[Tool Error] _search_football_news: {e}")
+        return "足球新闻库暂时不可用。"
 
 
 async def _get_group_members(group_id: str) -> str:

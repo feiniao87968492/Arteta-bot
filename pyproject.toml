@@ -12,6 +12,12 @@ dependencies = [
     "pillow",
     "pilmoji",
     "duckduckgo_search",
+    "loguru",
+    "fastapi",
+    "uvicorn",
+    "python-jose[cryptography]",
+    "python-multipart",
+    "pypdf",
 ]
 
 [tool.nonebot]

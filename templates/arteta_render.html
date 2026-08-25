@@ -11,31 +11,63 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: #f8fafc;
+            background: #d8d2c6;
             color: #1e293b;
             font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
             font-size: 28px;
             line-height: 1.6;
-            padding: 40px 50px;
+            padding: 0;
             width: 1500px;
         }
-        .topbar {
-            background: #db0007;
-            height: 15px;
+        .reply-header {
             width: 100%;
-            margin-bottom: 30px;
+            display: block;
+            max-height: 280px;
+            object-fit: cover;
         }
-        .header {
-            font-size: 38px;
-            font-weight: 900;
-            color: #db0007;
-            margin-bottom: 20px;
-            letter-spacing: 1px;
+        .notice-stage {
+            padding: 34px 32px 42px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.32), rgba(120,105,80,0.14)),
+                #d8d2c6;
         }
-        .separator {
-            border: none;
-            border-top: 3px solid #cbd5e1;
-            margin: 20px 0;
+        .notice-stage.compact {
+            padding: 22px 24px 26px;
+        }
+        .notice-frame {
+            background: #fdfcf7;
+            border: 5px solid #0f4c81;
+            box-shadow: 0 12px 22px rgba(30, 41, 59, 0.16);
+            padding: 7px;
+        }
+        .notice-frame-red {
+            border: 3px solid #db0007;
+            padding: 8px;
+            background: #fffefa;
+        }
+        .notice-frame-gold {
+            border: 3px solid #d7bf6a;
+            padding: 7px;
+            background:
+                linear-gradient(90deg, rgba(215,191,106,0.22), transparent 16%, transparent 84%, rgba(215,191,106,0.22)),
+                #fffefa;
+        }
+        .notice-paper {
+            min-height: 320px;
+            border: 2px solid #efe3aa;
+            padding: 46px 52px 52px;
+            background:
+                radial-gradient(circle at 50% 100%, rgba(219, 0, 7, 0.06), transparent 38%),
+                linear-gradient(180deg, rgba(255,255,255,0.98), rgba(251,249,239,0.96));
+        }
+        .notice-paper.compact {
+            min-height: 0;
+            border: 2px solid #db0007;
+            padding: 28px 34px 32px;
+            box-shadow: 0 10px 22px rgba(30, 41, 59, 0.14);
+        }
+        .content-wrap {
+            padding: 0;
         }
         h1, h2, h3 {
             color: #1e293b;
@@ -93,13 +125,34 @@
         tr:nth-child(even) { background: #f1f5f9; }
         .arsenal-red { color: #db0007; font-weight: 700; }
         .arsenal-blue { color: #0284c7; font-weight: 700; }
+        .arsenal-bold { font-weight: 800; }
+        .arsenal-large { font-size: 1.18em; }
     </style>
 </head>
+{% set mode = render_mode|default("full") %}
 <body>
-    <div class="topbar"></div>
-    <div class="header">ARSENAL | TACTICAL BOARD</div>
-    <hr class="separator">
-    <div id="content"></div>
+    {% if header_image_data_uri and mode != "compact" %}
+    <img class="reply-header" src="{{ header_image_data_uri }}" alt="Premier League Situation Room">
+    {% endif %}
+    <div class="notice-stage{% if mode == "compact" %} compact{% endif %}">
+        {% if mode == "compact" %}
+        <div class="notice-paper compact">
+            <div class="content-wrap">
+                <div id="content"></div>
+            </div>
+        </div>
+        {% else %}
+        <div class="notice-frame">
+            <div class="notice-frame-red">
+                <div class="notice-paper">
+                    <div class="content-wrap">
+                        <div id="content"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
     <script>
         var raw = {{ text | tojson }};
         var hasMath = raw.indexOf('$') !== -1;

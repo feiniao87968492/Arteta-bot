@@ -1,9 +1,15 @@
 """Quick deploy: base64 encode files, upload via SSH, restart via supervisor."""
 import paramiko, os, time, base64
 
-HOST, PORT, USER, PASS = "118.178.140.171", 22, "root", "Zty87968492"
-LOCAL = r"C:\Users\zty\Desktop\arteta_bot"
+HOST = os.environ.get("ARTETA_DEPLOY_HOST", "")
+PORT = int(os.environ.get("ARTETA_DEPLOY_PORT", "22"))
+USER = os.environ.get("ARTETA_DEPLOY_USER", "root")
+PASS = os.environ.get("ARTETA_DEPLOY_PASSWORD", "")
+LOCAL = os.environ.get("ARTETA_LOCAL_PATH", r"C:\Users\zty\Desktop\arteta_bot")
 REMOTE = "/opt/arteta_bot"
+
+if not HOST or not PASS:
+    raise SystemExit("ARTETA_DEPLOY_HOST and ARTETA_DEPLOY_PASSWORD are required")
 
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -46,11 +52,14 @@ stdin, stdout, stderr = ssh.exec_command(f"cat {REMOTE}/.env.prod")
 current_env = stdout.read().decode()
 
 if "IMAGE_API_KEY" not in current_env:
+    image_api_key = os.environ.get("IMAGE_API_KEY", "")
+    if not image_api_key:
+        raise SystemExit("IMAGE_API_KEY is required to update .env.prod")
     additions = """\n# 图片生成（gpt-image-1.5）
-IMAGE_API_KEY=sk-5fdiT7sPpX36NkvLykAo5MxKiWftOldkCfMX8kjfrr8VI1kb
+IMAGE_API_KEY={image_api_key}
 IMAGE_API_URL=https://api.duckcoding.ai
 IMAGE_MODEL=gpt-image-1.5
-"""
+""".format(image_api_key=image_api_key)
     new_env = (current_env.rstrip() + additions).encode()
     b64 = base64.b64encode(new_env).decode()
     run(f"echo '{b64}' | base64 -d > {REMOTE}/.env.prod")

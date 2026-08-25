@@ -1,7 +1,10 @@
+import os
 import httpx, asyncio, time
 
 async def test():
-    api_key = "sk-5fdiT7sPpX36NkvLykAo5MxKiWftOldkCfMX8kjfrr8VI1kb"
+    api_key = os.environ.get("IMAGE_API_KEY", "")
+    if not api_key:
+        raise SystemExit("IMAGE_API_KEY is required")
     base = "https://api.duckcoding.ai"
 
     async with httpx.AsyncClient(timeout=180.0) as c:

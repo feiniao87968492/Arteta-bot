@@ -23,6 +23,18 @@ IMAGE_MODEL = str(config.get("image_model", "gpt-image-2")).strip('"\'')
 draw_cmd = on_command("画图", priority=10, block=True)
 
 
+def preprocess_reference_image(image_bytes: bytes) -> bytes:
+    """转换参考图为 1024x1024 PNG，白底居中补边。"""
+    img = Image.open(io.BytesIO(image_bytes))
+    sz = max(img.width, img.height)
+    sq = Image.new("RGB", (sz, sz), (255, 255, 255))
+    sq.paste(img, ((sz - img.width) // 2, (sz - img.height) // 2))
+    sq = sq.resize((1024, 1024), Image.LANCZOS)
+    buf = io.BytesIO()
+    sq.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 @draw_cmd.handle()
 async def handle_draw(bot: Bot, event: MessageEvent):
     prompt = event.get_message().extract_plain_text().strip()
@@ -147,14 +159,7 @@ async def handle_img2img(bot: Bot, event: MessageEvent):
                 return
 
             # 转换为 PNG + 裁剪为正方形 + 缩放到 1024x1024
-            img = Image.open(io.BytesIO(r.content))
-            sz = max(img.width, img.height)
-            sq = Image.new("RGB", (sz, sz), (255, 255, 255))
-            sq.paste(img, ((sz - img.width) // 2, (sz - img.height) // 2))
-            sq = sq.resize((1024, 1024), Image.LANCZOS)
-            buf = io.BytesIO()
-            sq.save(buf, format="PNG")
-            png_data = buf.getvalue()
+            png_data = preprocess_reference_image(r.content)
 
             # 调用 /v1/images/edits 图生图接口
             resp = await c.post(
