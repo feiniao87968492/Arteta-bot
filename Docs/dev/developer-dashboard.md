@@ -10,7 +10,7 @@ dashboard/
   web/        React + Vite + TypeScript 前端
 ```
 
-后端是唯一能访问 SQLite、ChromaDB、日志、文档、环境文件和验证脚本的层。当前 Dashboard 已关闭管理员登录密码门禁：浏览器打开封面页后点击“开始”即可进入控制台，`/api/*` 管理接口由运行环境和群组访问密码承担访问边界。
+后端是唯一能访问 SQLite、ChromaDB、日志、文档、环境文件和验证脚本的层。浏览器在封面页点击“开始”后必须使用管理员密码登录，登录成功才会进入控制台。Provider 配置接口要求有效 Dashboard Bearer token，并由服务器运行环境和群组访问密码提供额外访问边界。
 
 ## ECS 生产运行模式
 
@@ -33,10 +33,12 @@ ARTETA_CHROMA_DIR=/opt/arteta_bot/chroma_db
 DASHBOARD_LOGS_DIR=/opt/arteta_bot/logs
 DASHBOARD_ENV_FILE=/opt/arteta_bot/.env.prod
 DASHBOARD_WEB_DIST=/opt/arteta_bot/dashboard/web/dist
+DASHBOARD_ADMIN_PASSWORD=<strong-admin-password>
+DASHBOARD_SECRET_KEY=<long-random-secret>
 ARTETA_PROMPTS_FILE=/opt/arteta_bot/config/prompts.json
 ```
 
-`DASHBOARD_ADMIN_PASSWORD` 和 `DASHBOARD_SECRET_KEY` 目前不再参与 Dashboard 登录流程；如果线上仍保留这些变量，只是兼容旧配置。
+`DASHBOARD_ADMIN_PASSWORD` 用于登录校验，`DASHBOARD_SECRET_KEY` 用于签发和验证登录 JWT。在 `DASHBOARD_PUBLIC=true` 的生产环境中，两者都必须设置为非空强随机值；不要将真实值提交到仓库。
 
 `start_dashboard.ps1 -EcsSync` 仍可用于本地只读排障，但不再是生产管理主路径。
 
@@ -56,7 +58,7 @@ npm install
 npm run dev
 ```
 
-打开 Vite 输出的本地地址，点击封面页“开始”即可进入控制台。
+打开 Vite 输出的本地地址，点击封面页“开始”，然后使用 `DASHBOARD_ADMIN_PASSWORD` 登录进入控制台。
 
 ## 功能模块
 
@@ -72,7 +74,7 @@ npm run dev
 
 ## 安全规则
 
-- 当前 Dashboard 不要求管理员登录密码；面向局域网或服务器内网使用，不要直接公网暴露，公网使用时应通过安全组或反向代理限制来源。
+- Dashboard 要求管理员密码登录；面向局域网或服务器内网使用，不要直接公网暴露，公网使用时仍应通过安全组或反向代理限制来源。
 - API Key 不会从后端返回明文。
 - Group Profiles 可为单个群组设置或清除“群组访问密码”，状态会同步显示在 Chroma Memory 群组列表。
 - 已设置群组访问密码的群组，用户列表、用户详情、档案保存和档案清空都必须先解锁。

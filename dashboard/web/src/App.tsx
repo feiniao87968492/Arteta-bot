@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { subscribeToUnauthorized } from './api/client';
 import { Shell } from './components/Shell';
 import { BotChatPage } from './pages/BotChatPage';
 import { ConfigPage } from './pages/ConfigPage';
 import { DocsPage } from './pages/DocsPage';
 import { GroupsPage } from './pages/GroupsPage';
+import { LoginPage } from './pages/LoginPage';
 import { LogsPage } from './pages/LogsPage';
 import { MemoriesPage } from './pages/MemoriesPage';
 import { MissionControlPage } from './pages/MissionControlPage';
@@ -12,14 +14,24 @@ import { VerifyPage } from './pages/VerifyPage';
 
 export function App() {
   const [enteredDashboard, setEnteredDashboard] = useState(false);
+  const [loginRequested, setLoginRequested] = useState(false);
   const [page, setPage] = useState('overview');
 
+  useEffect(() => subscribeToUnauthorized(() => {
+    setEnteredDashboard(false);
+    setLoginRequested(true);
+  }), []);
+
   if (!enteredDashboard) {
+    if (loginRequested) {
+      return <LoginPage onLogin={() => setEnteredDashboard(true)} />;
+    }
+
     return (
       <main className="launch-page">
         <section className="launch-panel">
           <p className="mission-kicker launch-kicker">ARTETA BOT / MATCHDAY CONTROL</p>
-          <button className="launch-start-button" onClick={() => setEnteredDashboard(true)}>
+          <button className="launch-start-button" onClick={() => setLoginRequested(true)}>
             开始
           </button>
         </section>

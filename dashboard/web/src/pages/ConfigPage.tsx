@@ -42,12 +42,19 @@ export function ConfigPage() {
   const [pendingApply, setPendingApply] = useState<Provider | null>(null);
   const [message, setMessage] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => { void load(); }, []);
 
   async function load() {
-    const result = await apiGet<Provider[]>('/api/config/providers');
-    setProviders(result);
+    setLoadError('');
+    try {
+      const result = await apiGet<Provider[]>('/api/config/providers');
+      setProviders(result);
+    } catch (error) {
+      setProviders([]);
+      setLoadError(error instanceof Error ? error.message : 'Failed to load provider configuration');
+    }
   }
 
   function candidate(provider: Provider): Record<string, string> {
@@ -132,6 +139,12 @@ export function ConfigPage() {
           <p className="muted">每组独立验证后才能应用。应用会立即重启机器人。</p>
         </div>
         {message && <p className="status-ok config-message">{message}</p>}
+        {loadError && (
+          <div className="provider-load-error">
+            <p className="status-error config-message">{loadError}</p>
+            <button onClick={() => { void load(); }}>Retry loading configuration</button>
+          </div>
+        )}
         <div className="provider-grid">
           {providers.map(provider => {
             const verified = validation[provider.id];

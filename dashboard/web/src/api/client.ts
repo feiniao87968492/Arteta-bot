@@ -1,6 +1,7 @@
 import type { ApiResponse } from './types';
 
 const TOKEN_KEY = 'arteta_dashboard_token';
+const DASHBOARD_UNAUTHORIZED_EVENT = 'arteta-dashboard-unauthorized';
 
 export function getToken(): string {
   return localStorage.getItem(TOKEN_KEY) || '';
@@ -12,6 +13,12 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  window.dispatchEvent(new Event(DASHBOARD_UNAUTHORIZED_EVENT));
+}
+
+export function subscribeToUnauthorized(handler: () => void): () => void {
+  window.addEventListener(DASHBOARD_UNAUTHORIZED_EVENT, handler);
+  return () => window.removeEventListener(DASHBOARD_UNAUTHORIZED_EVENT, handler);
 }
 
 async function readApiResponse<T>(response: Response): Promise<T> {
