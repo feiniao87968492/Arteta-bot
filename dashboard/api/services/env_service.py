@@ -1,4 +1,6 @@
 import os
+import re
+import tempfile
 from typing import Dict, List
 
 
@@ -12,6 +14,12 @@ class EnvService:
             return []
         with open(self.env_file, "r", encoding="utf-8") as f:
             return f.read().splitlines()
+
+    def read_text(self) -> str:
+        if not os.path.exists(self.env_file):
+            return ""
+        with open(self.env_file, "r", encoding="utf-8") as f:
+            return f.read()
 
     def _parse(self) -> Dict[str, str]:
         values = {}
@@ -88,3 +96,55 @@ class EnvService:
         with open(self.env_file, "w", encoding="utf-8") as f:
             f.write("\n".join(output) + "\n")
         os.environ[key] = value
+
+    def write_text_atomic(self, content: str) -> None:
+        """Replace the environment file without exposing a partial configuration."""
+        parent = os.path.dirname(os.path.abspath(self.env_file))
+        if not os.path.exists(parent):
+            os.makedirs(parent)
+        temp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                newline="",
+                dir=parent,
+                prefix=".env.",
+                suffix=".tmp",
+                delete=False,
+            ) as f:
+                temp_path = f.name
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.env_file)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def replace_values_atomic(self, values: Dict[str, str]) -> None:
+        """Replace exact environment assignments while preserving other lines."""
+        ordered_values = {str(key): str(value) for key, value in values.items()}
+        if not ordered_values:
+            return
+        pattern = re.compile(r"^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*=")
+        output = []
+        replaced = set()
+        for line in self.read_text().splitlines(True):
+            match = pattern.match(line)
+            key = match.group(2) if match else ""
+            if key in ordered_values:
+                remainder = line[match.end():]
+                comment = re.search(r"(\s+#.*?)(?:\r?\n)?$", remainder)
+                suffix = comment.group(1) if comment else ""
+                newline = "\r\n" if line.endswith("\r\n") else "\n"
+                output.append(key + "=" + ordered_values[key] + suffix + newline)
+                replaced.add(key)
+            else:
+                output.append(line)
+        for key, value in ordered_values.items():
+            if key not in replaced:
+                if output and not output[-1].endswith("\n"):
+                    output[-1] += "\n"
+                output.append(key + "=" + value + "\n")
+        self.write_text_atomic("".join(output))

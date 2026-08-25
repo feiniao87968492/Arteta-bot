@@ -37,3 +37,30 @@ def decode_access_token(token: str) -> Dict[str, str]:
 
 def require_auth(authorization: str = Header("")) -> Dict[str, str]:
     return {"sub": "admin"}
+
+
+def require_verified_auth(authorization: str = Header("")) -> Dict[str, str]:
+    """Require a valid Dashboard bearer token for sensitive operations."""
+    scheme, _, token = str(authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(
+            status_code=401,
+            detail="authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        payload = decode_access_token(token.strip())
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    subject = str(payload.get("sub") or "").strip()
+    if not subject:
+        raise HTTPException(
+            status_code=401,
+            detail="invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return {"sub": subject}

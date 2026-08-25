@@ -5828,7 +5828,7 @@ def test_phase5_mute_member_calls_bot_and_audits(tmp_path):
     assert AuditStore(str(tmp_path / "audit.db")).list_records()[0]["tool_name"] == "mute_member"
 
 
-def test_phase5_config_tools_use_env_service(monkeypatch, tmp_path):
+def test_phase5_config_tool_rejects_provider_group_fields(monkeypatch, tmp_path):
     from plugins.arteta_agent.tools import admin
 
     env_file = tmp_path / ".env"
@@ -5839,8 +5839,8 @@ def test_phase5_config_tools_use_env_service(monkeypatch, tmp_path):
     updated = admin.update_config(ctx, name="DEEPSEEK_MODEL", value="new-model")
 
     assert "DEEPSEEK_MODEL" in checked
-    assert "new-model" in env_file.read_text(encoding="utf-8")
-    assert "DEEPSEEK_MODEL" in updated
+    assert env_file.read_text(encoding="utf-8") == "DEEPSEEK_MODEL=old\n"
+    assert "provider group" in updated
 
 
 def test_phase5_update_favor_tool_uses_sqlite_service(monkeypatch, tmp_path):

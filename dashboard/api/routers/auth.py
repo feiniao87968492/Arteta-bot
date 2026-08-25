@@ -13,7 +13,9 @@ class LoginRequest(BaseModel):
 
 @router.post("/login")
 def login(request: LoginRequest):
-    return ok({"token": ""})
+    if not verify_admin_password(request.password):
+        raise HTTPException(status_code=401, detail="invalid dashboard password")
+    return ok({"token": create_access_token({"sub": "admin"})})
 
 
 @router.get("/me")

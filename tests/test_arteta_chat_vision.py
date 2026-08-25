@@ -52,14 +52,6 @@ def _load_fetch_quoted_chain_helper():
     return namespace
 
 
-def _select_vision_api_key(vision_api_key: str, image_api_key: str) -> str:
-    return vision_api_key or image_api_key
-
-
-def _select_vision_api_url(vision_api_url: str, image_api_url: str) -> str:
-    return vision_api_url or image_api_url
-
-
 class FakeEvent:
     def __init__(self, message, original_message=None, to_me=False, self_id="3443862126", group_id="543915926"):
         self.message = FakeMessage(message)
@@ -204,22 +196,6 @@ def test_fetch_quoted_chain_collects_image_urls_without_analyzing_in_agent_mode(
     assert image_urls == ["https://fresh.example/a.png"]
     assert "可调用 analyze_image" in text
     assert calls == []
-
-
-def test_select_vision_api_key_prefers_dedicated_key():
-    assert _select_vision_api_key("sk-vision", "sk-image") == "sk-vision"
-
-
-def test_select_vision_api_key_falls_back_to_image_key():
-    assert _select_vision_api_key("", "sk-image") == "sk-image"
-
-
-def test_select_vision_api_url_prefers_dedicated_url():
-    assert _select_vision_api_url("https://vision.example.com/anthropic", "https://image.example.com") == "https://vision.example.com/anthropic"
-
-
-def test_select_vision_api_url_falls_back_to_image_url():
-    assert _select_vision_api_url("", "https://image.example.com") == "https://image.example.com"
 
 
 def test_build_vision_request_uses_anthropic_messages_for_anthropic_url():

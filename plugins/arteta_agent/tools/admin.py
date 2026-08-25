@@ -2,6 +2,7 @@ import json
 
 from dashboard.api.config import ENV_WHITELIST, REPO_ROOT, get_settings
 from dashboard.api.services.env_service import EnvService
+from dashboard.api.services.provider_config_service import provider_field_names
 from dashboard.api.services.logs_service import LogsService
 from dashboard.api.services.verify_service import VerifyService
 from dashboard.api.services.sqlite_service import SQLiteService
@@ -69,6 +70,9 @@ def check_config(ctx: ToolContext) -> str:
 
 
 def update_config(ctx: ToolContext, name: str, value: str) -> str:
+    if str(name) in provider_field_names():
+        record_tool_audit(ctx, "update_config", "rejected", "provider group field {0}".format(name))
+        return "This setting belongs to a provider group and must be verified and applied from Dashboard Config."
     env_file = str((ctx.extra or {}).get("env_file") or _settings().env_file)
     EnvService(env_file, ENV_WHITELIST).update(str(name), str(value))
     record_tool_audit(ctx, "update_config", "ok", "updated config {0}".format(name))

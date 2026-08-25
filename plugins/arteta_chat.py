@@ -100,14 +100,14 @@ try:
 except AttributeError:
     config = driver.config.dict()
 
-FOOTBALL_API_TOKEN = str(config.get("football_api_token", "da24063a4040404c89250b601f8994a2")).strip('"\'')
+FOOTBALL_API_TOKEN = str(config.get("football_api_token", "")).strip('"\'')
 DEEPSEEK_API_KEY = str(config.get("deepseek_api_key", "")).strip('"\'')
 DEEPSEEK_API_URL = str(config.get("deepseek_api_url", os.environ.get("DEEPSEEK_API_URL", "https://api.deepseek.com/chat/completions"))).strip('"\'')
 DEEPSEEK_MODEL = str(config.get("deepseek_model", "deepseek-v4-pro")).strip('"\'')
 IMAGE_API_KEY = str(config.get("image_api_key", "")).strip('"\'')
 IMAGE_API_URL = str(config.get("image_api_url", "https://api.duckcoding.ai")).strip('"\'')
-VISION_API_KEY = str(config.get("vision_api_key", IMAGE_API_KEY)).strip('"\'')
-VISION_API_URL = str(config.get("vision_api_url", IMAGE_API_URL)).strip('"\'')
+VISION_API_KEY = str(config.get("vision_api_key", "")).strip('"\'')
+VISION_API_URL = str(config.get("vision_api_url", "")).strip('"\'')
 VISION_MODEL = str(config.get("vision_model", "gpt-4o-mini")).strip('"\'')
 VISION_TIMEOUT = float(config.get("vision_timeout", 60.0))
 SILICONFLOW_API_KEY = str(config.get("siliconflow_api_key", os.environ.get("SILICONFLOW_API_KEY", ""))).strip('"\'')
@@ -823,21 +823,11 @@ async def analyze_image(image_url: str) -> str:
     except Exception as e:
         return f"[图片识别异常：{type(e).__name__}: {e}]"
 
-def _select_vision_api_key(vision_api_key: str, image_api_key: str) -> str:
-    return vision_api_key or image_api_key
-
-
-def _select_vision_api_url(vision_api_url: str, image_api_url: str) -> str:
-    return vision_api_url or image_api_url
-
-
 def _build_vision_config() -> VisionConfig:
     return VisionConfig(
         vision_api_key=VISION_API_KEY,
         vision_api_url=VISION_API_URL,
         vision_model=VISION_MODEL,
-        image_api_key=IMAGE_API_KEY,
-        image_api_url=IMAGE_API_URL,
         siliconflow_api_key=SILICONFLOW_API_KEY,
         siliconflow_model=SILICONFLOW_VISION_MODEL,
         vision_timeout=VISION_TIMEOUT,

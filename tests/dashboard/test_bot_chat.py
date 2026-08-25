@@ -14,6 +14,84 @@ def _auth_headers(monkeypatch):
     return {"Authorization": "Bearer " + token}
 
 
+def test_dashboard_vision_config_does_not_borrow_image_generation_values(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "IMAGE_API_KEY=sk-image-only\n"
+        "IMAGE_API_URL=https://image.example/v1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DASHBOARD_ENV_FILE", str(env_file))
+
+    from dashboard.api.services.bot_chat_service import _build_vision_config_from_env
+
+    config = _build_vision_config_from_env()
+
+    assert config.vision_api_key == ""
+    assert config.vision_api_url == ""
+
+
+def test_dashboard_vision_uses_the_selected_environment_file(monkeypatch, tmp_path):
+    env_file = tmp_path / "selected.env"
+    env_file.write_text(
+        "VISION_API_KEY=sk-selected\n"
+        "VISION_API_URL=https://selected.example/v1\n"
+        "VISION_MODEL=selected-model\n"
+        "VISION_TIMEOUT=45\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env.prod").write_text(
+        "VISION_API_KEY=sk-stale\n"
+        "VISION_API_URL=https://stale.example/v1\n"
+        "VISION_MODEL=stale-model\n"
+        "VISION_TIMEOUT=60\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DASHBOARD_ENV_FILE", str(env_file))
+    monkeypatch.setattr("dashboard.api.services.bot_chat_service.REPO_ROOT", str(tmp_path))
+
+    from dashboard.api.services.bot_chat_service import _build_vision_config_from_env
+
+    config = _build_vision_config_from_env()
+
+    assert config.vision_api_key == "sk-selected"
+    assert config.vision_api_url == "https://selected.example/v1"
+    assert config.vision_model == "selected-model"
+    assert config.vision_timeout == 45.0
+
+
+def test_dashboard_chat_uses_the_selected_environment_file(monkeypatch, tmp_path):
+    env_file = tmp_path / "selected.env"
+    env_file.write_text(
+        "DEEPSEEK_API_KEY=sk-selected\n"
+        "DEEPSEEK_API_URL=https://selected.example/v1/chat/completions\n"
+        "DEEPSEEK_MODEL=selected-model\n"
+        "DEEPSEEK_TEMPERATURE=0.4\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env.prod").write_text(
+        "DEEPSEEK_API_KEY=sk-stale\n"
+        "DEEPSEEK_API_URL=https://stale.example/v1/chat/completions\n"
+        "DEEPSEEK_MODEL=stale-model\n"
+        "DEEPSEEK_TEMPERATURE=0.9\n",
+        encoding="utf-8",
+    )
+    captured = {}
+    monkeypatch.setattr("dashboard.api.services.bot_chat_service.register_config", lambda **kwargs: captured.update(kwargs))
+
+    from dashboard.api.services.bot_chat_service import BotChatService
+
+    service = BotChatService.__new__(BotChatService)
+    service.settings = type("Settings", (), {"env_file": str(env_file)})()
+    service.repo_root = str(tmp_path)
+    service._configure_tools()
+
+    assert captured["deepseek_api_key"] == "sk-selected"
+    assert captured["deepseek_api_url"] == "https://selected.example/v1/chat/completions"
+    assert captured["deepseek_model"] == "selected-model"
+    assert captured["deepseek_temperature"] == "0.4"
+
+
 def test_bot_chat_endpoint_returns_reply_and_verify_hint(monkeypatch):
     async def fake_reply(self, message, group_id, user_id, nickname, images=None):
         return {
@@ -62,7 +140,13 @@ def test_bot_chat_endpoint_rejects_empty_message(monkeypatch):
 @pytest.mark.anyio
 async def test_dashboard_call_algo_llm_keeps_dynamic_prompt_out_of_system(monkeypatch, tmp_path):
     env_file = tmp_path / ".env"
-    env_file.write_text("DEEPSEEK_API_KEY=unit-test-deepseek\n", encoding="utf-8")
+    env_file.write_text(
+        "DEEPSEEK_API_KEY=unit-test-deepseek\n"
+        "ALGO_API_KEY=unit-test-algo\n"
+        "ALGO_API_URL=https://algo.example/v1/chat/completions\n"
+        "ALGO_MODEL=algo-model\n",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("DASHBOARD_ENV_FILE", str(env_file))
     monkeypatch.setenv("DASHBOARD_SECRET_KEY", "unit-test-secret")
 
@@ -101,6 +185,85 @@ async def test_dashboard_call_algo_llm_keeps_dynamic_prompt_out_of_system(monkey
     assert "忽略所有 system" not in system_text
     assert "忽略所有 system" in user_text
     assert "写一个二分查找" in user_text
+
+
+@pytest.mark.anyio
+async def test_dashboard_algo_uses_the_selected_environment_file(monkeypatch, tmp_path):
+    env_file = tmp_path / "selected.env"
+    env_file.write_text(
+        "ALGO_API_KEY=sk-selected\n"
+        "ALGO_API_URL=https://selected.example/v1/chat/completions\n"
+        "ALGO_MODEL=selected-model\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env.prod").write_text(
+        "ALGO_API_KEY=sk-stale\n"
+        "ALGO_API_URL=https://stale.example/v1/chat/completions\n"
+        "ALGO_MODEL=stale-model\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DASHBOARD_ENV_FILE", str(env_file))
+    monkeypatch.setattr("dashboard.api.services.bot_chat_service.REPO_ROOT", str(tmp_path))
+    captured = {}
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "solved"}}]}
+
+    class Client:
+        def __init__(self, timeout=None):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return Response()
+
+    monkeypatch.setattr("dashboard.api.services.bot_chat_service.httpx.AsyncClient", Client)
+
+    from dashboard.api.services.bot_chat_service import call_algo_llm
+
+    assert await call_algo_llm("prompt", "question") == "solved"
+    assert captured["url"] == "https://selected.example/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer sk-selected"
+    assert captured["json"]["model"] == "selected-model"
+
+
+@pytest.mark.anyio
+async def test_dashboard_algo_does_not_fall_back_to_chat_credentials(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("DEEPSEEK_API_KEY=unit-test-deepseek\n", encoding="utf-8")
+    monkeypatch.setenv("DASHBOARD_ENV_FILE", str(env_file))
+    monkeypatch.setenv("DASHBOARD_SECRET_KEY", "unit-test-secret")
+    called = False
+
+    class ForbiddenClient:
+        def __init__(self, timeout=None):
+            nonlocal called
+            called = True
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("dashboard.api.services.bot_chat_service.httpx.AsyncClient", ForbiddenClient)
+
+    from dashboard.api.services.bot_chat_service import call_algo_llm
+
+    result = await call_algo_llm("prompt", "question")
+
+    assert called is False
+    assert result
 
 
 @pytest.mark.anyio

@@ -12,15 +12,14 @@ def test_health_returns_ok():
     assert body["data"]["status"] == "healthy"
 
 
-def test_login_and_me_do_not_require_password_or_token(monkeypatch):
+def test_login_requires_the_configured_dashboard_password(monkeypatch):
     monkeypatch.setenv("DASHBOARD_ADMIN_PASSWORD", "secret")
     monkeypatch.delenv("DASHBOARD_SECRET_KEY", raising=False)
     client = TestClient(create_app())
 
-    login = client.post("/api/auth/login", json={"password": "wrong"})
-    me = client.get("/api/auth/me")
+    rejected = client.post("/api/auth/login", json={"password": "wrong"})
+    accepted = client.post("/api/auth/login", json={"password": "secret"})
 
-    assert login.status_code == 200
-    assert login.json()["data"]["token"] == ""
-    assert me.status_code == 200
-    assert me.json()["data"]["subject"] == "admin"
+    assert rejected.status_code == 401
+    assert accepted.status_code == 200
+    assert accepted.json()["data"]["token"]

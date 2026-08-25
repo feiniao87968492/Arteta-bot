@@ -52,3 +52,23 @@ def test_model_and_url_values_are_not_masked(tmp_path):
     assert values["ALGO_MODEL"]["masked"] == "gpt-5.5"
     assert values["DEEPSEEK_MODEL"]["masked"] == "gpt-5.5"
     assert values["IMAGE_BASE_URL"]["masked"] == "https://image.example.com/v1"
+
+
+def test_atomic_group_replace_preserves_comments_and_unrelated_values(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# Provider configuration\n"
+        "DEEPSEEK_MODEL=old-model # chat model\n"
+        "OTHER=value\n",
+        encoding="utf-8",
+    )
+    service = EnvService(str(env_file), [])
+
+    service.replace_values_atomic({"DEEPSEEK_MODEL": "new-model", "DEEPSEEK_API_KEY": "sk-new"})
+
+    assert env_file.read_text(encoding="utf-8") == (
+        "# Provider configuration\n"
+        "DEEPSEEK_MODEL=new-model # chat model\n"
+        "OTHER=value\n"
+        "DEEPSEEK_API_KEY=sk-new\n"
+    )

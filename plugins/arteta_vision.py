@@ -21,17 +21,15 @@ class VisionConfig:
     vision_api_key: str = ""
     vision_api_url: str = ""
     vision_model: str = "gpt-4o-mini"
-    image_api_key: str = ""
-    image_api_url: str = "https://api.duckcoding.ai"
     siliconflow_api_key: str = SILICONFLOW_API_KEY
     siliconflow_model: str = SILICONFLOW_VISION_MODEL
     vision_timeout: float = DEFAULT_VISION_TIMEOUT
 
     def configured_api_key(self) -> str:
-        return self.vision_api_key or self.image_api_key
+        return self.vision_api_key
 
     def configured_api_url(self) -> str:
-        return self.vision_api_url or self.image_api_url
+        return self.vision_api_url
 
     def fallback_api_key(self) -> str:
         return self.siliconflow_api_key

@@ -4,6 +4,15 @@ import bot as bot_entry
 from plugins.arteta_vision import VisionConfig, analyze_image_base64
 
 
+def test_vision_config_never_uses_image_generation_credentials():
+    config = VisionConfig(vision_api_key="", vision_api_url="")
+
+    assert config.configured_api_key() == ""
+    assert config.configured_api_url() == ""
+    assert not hasattr(config, "image_api_key")
+    assert not hasattr(config, "image_api_url")
+
+
 def test_analyze_image_uses_configured_vision_service_before_siliconflow(monkeypatch):
     calls = []
 

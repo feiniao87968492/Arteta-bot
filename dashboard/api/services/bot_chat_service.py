@@ -28,21 +28,14 @@ from plugins.arteta_vision import VisionConfig, analyze_image_base64
 def _build_vision_config_from_env() -> VisionConfig:
     settings = get_settings()
     env_values = EnvService(settings.env_file, [])._parse()
-    prod_env = os.path.join(REPO_ROOT, ".env.prod")
-    if os.path.abspath(prod_env) != os.path.abspath(settings.env_file):
-        env_values.update(EnvService(prod_env, [])._parse())
 
     def _val(name: str, default: str = "") -> str:
         return env_values.get(name, env_values.get(name.lower(), os.environ.get(name, os.environ.get(name.lower(), default))))
 
-    image_api_key = _val("IMAGE_API_KEY")
-    image_api_url = _val("IMAGE_API_URL", "https://api.duckcoding.ai")
     return VisionConfig(
-        vision_api_key=_val("VISION_API_KEY", image_api_key),
-        vision_api_url=_val("VISION_API_URL", image_api_url),
+        vision_api_key=_val("VISION_API_KEY"),
+        vision_api_url=_val("VISION_API_URL"),
         vision_model=_val("VISION_MODEL", "gpt-4o-mini"),
-        image_api_key=image_api_key,
-        image_api_url=image_api_url,
         vision_timeout=float(_val("VISION_TIMEOUT", "60.0")),
     )
 
@@ -136,10 +129,7 @@ async def call_algo_llm(system_prompt: str, user_text: str) -> str:
     ).format(str(system_prompt or "").strip(), str(user_text or "").strip())
     settings = get_settings()
     env_values = EnvService(settings.env_file, [])._parse()
-    prod_env = os.path.join(REPO_ROOT, ".env.prod")
-    if os.path.abspath(prod_env) != os.path.abspath(settings.env_file):
-        env_values.update(EnvService(prod_env, [])._parse())
-    api_key = env_values.get("ALGO_API_KEY", os.environ.get("ALGO_API_KEY", env_values.get("DEEPSEEK_API_KEY", os.environ.get("DEEPSEEK_API_KEY", ""))))
+    api_key = env_values.get("ALGO_API_KEY", os.environ.get("ALGO_API_KEY", ""))
     api_url = env_values.get("ALGO_API_URL", os.environ.get("ALGO_API_URL", "https://www.boxying.com/v1/chat/completions"))
     model = env_values.get("ALGO_MODEL", os.environ.get("ALGO_MODEL", "gpt-5.5"))
     if not api_key:
@@ -184,9 +174,6 @@ class BotChatService:
 
     def _configure_tools(self) -> None:
         env_values = EnvService(self.settings.env_file, [])._parse()
-        prod_env = os.path.join(self.repo_root, ".env.prod")
-        if os.path.abspath(prod_env) != os.path.abspath(self.settings.env_file):
-            env_values.update(EnvService(prod_env, [])._parse())
         deepseek_api_key = self._setting_value(env_values, "DEEPSEEK_API_KEY")
         if not deepseek_api_key:
             raise HTTPException(status_code=500, detail="DEEPSEEK_API_KEY is required for Dashboard bot chat")

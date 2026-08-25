@@ -680,6 +680,123 @@ pre {
   align-items: center;
 }
 
+.config-page {
+  min-width: 0;
+}
+
+.config-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  padding-bottom: 18px;
+}
+
+.config-heading h2 {
+  margin: 4px 0 0;
+  font-size: 24px;
+}
+
+.config-heading .muted {
+  max-width: 360px;
+  margin: 0;
+}
+
+.config-message {
+  margin: 0 0 16px;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.provider-card {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(5, 7, 10, 0.28);
+}
+
+.provider-card-header,
+.provider-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.provider-card h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.provider-card-header small {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.provider-verified {
+  padding: 5px 8px;
+  color: #37f29b;
+  border: 1px solid rgba(55, 242, 155, 0.48);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.provider-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-fields label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: #d8e1f5;
+  font-size: 13px;
+}
+
+.provider-fields label > small {
+  min-width: 0;
+  overflow: hidden;
+  color: #9aa6bd;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-fields input {
+  width: 100%;
+  min-width: 0;
+}
+
+.provider-actions {
+  justify-content: flex-start;
+}
+
+.provider-actions button {
+  width: auto;
+  margin: 0;
+  text-align: center;
+}
+
+.provider-note {
+  display: block;
+  color: #9aa6bd;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .tree-group {
   margin: 10px 0;
   padding-left: 10px;
@@ -868,6 +985,7 @@ pre {
   .memory-group-layout,
   .bot-chat-layout,
   .prompt-layout,
+  .provider-grid,
   .memory-row,
   .config-row,
   .group-row,
@@ -881,5 +999,11 @@ pre {
 
   .topbar {
     display: grid;
+  }
+
+  .config-heading,
+  .provider-fields {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 }

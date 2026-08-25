@@ -31,7 +31,7 @@ DASHBOARD_PORT=8765
 ARTETA_DB_PATH=/opt/arteta_bot/arsenal_data.db
 ARTETA_CHROMA_DIR=/opt/arteta_bot/chroma_db
 DASHBOARD_LOGS_DIR=/opt/arteta_bot/logs
-DASHBOARD_ENV_FILE=/opt/arteta_bot/.env
+DASHBOARD_ENV_FILE=/opt/arteta_bot/.env.prod
 DASHBOARD_WEB_DIST=/opt/arteta_bot/dashboard/web/dist
 ARTETA_PROMPTS_FILE=/opt/arteta_bot/config/prompts.json
 ```
@@ -109,3 +109,33 @@ npm --prefix dashboard/web run build
 ```bash
 python tools/verify_features.py --suite core
 ```
+
+## Provider configuration (current)
+
+This section supersedes the earlier legacy Config description. The Dashboard
+now manages external credentials as complete provider groups rather than
+individual environment fields. Each group is verified against its own provider
+before it can be applied:
+
+- Chat: `DEEPSEEK_*`; algorithm solving: `ALGO_*`; image generation:
+  `IMAGE_*`; vision: `VISION_*`.
+- Football data uses `FOOTBALL_API_TOKEN`; Grok Search uses
+  `ARTETA_GROKSEARCH_*`; X Fetch uses `ARTETA_X_FETCH_*`.
+- Chat and algorithm URLs are complete `/chat/completions` URLs. The other
+  providers use base URLs, with the runtime transport adding its endpoint.
+
+The Config page never returns or pre-fills an API key. The operator enters all
+fields for one group, selects **Verify configuration**, and then selects
+**Apply and restart bot** within five minutes. Editing any field invalidates
+the receipt. A successful apply atomically replaces only that group in `.env`
+and restarts `arteta_bot`; if the first restart fails, the Dashboard restores
+the exact prior `.env` snapshot and attempts one recovery restart.
+
+The former `/api/config/keys*` endpoints and global restart endpoint are
+removed. Agent `update_config` calls also reject every provider-owned field, so
+they cannot bypass verification, atomic persistence, or restart recovery.
+Provider reads, validation, and apply all require a valid Dashboard admin
+Bearer token obtained through the login page; unauthenticated requests are
+rejected before provider data is read or a restart can be requested.
+See [dashboard-provider-configuration.md](dashboard-provider-configuration.md)
+for the endpoint contract, probe behaviour, and failure semantics.
